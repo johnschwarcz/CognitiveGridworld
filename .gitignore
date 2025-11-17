@@ -1,0 +1,13 @@
+DATA/
+__pycache__/
+*.pyc
+venv/
+*.pth
+*.pt
+*.ckpt
+.DS_Store
+*.lyx~
+*.lyx#
+temp/
+temp.py
+.vscode/
