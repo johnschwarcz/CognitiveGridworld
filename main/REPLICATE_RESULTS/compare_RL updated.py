@@ -5,9 +5,9 @@ from mpl_toolkits.mplot3d import Axes3D
 path = inspect.getfile(inspect.currentframe())
 path = os.path.dirname( os.path.abspath(path))
 print("root:", path)
-sys.path.insert(0, path + '/Main')
-sys.path.insert(0, path + '/Main/model')
-from Main.CognitiveGridworld import CognitiveGridworld
+sys.path.insert(0, path + '/main')
+sys.path.insert(0, path + '/main/model')
+from main.CognitiveGridworld import CognitiveGridworld
 from utils import tnp
 
 # --- Global Plotting Style Configuration (Single Source of Truth) ---

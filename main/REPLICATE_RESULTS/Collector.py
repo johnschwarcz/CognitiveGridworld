@@ -4,11 +4,11 @@ from tqdm import tqdm
 path = inspect.getfile(inspect.currentframe())
 path = os.path.dirname( os.path.abspath(path))
 print("root:", path)
-sys.path.insert(0, path + '/Main')
-sys.path.insert(0, path + '/Main/bayes')
-sys.path.insert(0, path + '/Main/model')
-from Main.CognitiveGridworld import CognitiveGridworld
-from Main.Code_For_Paper.collection_plotters import Collection_Plotters
+sys.path.insert(0, path + '/main')
+sys.path.insert(0, path + '/main/bayes')
+sys.path.insert(0, path + '/main/model')
+from main.CognitiveGridworld import CognitiveGridworld
+from main.REPLICATE_RESULTS.collection_plotters import Collection_Plotters
 
 class Sanity_Collector(Collection_Plotters):
     def __init__(self, cuda, state_num, batch_num, realization_num, step_num, ctx_num, obs_num):

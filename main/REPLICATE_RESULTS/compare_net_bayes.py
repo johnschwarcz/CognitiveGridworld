@@ -3,11 +3,11 @@ import pylab as plt; from matplotlib.colors import PowerNorm
 path = inspect.getfile(inspect.currentframe())
 path = os.path.dirname( os.path.abspath(path))
 print("root:", path)
-sys.path.insert(0, path + '/Main')
-sys.path.insert(0, path + '/Main/bayes')
-sys.path.insert(0, path + '/Main/model')
-from Main.Code_For_Paper.Collector import Sanity_Collector
-from Main.Code_For_Paper.collection_plotters import Collection_Plotters
+sys.path.insert(0, path + '/main')
+sys.path.insert(0, path + '/main/bayes')
+sys.path.insert(0, path + '/main/model')
+from main.REPLICATE_RESULTS.Collector import Sanity_Collector
+from main.REPLICATE_RESULTS.collection_plotters import Collection_Plotters
 
 if __name__ == "__main__":
     cuda = 0

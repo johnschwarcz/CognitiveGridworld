@@ -23,10 +23,10 @@ from numpy.linalg import LinAlgError
 try:
     path = os.path.dirname(os.path.abspath(inspect.getfile(inspect.currentframe())))
     print("root:", path)
-    sys.path.insert(0, path + '/Main')
-    sys.path.insert(0, path + '/Main/bayes')
-    sys.path.insert(0, path + '/Main/model')
-    from Main.CognitiveGridworld import CognitiveGridworld
+    sys.path.insert(0, path + '/main')
+    sys.path.insert(0, path + '/main/bayes')
+    sys.path.insert(0, path + '/main/model')
+    from main.CognitiveGridworld import CognitiveGridworld
 except (TypeError, FileNotFoundError):
     print("Running outside of a file context. CognitiveGridworld class may not be available.")
 
@@ -81,7 +81,6 @@ def plot_controllers_curve(naive_agent, joint_agent, online_net, offline_net, re
     ax.get_xaxis().set_major_formatter(FuncFormatter(lambda x, p: f'{int(x):,}'))
 
     os.makedirs(path, exist_ok=True)
-    # plt.ylim([.2, .7])
     plt.xscale('log')
     ax.legend(loc='lower center', ncol = 2)
     plt.savefig(os.path.join(path, "controller_comparison_curve.pdf"), bbox_inches="tight")

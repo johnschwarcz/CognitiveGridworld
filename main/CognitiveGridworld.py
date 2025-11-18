@@ -2,11 +2,11 @@ import numpy as np; import torch; import os; import sys; import inspect
 path = inspect.getfile(inspect.currentframe())
 path = os.path.dirname( os.path.abspath(path))
 print("root:", path)
-sys.path.insert(0, path + '/Main')
-sys.path.insert(0, path + '/Main/env')
-sys.path.insert(0, path + '/Main/bayes')
-sys.path.insert(0, path + '/Main/model')
-sys.path.insert(0, path + '/Main/plotting')
+sys.path.insert(0, path + '/main')
+sys.path.insert(0, path + '/main/env')
+sys.path.insert(0, path + '/main/bayes')
+sys.path.insert(0, path + '/main/model')
+sys.path.insert(0, path + '/main/plotting')
 from main.env.env_model_manager import Env_model_manager
 
 class CognitiveGridworld(Env_model_manager):

@@ -4,8 +4,8 @@ import numpy as np; import torch; import os; import sys; import inspect
 path = inspect.getfile(inspect.currentframe())
 path = os.path.dirname( os.path.abspath(path))
 print("root:", path)
-sys.path.insert(0, path + '/Main')
-sys.path.insert(0, path + '/Main/model')
+sys.path.insert(0, path + '/main')
+sys.path.insert(0, path + '/main/model')
 from main.CognitiveGridworld import CognitiveGridworld
 
 if __name__ == "__main__":
