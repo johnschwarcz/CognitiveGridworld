@@ -17,7 +17,7 @@ The top‑level module `CognitiveGridworld.py` ties everything together.  When y
 - **1.0:** The environment is preprocessed
 - **1.1:** The embedding space are generated
 - **2.0:** Episodes (contexts, realizations and observations) are generated
-- **2.1:** Bayesian & Network agents may be run and diagnostic plots are produced every 'checkpoint_every' episodes.
+- **2.1:** Bayesian & Network agents are run with diagnostic plots every 'checkpoint_every' episodes.
 
 ## Installation
 
@@ -83,5 +83,5 @@ CognitiveGridworld/
 ```
 
 ## Customization
-Customization is built into the foundation of the CognitiveGridworld. The pipeline checks custom functions before the default functions can be run. '_Customization.py' files in env/ & model/ facilitate are designed for convenient changes to the environment and models.
+Customization is built into the foundation of the pipeline. Custom functions are checked before default functions can be run. '_Customization.py' files in env/ & model/ facilitate are designed for convenient changes to the environment and models.
 
