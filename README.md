@@ -14,11 +14,10 @@ The repository is organised into several modules.  The root contains a `packages
 - **`utils.py`** – A small utility file with helper functions used throughout the project.
 
 The top‑level module `CognitiveGridworld.py` ties everything together.  When you instantiate `CognitiveGridworld`:
-- **1:** The environment is preprocessed
-- **2:** The embedding space are generated
-- **3.1:** Episodes (contexts, realizations and observations) are generated
-- **3.2:** Bayesian and Neural Network agents can be run. 
-- **3.3:** When plotting is enabled, a set of diagnostic plots is produced every 'checkpoint_every' episodes.
+- **1.0:** The environment is preprocessed
+- **1.1:** The embedding space are generated
+- **2.0:** Episodes (contexts, realizations and observations) are generated
+- **2.1:** Bayesian & Network agents may be run and diagnostic plots are produced every 'checkpoint_every' episodes.
 
 ## Installation
 
@@ -49,7 +48,7 @@ cg = CognitiveGridworld(episodes=10,
 
 Upon instantiation the simulator will preprocess the environment, generate state embeddings and loop through episodes. If `show_plots=True` the likelihood, Bayesian performance and a sample trajectory will be displayed.
 
-All tune-able hyperparameters can be found in main/CognitiveGridworld.py. A standard example environment is located in main/__init__.py. 
+A standard example environment is located in main/__init__.py. 
 
 ### Environment customisation
 
@@ -66,7 +65,7 @@ When initializing `CognitiveGridworld`, you can pass a dictionary of keyword arg
 * `reservoir`: toggles the use of a reservoir network.
 * `mode`: selects between using only Bayesian observers / no network ('None') and 2 training modes RL (`"RL"`) and supervised (`"SANITY"`). In RL mode, a classifier and generator are trained jointly; in sanity mode, only a classifer is trained.
 
-Most scripts set these options explicitly; you can edit the script files to try different configurations.
+All tune-able hyperparameters can be found in main/CognitiveGridworld.py. Hyperparameters that are not set manually will default to the values in this script.
 
 ## Directory structure
 
@@ -75,11 +74,14 @@ CognitiveGridworld/
 ├── README.md                 
 ├── packages.txt              ← Conda environment specification
 └── main/
-    ├── CognitiveGridworld.py ← top‑level class orchestrating environment and model
+    ├── CognitiveGridworld.py ← top‑level class containing default hyperparameters
     ├── env/                  ← environment definitions, generators and preprocessing
     ├── env_plotting/         ← plotting helpers
     ├── model/                ← neural architectures
     ├── REPLICATE_RESULTS/    ← scripts to reproduce experiments and generate plots
     └── utils.py              ← utility functions
 ```
+
+## Customization
+Customization is built into the foundation of the CognitiveGridworld. The pipeline checks custom functions before the default functions can be run. '_Customization.py' files in env/ & model/ facilitate are designed for convenient changes to the environment and models.
 
