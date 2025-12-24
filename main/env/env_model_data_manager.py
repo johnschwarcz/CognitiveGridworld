@@ -1,5 +1,5 @@
 import torch; import numpy as np; import pylab as plt; from tqdm import tqdm
-from main.utils import tnp; from .env_control_manager import Env_control_manager
+from main.utils import tnp; from main.env.env_control_manager import Env_control_manager
 from main.model.model_architecture import Model_architecture as Model
 
 class Env_model_data_manager(Env_control_manager):

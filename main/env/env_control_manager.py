@@ -1,5 +1,5 @@
 import torch; import numpy as np; import pylab as plt; from tqdm import tqdm
-from main.utils import tnp; from .env_preprocessing import Env_preprocessing
+from main.utils import tnp; from main.env.env_preprocessing import Env_preprocessing
 from main.model.model_architecture import Model_architecture as Model
 
 class Env_control_manager(Env_preprocessing):
@@ -10,7 +10,6 @@ class Env_control_manager(Env_preprocessing):
         self.controller_training_logs = {'reward': np.zeros((self.reps, self.controller_training_episodes)),
                                          'example_policy': np.zeros((self.reps, self.controller_training_episodes, *self.ctx_dims)),
                                          'prefence_landscape': np.zeros((self.reps, *self.ctx_dims)), 'optimality': np.zeros(self.reps),}
-        
         for self.rep in tqdm(range(reps),  desc = f"{offline_teacher or "ONLINE"}"):
             self.EC_gen_context()
             self.EC_gen_likelihoods()

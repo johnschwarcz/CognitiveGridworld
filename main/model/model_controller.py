@@ -14,7 +14,6 @@ class Model_controller(Model_forward):
         self.offline = offline_teacher is not None
         self.offline_teacher = offline_teacher
         self.controller_actions = self.ctx_vals
-        self.control_ent_bonus_decay = .999
         self.O = self.obs_flat.mean(1)
         self.control_ent_bonus = 1
         self.joint_likelihood = JL

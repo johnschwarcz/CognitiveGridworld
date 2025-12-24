@@ -10,7 +10,8 @@ class Model_backward(Model_Customization):
             self.SANITY_loss()
         if self.learn_embeddings:
             self.SSL_loss()
-            self.update(self.generator_loss, self.generator_optim)    
+            self.update(self.generator_loss, self.generator_optim)  
+
         self.update(self.classifier_loss, self.classifier_optim)
         return tnp([self.classifier_loss, self.generator_loss], 'np')
 
@@ -28,13 +29,14 @@ class Model_backward(Model_Customization):
         P = self.joint_goal_belief
         Q = self.classifier_goal_belief
         DKL = self.DKL_sym(Q, P, PM=False)
-        DKL = (DKL-DKL.min() + 1e-8)**0.5
+        # DKL = (DKL-DKL.min() + 1e-8)**0.5
+        DKL = (DKL-DKL.detach().min() + 1e-8)**0.5
         self.classifier_loss = DKL.mean()
         
     def SSL_loss(self):
         chance = 1/self.realization_num
         last_ACC = self.ACC[:, -1, None]
-        OPE = self.DKL_sym(self.pred_pobs, self.obs_flat.mean(1)) 
+        OPE = self.DKL_sym(self.pred_pobs, self.obs_flat.mean(1))
         OPE__ACC = (last_ACC * OPE).sum() / last_ACC.sum()
         OPE = OPE.mean() * chance + (1 - chance) * OPE__ACC
 
@@ -51,9 +53,9 @@ class Model_backward(Model_Customization):
 
         acc = self.ACC[:, -1, None]
         rew =  acc * -belief.log()
-        pun = -(1 - belief).log() 
+        pun = (1 - acc) * -(1 - belief).log() 
         ent = -belief * belief.log() * self.classifier_ent_bonus 
-        self.classifier_loss = (rew + (1 - acc) * (pun - ent)).mean()       
+        self.classifier_loss = (rew + pun - ent).mean()       
 
     def DKL_sym(self, x, y, PM = True):
         forward  = self.DKL(x, y) + PM * self.DKL(1-x, 1-y)

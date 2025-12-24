@@ -1,4 +1,5 @@
 import numpy as np; import torch; import torch.nn as nn; import torch.optim as optim
+from torch.optim.lr_scheduler import StepLR
 from main.utils import tnp; from main.model.model_controller import Model_controller 
 
 class Model_architecture(Model_controller):
@@ -45,6 +46,7 @@ class Model_architecture(Model_controller):
         self.classifier_optim = optim.Adam([{'params': params,'lr': self.classifier_LR}]) 
 
     def default_generator(self):
+        
         if self.learn_embeddings:
             self.Z_to_pobs = nn.Linear(self.Z_num , self.hid_dim)            
             self.sample_to_emb = nn.Embedding(self.realization_num, self.hid_dim)

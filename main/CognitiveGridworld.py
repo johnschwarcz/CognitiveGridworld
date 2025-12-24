@@ -35,11 +35,13 @@ class CognitiveGridworld(Env_model_manager):
         self.obs_num = init.get('obs_num', 5)
         self.KQ_dim = init.get('KQ_dim', 30)
 
-        self.hid_dim = init.get('hid_dim', 1000)
+        self.control_ent_bonus_decay = init.get('control_ent_bonus_decay', 0.999)
         self.classifier_ent_bonus = init.get('classifier_ent_bonus', 0.1)
         self.classifier_LR = init.get('classifier_LR', 0.0005)
         self.controller_LR = init.get('controller_LR', 0.001)
         self.generator_LR = init.get('generator_LR', 0.001)
+        self.hid_dim = init.get('hid_dim', 1000)
+
         self.learn_embeddings = init.get('learn_embeddings', True)
         self.reservoir = init.get('reservoir', False)
         self.training = init.get('training', True)
