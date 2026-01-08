@@ -12,25 +12,30 @@ class Model_backward(Model_Customization):
             self.SSL_loss()
             self.update(self.generator_loss, self.generator_optim)  
 
-        self.update(self.classifier_loss, self.classifier_optim)
-        return tnp([self.classifier_loss, self.generator_loss], 'np')
+        self.update(self.classifier_loss, self.classifier_optim, self.classifier_gradients)
+        return tnp([self.classifier_loss, self.generator_loss, self.readin_grad, self.readout_grad], 'np')
 
-    def update(self, loss, optim):
+    def update(self, loss, optim, collect_grad = None):
         optim.zero_grad()
         torch.cuda.empty_cache()
         loss.backward()
+        if collect_grad is not None:
+            collect_grad()
         optim.step()
-            
+
+    def classifier_gradients(self):
+        self.readin_grad = self.get_gradient_norm(self.classifier_readin)
+        self.readout_grad = self.get_gradient_norm(self.classifier_readout)
+
     ########################################################################################################
     """ default loss functions """ 
     ########################################################################################################
 
-    def SANITY_loss(self):
+    def SANITY_loss(self, eps = 1e-8):
         P = self.joint_goal_belief
         Q = self.classifier_goal_belief
         DKL = self.DKL_sym(Q, P, PM=False)
-        # DKL = (DKL-DKL.min() + 1e-8)**0.5
-        DKL = (DKL-DKL.detach().min() + 1e-8)**0.5
+        DKL = (DKL - DKL.detach().min() + eps)**0.5
         self.classifier_loss = DKL.mean()
         
     def SSL_loss(self):

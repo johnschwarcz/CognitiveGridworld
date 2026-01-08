@@ -7,7 +7,7 @@ class Model_forward(Model_backward):
         self.MC_to_interactions()
         self.MC_to_classification()
         self.MC_to_pobs()
-        return tnp([self.classifier_belief_flat, self.classifier_goal_belief], 'np')
+        return tnp([self.classifier_belief_flat, self.classifier_goal_belief, self.input_flat, self.update_flat], 'np')
 
     def default_interactions(self):
         self.Z_count = 0
@@ -34,20 +34,35 @@ class Model_forward(Model_backward):
         self.Z_count += 1 
 
     def default_classification(self):
-        O = self.obs_flat
+        inp = self.forward_readin()
+        if self.testing:
+            self.input_flat = inp.detach()        
+
+        stm = self.STM.expand(-1, self.batch_num, -1).contiguous()
+        ltm = self.LTM.expand(-1, self.batch_num, -1).contiguous()
+        update, _ = self.LSTM(inp, (stm, ltm))     
+        if self.testing:
+            self.update_flat = update.detach()        
+
+        belief = self.forward_readout(update)
+        self.postprocess_belief(belief)
+
+    def forward_readin(self):
         Z = self.active_Z.detach()
         Z = Z.reshape(self.batch_num, 1, -1)
         Z = Z.expand(-1, self.step_num, -1)
-
-        inp = torch.cat((O, Z), dim = -1)
+        inp = torch.cat((self.obs_flat, Z), dim = -1)
         inp = torch.relu(self.classifier_readin(inp))
-        stm = self.STM.expand(-1, self.batch_num, -1).contiguous()
-        ltm = self.LTM.expand(-1, self.batch_num, -1).contiguous()
-        belief, _ = self.LSTM(inp, (stm, ltm))     
-        belief = self.classifier_readout(belief)
-        belief = belief.reshape(self.BSCR_dims).cumsum(1)
-        belief = torch.softmax(belief, -1) 
+        return inp
 
+    def forward_readout(self, update):
+        update = self.classifier_readout(update)
+        update = update.reshape(self.BSCR_dims)
+        belief = update.cumsum(1)
+        belief = torch.softmax(belief, -1) 
+        return belief
+
+    def postprocess_belief(self, belief):
         self.classifier_belief_flat = belief.detach()
         self.classifier_goal_belief = belief[self.batch_range, :, self.goal_ind]
         self.classifier_goal_selection = Categorical(self.classifier_goal_belief).sample()

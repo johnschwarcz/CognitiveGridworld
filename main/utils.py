@@ -18,8 +18,9 @@ def tnp(x, to, device = None):
     if type(x) is list:
         return [tnp(x_, to, device = device) for x_ in x]
     
-    if x is None:
+    if x is None or type(x) is float:
         return x
+
     if to == "np":
         return x.detach().cpu().numpy()   
     if (to == "torch") and (type(x) != torch.Tensor):

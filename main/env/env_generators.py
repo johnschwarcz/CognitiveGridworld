@@ -56,7 +56,8 @@ class Env_generators(Env_helpers):
     def default_likelihoods(self):
         self.naive_likelihood = np.zeros((*self.batch_obs_dims, *self.ctx_realization_dims))
         self.joint_likelihood, self.joint_Z = self.trigger_build_likelihood()     
-        for c in self.ctx_range:                                               # Get naive by marginalizing joint likelihood 
+
+        for c in self.ctx_range:                                               # Get naive by marginalizing joint likelihood
             self.naive_likelihood[:,:, c, :] = self.avg_over_ctx(
             self.joint_likelihood, keep = c, includes_obs = True)              # Dims: batch, obs pairs, ctx, realizations                
 

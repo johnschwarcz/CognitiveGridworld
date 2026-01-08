@@ -59,3 +59,16 @@ class Env_helpers(Env_Customization):
         
     def sample_obs(self, obs = None):
         self.o = np.random.randint(self.obs_num) if obs is None else obs
+
+    def DKL(self, x, y, eps = 1e-15, avg_over_batch = True, sym = False):
+        x = np.clip(x, a_min = eps, a_max = float(1) - eps)
+        y = np.clip(y, a_min = eps, a_max = float(1) - eps)
+        DKL = self.DKL_helper(x, y)
+        if sym:
+            DKL = (DKL + self.DKL_helper(y, x)) / 2
+        if avg_over_batch:
+            return DKL.mean(0)
+        return DKL
+
+    def DKL_helper(self, x, y):
+        return (x * np.log(x/y)).sum(-1)

@@ -70,3 +70,8 @@ class Model_architecture(Model_controller):
                         list(self.hid_to_hid2.parameters()) +          
                         list(self.conf_to_hid.parameters()), 'lr': self.generator_LR}]                
             self.generator_optim = optim.Adam(params)
+
+    def get_gradient_norm(self, layer, s = 0):
+        for p in layer.parameters():
+            s = s + p.grad.detach().pow(2).sum()
+        return s.sqrt().item()

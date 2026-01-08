@@ -23,8 +23,10 @@ class CognitiveGridworld(Env_model_manager):
         self.showtime = init.get('showtime', .2)
         self.state_num = init.get('state_num', 5000)
         self.show_plots = init.get('show_plots', True)
+        self.load_warnings = init.get('load_warnings', False)
         self.checkpoint_every = init.get('checkpoint_every', 500)
-        self.test_eps = init.get('test_eps', min(self.episodes, 5))
+        self.plot_every = init.get('plot_every', 5)
+        # self.test_eps = init.get('test_eps', min(self.episodes, 5))
         self.test_states = init.get('test_states', self.state_num // 10)
 
         self.likelihood_temp = init.get('likelihood_temp', 2)
@@ -44,7 +46,7 @@ class CognitiveGridworld(Env_model_manager):
 
         self.learn_embeddings = init.get('learn_embeddings', True)
         self.reservoir = init.get('reservoir', False)
-        self.training = init.get('training', True)
+        self.training = init.get('training', False)
         self.load_env = init.get('load_env', None)
         self.save_env = init.get('save_env', None)
 

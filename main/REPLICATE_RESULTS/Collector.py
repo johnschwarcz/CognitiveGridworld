@@ -33,10 +33,10 @@ class Sanity_Collector(Collection_Plotters):
     def collect_bayes(self, rep = 1):
         self.collect(rep = rep)
 
-    def collect_net(self, mode, rep = 1):
-        self.collect(rep = rep, mode = mode, WITH_net = True)
+    def collect_net(self, mode, rep = 1, bayes_on_cond = 0):
+        self.collect(WITH_net = True, mode = mode, rep = rep, bayes_on_cond = bayes_on_cond)
         
-    def collect(self, WITH_net = False, mode = None, rep = 1):
+    def collect(self, WITH_net = False, mode = None, rep = 1, bayes_on_cond = 0):
         #######################################
         """ COLLECT DATA """
         #######################################        
@@ -72,7 +72,7 @@ class Sanity_Collector(Collection_Plotters):
                     bayes_i = 0       
                     joint_belief = agent.joint_goal_belief.copy()
                     naive_belief = agent.naive_goal_belief.copy()
-                    if cond == 0:   
+                    if cond == bayes_on_cond:   
                         joint_i = 0
                         self.belief[bayes_i,joint_i,ctx] = joint_belief
                         self.goal_TP[bayes_i, joint_i, ctx] = agent.joint_TP

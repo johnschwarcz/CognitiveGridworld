@@ -16,7 +16,17 @@ if __name__ == "__main__":
     state_num = 500
     obs_num = 5
     self = CognitiveGridworld(**{'mode': "RL", 'cuda': cuda, 'episodes': 125000,
-        'realization_num': realization_num,  'hid_dim': hid_dim,  'obs_num': obs_num,
+        'realization_num': realization_num,  'hid_dim': hid_dim,  'obs_num': obs_num,'training': True,
         'batch_num': batch_num, 'step_num': step_num, 'state_num': state_num, 'save_env': f'RL',
         'classifier_LR': .0005, 'ctx_num': 2, 'generator_LR':.0005, 'learn_embeddings': True})
 
+    # self = CognitiveGridworld(**{'mode': "RL", 'cuda': cuda, 'episodes': 200000, 'checkpoint_every': 5000,
+    #     'realization_num': realization_num,  'hid_dim': hid_dim,  'obs_num': obs_num,'training': True,
+    #     'batch_num': batch_num, 'step_num': step_num, 'state_num': state_num, 'save_env': f'RL_ctx_2',
+    #     'classifier_LR': .0005, 'ctx_num': 2, 'generator_LR':.0005, 'learn_embeddings': True})
+
+    # FOR LONG SLOW TRAINING TO HIGHER ACCURACY
+    # self = CognitiveGridworld(**{'mode': "RL", 'cuda': cuda, 'episodes': 200000,
+    #     'realization_num': realization_num,  'hid_dim': hid_dim,  'obs_num': obs_num, 'checkpoint_every': 5000,
+    #     'batch_num': batch_num, 'step_num': step_num, 'state_num': state_num, 'save_env': "RL_exp", 'training': True,
+    # 'classifier_LR': .0001, 'ctx_num': 2, 'generator_LR':.0001, 'classifier_ent_bonus': .1, 'learn_embeddings': True})

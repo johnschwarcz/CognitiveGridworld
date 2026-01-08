@@ -22,9 +22,10 @@ if __name__ == "__main__":
         'KQ_dim': 30, 
         'realization_num': 10,
         'likelihood_temp': 2,
-        'checkpoint_every': 500,    # start tests at every "checkpoint_every" episodes
+        'checkpoint_every': 500,    # test at every "checkpoint_every" episodes
         'showtime': .1,             # show print_time decorated function runtime if runtime > showtime min
         'show_plots': True,
+        'plot_every': 5,            # plot at every "plot_every" checkpoints
 
         'mode': mode,
         'hid_dim': 1000,
@@ -33,7 +34,7 @@ if __name__ == "__main__":
         'generator_LR': .001,
         'learn_embeddings': True,   # if True, embedding space must be learned
         'reservoir': False,
-        'training': True,
+        'training': False,
         'save_env': None,
         'load_env': None,
         'cuda': cuda})

@@ -20,11 +20,15 @@ class Bayes_inference(Plotters):
         p_x = np.einsum('bto, bo...->bt...', self.obs_flat, np.log(L)) + \
               np.einsum('bto, bo...->bt...', 1-self.obs_flat, np.log1p(-L))
         p_x = np.exp(p_x)
+
         for t in self.step_range:
             p = p_x[:, t] 
+            
             if t > 0:
                 p = p * dist_flat[:, t-1]
+
             dist_flat[:, t] = p / self.avg_until(p, override = "sum", stop_shape = 2 if naive else 1)    
+
         return self.postprocess_belief(dist_flat, naive)
 
     def postprocess_belief(self, dist_flat, naive):                            # Functions in inference_helpers
@@ -51,7 +55,6 @@ class Bayes_inference(Plotters):
         TP = np.take_along_axis(GB, V[...,None], -1).squeeze()        
         E = np.take_along_axis(est, I, -1)
         mse = ((V - E.squeeze())**2)  
-
         return est, GB, acc, TP, mse
 
     def log_outcomes(self):

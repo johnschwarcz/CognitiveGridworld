@@ -22,8 +22,6 @@ if __name__ == "__main__":
         'KQ_dim': 30, 
         'realization_num': 10,
         'likelihood_temp': 2,
-        'checkpoint_every': 500,    # start tests at every "checkpoint_every" episodes
-        'showtime': .1,             # show print_time decorated function runtime if runtime > showtime min
         'show_plots': True,
 
         'mode': mode,
@@ -31,9 +29,8 @@ if __name__ == "__main__":
         'classifier_LR': .0005, 
         'controller_LR': .005, 
         'generator_LR': .001,
-        'learn_embeddings': True,   # if True, embedding space must be learned
+        'learn_embeddings': True,   
         'reservoir': False,
-        'training': True,
         'save_env': None,
         'load_env': None,
         'cuda': cuda})
@@ -47,6 +44,7 @@ if __name__ == "__main__":
     Nlogit = np.log(self.naive_TP / (1-self.naive_TP))
     belief_diff = Jlogit - Nlogit
 
+    """ PLOTTING """
     fig, ax = plt.subplots(1, 1, figsize=(3, 3))
     plt.hist(Jent[:,0], bins = 55); plt.hist(Nent[:,0], alpha = .5, bins = 55); plt.show()
     fig, ax = plt.subplots(1, 1, figsize=(3, 3))

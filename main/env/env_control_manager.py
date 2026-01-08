@@ -6,10 +6,14 @@ class Env_control_manager(Env_preprocessing):
 
     def train_controller(self, eps, reps = 1, offline_teacher = None):
         self.controller_training_episodes = eps; self.reps = reps
-        self.offline_teacher = offline_teacher;  self.test_set = True
-        self.controller_training_logs = {'reward': np.zeros((self.reps, self.controller_training_episodes)),
-                                         'example_policy': np.zeros((self.reps, self.controller_training_episodes, *self.ctx_dims)),
-                                         'prefence_landscape': np.zeros((self.reps, *self.ctx_dims)), 'optimality': np.zeros(self.reps),}
+        self.offline_teacher = offline_teacher
+        self.test_set = True
+
+        self.controller_training_logs = {
+            'reward': np.zeros((self.reps, self.controller_training_episodes)),
+            'example_policy': np.zeros((self.reps, self.controller_training_episodes, *self.ctx_dims)),
+            'prefence_landscape': np.zeros((self.reps, *self.ctx_dims)), 'optimality': np.zeros(self.reps)}
+        
         for self.rep in tqdm(range(reps),  desc = f"{offline_teacher or "ONLINE"}"):
             self.EC_gen_context()
             self.EC_gen_likelihoods()

@@ -28,24 +28,24 @@ class Plotters(Plotting_anim):
         self.plot_performance_postprocess(fig, ax)
 
     def plot_model_perf(self):
-        fig, ax = plt.subplots(1,3, figsize = (12,4))
+        fig, ax = plt.subplots(1,3, figsize = (12,4), tight_layout = True)
         bayes_perfs = [self.agent_accs, self.agent_TPs, self.agent_mses]
+        model_train_perfs = [self.train_accs, self.train_TPs, self.train_mses]
+        model_test_perfs = [self.test_accs, self.test_TPs, self.test_mses]
         titles = ["acc", "pgoal", "mse"]
-        for p, title in enumerate(titles):
-            model_perf = self.model_perf_log[:,:, p]
-            bayes_perf = bayes_perfs[p]
 
-            ax[p].plot(model_perf.T, c = 'C0', alpha = .2)
+        for p, title in enumerate(titles):
+            bayes_perf = bayes_perfs[p]
+            ax[p].plot(model_train_perfs[p][self.test_e-1], c = 'C0', linewidth = 5, label = "model train")
             ax[p].plot(bayes_perf[0].mean(0), c = 'C1', linewidth = 5, label = "joint")
             ax[p].plot(bayes_perf[1].mean(0), c = 'C2', linewidth = 5, label = "naive")
-            ax[p].plot(model_perf[:self.test_eps].mean(0), c = 'r', linewidth = 5, label = "model")       
+            ax[p].plot(model_test_perfs[p][self.test_e-1], c = 'r', linewidth = 5, label = "model test")       
             ax[p].set_title(title)
             ax[p].legend()
         plt.show()      
         
-        s = self.checkpoint_every + self.test_eps + 1
         fig, ax = plt.subplots(1, 3, figsize = (12,4))
-        ax[0].plot(self.generator_loss_log[s : self.e])
-        ax[1].plot(self.classifier_loss_log[s : self.e])
-        ax[2].plot(self.test_accs[:self.test_e, -1])
+        ax[0].plot(self.generator_loss_log[1:self.test_e])
+        ax[1].plot(self.classifier_loss_log[1:self.test_e])
+        ax[2].plot(self.test_accs[1:self.test_e, -1])
         plt.show()      

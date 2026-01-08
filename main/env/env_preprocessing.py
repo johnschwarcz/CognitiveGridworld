@@ -42,7 +42,6 @@ class Env_preprocessing(Env_generators):
         self.L_dims = (*self.batch_obs_dims, *self.ctx_dims)
         
         # Pre-allocate arrays for future use.
-        self.model_perf_log = np.zeros((self.checkpoint_every, self.step_num, 3))   # [acc, TP, mse]
         self.particle_traj = np.zeros((*self.batch_step_dims, self.ctx_num))
         self.flow_count = np.zeros((2, self.obs_num, self.realization_num, self.realization_num))
         self.flow_grid = np.zeros((2, self.obs_num, self.realization_num, self.realization_num, 2))

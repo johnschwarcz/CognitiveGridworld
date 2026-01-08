@@ -1,53 +1,75 @@
-import torch; import numpy as np; import pylab as plt; from tqdm import tqdm
+import torch; import numpy as np; import pylab as plt; from tqdm import tqdm;
+from sklearn.decomposition import PCA; from sklearn.linear_model import LogisticRegression
 from main.utils import tnp; from main.env.env_control_manager import Env_control_manager
 from main.model.model_architecture import Model_architecture as Model
 
 class Env_model_data_manager(Env_control_manager):
 
     def prep_data_manager(self):
+        self.test_model_update_dim, self.test_model_update_dim_ratio, self.test_model_input_dim, self.test_model_input_dim_ratio\
+                                                                        = [np.zeros((self.episodes, self.hid_dim)) for _ in range(4)]
+        self.classifier_loss_log, self.generator_loss_log, self.test_SII_score, self.test_SII_coef, self.readin_grad_log, self.readout_grad_log \
+                                                                                                    = [np.zeros(self.episodes) for _ in range(6)]
+        self.test_net_joint_DKL, self.test_net_naive_DKL, self.test_accs, self.train_accs, self.test_TPs, self.train_TPs, self.test_mses, self.train_mses \
+                                                                                             = [np.zeros((self.episodes, self.step_num)) for _ in range(8)]
         self.test_e = 0
-        s = (self.episodes, self.batch_num, self.Z_num * self.obs_num)
-        self.test_true_Z, self.test_model_Z = [np.zeros(s) for _ in range(2)]
-        self.test_accs, self.train_accs \
-            = [np.zeros((self.episodes, self.step_num)) for _ in range(2)]
-        self.test_model_SII, self.classifier_loss_log, self.generator_loss_log \
-            = [np.zeros(self.episodes) for _ in range(3)]
-     
-    def log_model_perf(self):
-        avg_model_acc = self.model_acc.mean(0)
-        self.model_perf_log[self.log_ind, :, 0] = avg_model_acc
-        self.model_perf_log[self.log_ind, :, 1] = self.model_TP.mean(0)
-        self.model_perf_log[self.log_ind, :, 2] = self.model_mse.mean(0)
-        self.generator_loss_log[self.e] = self.model.generator_loss
-        self.classifier_loss_log[self.e] = self.model.classifier_loss
 
+    def log_model(self):
         if self.test_set:
-            self.test_model_SII[self.test_e] = self.get_SII()
-            self.test_model_Z[self.test_e, :] = tnp(self.model.active_Z, 'np').reshape(self.batch_num, -1)
-            self.test_true_Z[self.test_e, :] = self.joint_Z.reshape(self.batch_num, -1) 
-            self.test_accs[self.test_e, :] = avg_model_acc
+            self.test_net_joint_DKL[self.test_e, :] = self.DKL(self.model_goal_belief, self.joint_goal_belief)
+            self.test_net_naive_DKL[self.test_e, :] = self.DKL(self.model_goal_belief, self.naive_goal_belief)
+            self.test_accs[self.test_e, :] = self.model_acc.mean(0)
+            self.test_TPs[self.test_e, :] = self.model_TP.mean(0)
+            self.test_mses[self.test_e, :] = self.model_mse.mean(0)
+            if self.training:
+                self.perform_training_analyses()
             self.test_e += 1
         else:
-            self.train_accs[self.test_e:, :] = avg_model_acc         # overwrite until test
+            # Overwrites until test
+            self.classifier_loss_log[self.test_e] = self.classifier_loss
+            self.generator_loss_log[self.test_e] = self.generator_loss
+            self.readout_grad_log[self.test_e] = self.readout_grad
+            self.readin_grad_log[self.test_e] = self.readin_grad
+            self.train_accs[self.test_e, :] = self.model_acc.mean(0)
+            self.train_TPs[self.test_e, :] = self.model_TP.mean(0)
+            self.train_mses[self.test_e, :] = self.model_mse.mean(0)
+        
+    def perform_training_analyses(self):
+            # Get SII prediction of accuracy
+            SII = self.DKL(self.joint_goal_belief, self.naive_goal_belief, avg_over_batch=False, sym = True)
+            X = SII[:, -1].reshape(-1, 1)
+            Y = self.model_acc[:, -1]
 
-    def get_SII(self, eps = 1e-8):
-        J = np.clip(self.joint_goal_belief, a_min= eps, a_max = float(1) - eps)
-        N = np.clip(self.naive_goal_belief, a_min= eps, a_max = float(1) - eps)
-        M = np.clip(self.model_goal_belief, a_min= eps, a_max = float(1) - eps)
-        JN_DKL = (J * np.log(J/N)).sum(-1).mean()
-        JM_DKL = (J * np.log(J/M)).sum(-1).mean()
-        return 1 - JM_DKL/JN_DKL
+            reg = LogisticRegression().fit(X, Y) # predict final step acc from final step SII
+            self.test_SII_score[self.test_e] = reg.score(X, Y)
+            self.test_SII_coef[self.test_e] = reg.coef_[0][0]
+
+            # Get dimensionality of LSTM input and output 
+            pca = PCA(n_components = self.hid_dim).fit(self.model_update_flat.reshape(-1, self.hid_dim))
+            self.test_model_update_dim_ratio[self.test_e] = pca.explained_variance_ratio_
+            self.test_model_update_dim[self.test_e] = pca.explained_variance_
+            pca = PCA(n_components = self.hid_dim).fit(self.model_input_flat.reshape(-1, self.hid_dim))
+            self.test_model_input_dim_ratio[self.test_e] = pca.explained_variance_ratio_
+            self.test_model_input_dim[self.test_e] = pca.explained_variance_
 
     def save(self):
         save_path = self.DATA_path + self.save_env + "_net.pth"
         save_dict = {                         
-                "model_SII_through_training": self.test_model_SII[:self.test_e], 
-                "model_Z_through_training":   self.test_model_Z[:self.test_e], 
-                "true_Z_through_training":    self.test_true_Z[:self.test_e], 
+                "readin_grad_log_through_training": self.readin_grad_log[:self.test_e],
+                "readout_grad_log_through_training": self.readout_grad_log[:self.test_e],
+                "test_model_input_dim_through_training": self.test_model_input_dim[:self.test_e], 
+                "test_model_update_dim_through_training": self.test_model_update_dim[:self.test_e], 
+                "test_model_input_dim_ratio_through_training": self.test_model_input_dim_ratio[:self.test_e], 
+                "test_model_update_dim_ratio_through_training": self.test_model_update_dim_ratio[:self.test_e], 
+                "test_net_joint_DKL_through_training": self.test_net_joint_DKL[:self.test_e], 
+                "test_net_naive_DKL_through_training": self.test_net_naive_DKL[:self.test_e], 
+                "test_SII_score_through_training": self.test_SII_score[:self.test_e],
+                "test_SII_coef_through_training": self.test_SII_coef[:self.test_e],
                 "test_acc_through_training":  self.test_accs[:self.test_e], 
                 "train_acc_through_training": self.train_accs[:self.test_e], 
-                "gen_loss_through_training":  self.generator_loss_log, 
-                "pol_loss_through_training":  self.classifier_loss_log, 
+                "gen_loss_through_training":  self.generator_loss_log[:self.test_e], 
+                "pol_loss_through_training":  self.classifier_loss_log[:self.test_e], 
+
                 "K": self.all_K, "Q": self.all_Q,
                 "model_K": tnp(self.model.all_K,'np'), 
                 "model_Q": tnp(self.model.all_Q,'np'),
@@ -67,14 +89,31 @@ class Env_model_data_manager(Env_control_manager):
             self.model.load_state_dict(load_dict["weights"])
             self.model.all_K = torch.nn.Parameter(tnp(load_dict["model_K"], 'torch', self.device))
             self.model.all_Q = torch.nn.Parameter(tnp(load_dict["model_Q"], 'torch', self.device))
-            self.true_Z_through_training = load_dict["true_Z_through_training"]
-            self.model_Z_through_training = load_dict["model_Z_through_training"]
-            self.model_SII_through_training = load_dict["model_SII_through_training"]
-            self.train_acc_through_training = load_dict["train_acc_through_training"]
-            self.test_acc_through_training = load_dict["test_acc_through_training"]
-            self.gen_loss_through_training = load_dict["gen_loss_through_training"]
-            self.pol_loss_through_training = load_dict["pol_loss_through_training"]
+
+            self.readin_grad_log_through_training = self.skippable_load(load_dict, "readin_grad_log_through_training")
+            self.readout_grad_log_through_training = self.skippable_load(load_dict, "readout_grad_log_through_training")
+            self.test_model_input_dim_through_training = self.skippable_load(load_dict, "test_model_input_dim_through_training")
+            self.test_model_update_dim_through_training = self.skippable_load(load_dict, "test_model_update_dim_through_training")
+            self.test_model_input_dim_ratio_through_training = self.skippable_load(load_dict, "test_model_input_dim_ratio_through_training")
+            self.test_model_update_dim_ratio_through_training = self.skippable_load(load_dict, "test_model_update_dim_ratio_through_training")
+            self.test_SII_coef_through_training = self.skippable_load(load_dict, "test_SII_coef_through_training")
+            self.test_SII_score_through_training = self.skippable_load(load_dict, "test_SII_score_through_training")
+            self.test_net_joint_DKL_through_training = self.skippable_load(load_dict, "test_net_joint_DKL_through_training")
+            self.test_net_naive_DKL_through_training = self.skippable_load(load_dict, "test_net_naive_DKL_through_training")
+            self.train_acc_through_training = self.skippable_load(load_dict, "train_acc_through_training")
+            self.test_acc_through_training = self.skippable_load(load_dict, "test_acc_through_training")
+            self.gen_loss_through_training = self.skippable_load(load_dict, "gen_loss_through_training")
+            self.pol_loss_through_training = self.skippable_load(load_dict, "pol_loss_through_training")
+
             print("ENV LOADED")
         except:
             print("LOADING FAILED")
             self.model.load_state_dict(load_dict["weights"])
+
+    def skippable_load(self, load_dict, field):
+        if field in load_dict:
+            return load_dict[field]
+        else:
+            if self.load_warnings:
+                print(f"{field} not found.")
+            return None

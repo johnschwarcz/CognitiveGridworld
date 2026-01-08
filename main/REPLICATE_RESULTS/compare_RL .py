@@ -152,7 +152,7 @@ def plot_RL_training(joint, naive, D, step_num):
     custom_cmap = cmap_black2blue()
 
     # --- Plotting Code ---
-    fig, ax = plt.subplots(1, 1, figsize=(10, 12), subplot_kw={'projection': '3d', 'computed_zorder': False})
+    fig, ax = plt.subplots(1, 1, figsize=(8, 10), subplot_kw={'projection': '3d', 'computed_zorder': False})
     elav, azim = 10, -150
     lb = to_rgba('#e6f3ff', 0.8)
     lb2 = to_rgba("#aaebff", 0.8)
@@ -209,7 +209,7 @@ def plot_RL_training(joint, naive, D, step_num):
     ax.set_xlabel('Inference Time')
     ax.set_ylabel('Testing Episode')
     ax.set_zlabel('Performance')
-    ax.set_yticks(y[::300])
+    # ax.set_yticks(y[::300])
     ax.set_zticks([.1, .4, .7])
     plt.savefig(f"acc_surface_{custom_cmap.name}.pdf", bbox_inches="tight", dpi=300)
     plt.show()
@@ -221,7 +221,7 @@ if __name__ == "__main__":
     ctx_num = 2
     obs_num = 5 
     step_num = 30
-    batch_num = 5
+    batch_num = 10
     state_num = 500
     realization_num = 10
 
