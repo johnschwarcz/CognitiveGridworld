@@ -27,12 +27,9 @@ class Model_architecture(Model_controller):
 
     def default_internal_embeddings(self):
         if self.learn_embeddings:
-            print("LEARNING embedding space")
             self.all_K, self.all_Q = [torch.randn(*self.state_obs_dims, self.hid_dim).to(self.device) for _ in range(2)]
             self.all_K = nn.Parameter(self.all_K / torch.norm(self.all_K, dim=-1, keepdim=True))
             self.all_Q = nn.Parameter(self.all_Q / torch.norm(self.all_Q, dim=-1, keepdim=True))
-        else:
-            print("GIVEN embedding space")
 
     def default_classifier(self):
         inp_dims = (self.Z_num + 1) * self.obs_num

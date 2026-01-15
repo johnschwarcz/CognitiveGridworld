@@ -19,22 +19,22 @@ if __name__ == "__main__":
     self = CognitiveGridworld(**{'mode': "SANITY", 'cuda': cuda, 'episodes': 50000,
         'realization_num': realization_num,  'hid_dim': hid_dim,  'obs_num': obs_num, 'training': True,
         'batch_num': batch_num, 'step_num': step_num, 'state_num': state_num, 'learn_embeddings': False,
-        'reservoir': True, 'classifier_LR': .001, 'ctx_num': 2, 'save_env': "reservoir_ctx_2"})
+        'reservoir': True, 'classifier_LR': .001, 'ctx_num': 2, 'save_env': "/sanity/reservoir_ctx_2"})
 
     self = CognitiveGridworld(**{'mode': "SANITY", 'cuda': cuda, 'episodes': 25000,
         'realization_num': realization_num,  'hid_dim': hid_dim,  'obs_num': obs_num,'training': True,
         'batch_num': batch_num, 'step_num': step_num, 'state_num': state_num, 'learn_embeddings': False,
-        'reservoir': True, 'classifier_LR': .001, 'ctx_num': 1, 'save_env': "reservoir_ctx_1"})
+        'reservoir': True, 'classifier_LR': .001, 'ctx_num': 1, 'save_env': "/sanity/reservoir_ctx_1"})
 
     self = CognitiveGridworld(**{'mode': "SANITY", 'cuda': cuda, 'episodes': 50000,
         'realization_num': realization_num,  'hid_dim': hid_dim,  'obs_num': obs_num, 'training': True,
         'batch_num': batch_num, 'step_num': step_num, 'state_num': state_num, 'learn_embeddings': False,
-        'reservoir': False, 'classifier_LR': .001, 'ctx_num': 2, 'save_env': "fully_trained_ctx_2"})
+        'reservoir': False, 'classifier_LR': .001, 'ctx_num': 2, 'save_env': "/sanity/fully_trained_ctx_2"})
         
     self = CognitiveGridworld(**{'mode': "SANITY", 'cuda': cuda, 'episodes': 25000,
         'realization_num': realization_num,  'hid_dim': hid_dim, 'obs_num': obs_num,'training': True,
         'batch_num': batch_num, 'step_num': step_num, 'state_num': state_num, 'learn_embeddings': False,
-        'reservoir': False, 'classifier_LR': .001, 'ctx_num': 1, 'save_env': "fully_trained_ctx_1"})
+        'reservoir': False, 'classifier_LR': .001, 'ctx_num': 1, 'save_env': "/sanity/fully_trained_ctx_1"})
 
     print("done")
 

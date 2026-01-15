@@ -186,7 +186,7 @@ class Collection_Plotters():
         B = self.batch_num 
         T = self.step_num
         t = np.arange(T)
-        relative_labels = [r"$\frac{\text{Joint}}{\text{Independent}}$", 
+        relative_labels = [r"$\frac{\text{Joint}}{\text{Naive}}$", 
                         r"$\frac{\text{Fully Trained}}{\text{Echo State}}$"]
         markers = ['o', '^']
         mecs = ['k', 'r']
@@ -196,8 +196,12 @@ class Collection_Plotters():
         if self.WITH_net:
             # fig, axs = plt.subplots(1, 4, figsize=(16, 5), tight_layout=True,
             # gridspec_kw={'width_ratios':  (1, 1, 1, .4)})
-            fig, axs = plt.subplots(1, 4, figsize=(16,5), tight_layout=True,
-            gridspec_kw={'width_ratios':  (.7, .7, 1, 1)})
+
+            # fig, axs = plt.subplots(1, 4, figsize=(16,5), tight_layout=True,
+            # gridspec_kw={'width_ratios':  (.7, .7, 1, 1)})
+
+            fig, axs = plt.subplots(1, 3, figsize=(12, 5), tight_layout=True,
+            gridspec_kw={'width_ratios':  (1, 1, 1)})
         
         for cond in range(self.pairs):
             marker = markers[cond]
@@ -232,19 +236,19 @@ class Collection_Plotters():
 
             for c in range(self.ctx_num):
                 if self.WITHOUT_net:
-                    label = f'$|C|={c+1}$'
+                    label = f'$C={c+1}$'
                 if self.WITH_net:
                     if c > 0:
                         label = None 
                     elif cond == 0:
-                        label = "Joint Inference"
+                        label = "Joint"
                     else:
                         label = "Fully Trained"
 
                 ax.plot(t, mj[c], c=col[c], lw=lw, ls = ls)
                 ax.scatter(t[idx], mj[c, idx], s=50, marker=marker, label = label,
                     facecolors=col[c], edgecolors=mecs[cond], zorder=3)
-            title = "Joint Inference" if self.WITHOUT_net else "Experts"
+            title = "Joint" if self.WITHOUT_net else "Experts"
 
             ax.set(title=title, xlabel='Inference Time', ylabel='Accuracy')
             ax.set_yticks(np.linspace(0, 1, 6))
@@ -261,14 +265,14 @@ class Collection_Plotters():
                 if (c > 0) or (self.WITHOUT_net):
                     label = None 
                 elif cond == 0:
-                    label = "Independent Inference"
+                    label = "Naive"
                 else:
                     label = "Echo State"
 
                 ax.plot(t, mn[c], c=col[c], lw=lw, ls = ls)
                 ax.scatter(t[idx], mn[c, idx], s=50, marker=marker, label = label,
                     facecolors=col[c], edgecolors=mecs[cond], zorder=3)               
-            title = "Independent Inference" if self.WITHOUT_net else "Baselines"
+            title = "Naive" if self.WITHOUT_net else "Baselines"
             ax.set(title=title, xlabel='Inference Time')
             ax.set_yticks(np.linspace(0, 1, 6))
 
@@ -283,7 +287,7 @@ class Collection_Plotters():
             ax.plot([0, 1], [0, 1], ls = '-', c='gray', lw=1, alpha=1)
             for c in range(self.ctx_num):
                 if (self.WITH_net):
-                    label = f'$|C|={c+1}$ ' + (relative_labels[cond] if c == 0 else "")
+                    label = f'$C={c+1}$ ' + (relative_labels[cond] if c == 0 else "")
                 else:
                     label = ""
                 ax.plot(mn[c], mj[c], c=col[c], lw=lw, ls = ':' if cond == 0 else '--')
@@ -297,7 +301,7 @@ class Collection_Plotters():
             if cond == 0:
                 ax.annotate('start', (mn[0,0], mj[0,0]), xytext=(-25, -30), textcoords='offset points')
             if self.WITHOUT_net:
-                ax.set(xlabel= 'Independent Inference', ylabel='Joint Inference')
+                ax.set(xlabel= 'Naive', ylabel='Joint')
                 ax.set_ylim(.1, 1.1)
                 ax.set_xlim(.1, 1)
             else:
@@ -323,46 +327,48 @@ class Collection_Plotters():
                 max_d = dkl.max() * 1.05
                 ax.set_ylim(None, max_d)
                 ax.set_yticks([0, 4, 8, 12])
+            else:
+                ax.legend()
 
-            if self.WITH_net:
-                c = 1
-                ax.legend(loc = 'lower right')
-                ax = axs[3]
-                if cond == 0:
-                    TJ_dkl = self.net_joint_DKL[0,1]
-                    RJ_dkl = self.net_joint_DKL[1,1]
-                    TN_dkl = self.net_naive_DKL[0,1]
-                    RN_dkl = self.net_naive_DKL[1,1]
-                    JT_dkl = self.joint_net_DKL[0,1]
-                    JR_dkl = self.joint_net_DKL[1,1]
-                    NR_dkl = self.naive_net_DKL[1,1]
-                    NT_dkl = self.naive_net_DKL[0,1]
-                    JN_dkl = self.joint_naive_DKL[1]
-                    NJ_dkl = self.naive_joint_DKL[1]
-                    JN_sym = (JN_dkl + NJ_dkl)/2
-                    TN_sym = (TN_dkl + NT_dkl)/2
-                    JR_sym = (RJ_dkl + JR_dkl)/2
-                    NR_sym = (RN_dkl + NR_dkl)/2
-                    JT_sym = (TJ_dkl + JT_dkl)/2
+            # if self.WITH_net:
+            #     c = 1
+            #     ax.legend(loc = 'lower right')
+            #     ax = axs[3]
+            #     if cond == 0:
+            #         TJ_dkl = self.net_joint_DKL[0,1]
+            #         RJ_dkl = self.net_joint_DKL[1,1]
+            #         TN_dkl = self.net_naive_DKL[0,1]
+            #         RN_dkl = self.net_naive_DKL[1,1]
+            #         JT_dkl = self.joint_net_DKL[0,1]
+            #         JR_dkl = self.joint_net_DKL[1,1]
+            #         NR_dkl = self.naive_net_DKL[1,1]
+            #         NT_dkl = self.naive_net_DKL[0,1]
+            #         JN_dkl = self.joint_naive_DKL[1]
+            #         NJ_dkl = self.naive_joint_DKL[1]
+            #         JN_sym = (JN_dkl + NJ_dkl)/2
+            #         TN_sym = (TN_dkl + NT_dkl)/2
+            #         JR_sym = (RJ_dkl + JR_dkl)/2
+            #         NR_sym = (RN_dkl + NR_dkl)/2
+            #         JT_sym = (TJ_dkl + JT_dkl)/2
 
-                    ax.plot(JT_sym, JR_sym, c = '#CBE79D', zorder = 5)
-                    ax.plot(TN_sym, NR_sym, c = '#8A9776', zorder = 5)
-                    ax.scatter(JT_sym[idx], JR_sym[idx], marker = 'h', s = 75, c = "#CBE79D", edgecolors = 'k', label = r"$\mathcal{D}_{KL}(\cdot || $" + " Joint" + r"$)$", zorder = 10)
-                    ax.scatter(TN_sym[idx], NR_sym[idx], marker = 'h', s = 75, c = "#8A9776", edgecolors = 'k', label =r"$\mathcal{D}_{KL}(\cdot || $" + " Independent" + r"$)$", zorder = 10)
-                    ax.scatter(JT_sym[-1], JR_sym[-1], marker = 'h', s = 75, c = "#CBE79D", edgecolors = 'r', zorder = 20, linewidths = 1.5)
-                    ax.scatter(TN_sym[-1], NR_sym[-1], marker = 'h', s = 75, c = "#8A9776", edgecolors = 'r', zorder = 20, linewidths = 1.5)
+            #         ax.plot(JT_sym, JR_sym, c = '#CBE79D', zorder = 5)
+            #         ax.plot(TN_sym, NR_sym, c = '#8A9776', zorder = 5)
+            #         ax.scatter(JT_sym[idx], JR_sym[idx], marker = 'h', s = 75, c = "#CBE79D", edgecolors = 'k', label = r"$\mathcal{D}_{KL}(\cdot || $" + " Joint" + r"$)$", zorder = 10)
+            #         ax.scatter(TN_sym[idx], NR_sym[idx], marker = 'h', s = 75, c = "#8A9776", edgecolors = 'k', label =r"$\mathcal{D}_{KL}(\cdot || $" + " Independent" + r"$)$", zorder = 10)
+            #         ax.scatter(JT_sym[-1], JR_sym[-1], marker = 'h', s = 75, c = "#CBE79D", edgecolors = 'r', zorder = 20, linewidths = 1.5)
+            #         ax.scatter(TN_sym[-1], NR_sym[-1], marker = 'h', s = 75, c = "#8A9776", edgecolors = 'r', zorder = 20, linewidths = 1.5)
 
-                    ax.plot(np.linspace(-5, JN_sym[-1], 2), np.ones(2) * JN_sym[-1], c = 'r', ls = '--', label = r"$\mathcal{D}_{KL}($"+"Joint" + r"$||$" + " Independent" +  r"$)$", zorder= 0, lw = 1)
-                    ax.plot(np.ones(2) * JN_sym[-1], np.linspace(-5, JN_sym[-1], 2), c = 'r', ls = '--', zorder= 0, lw = 1)
-                    ax.set_xlabel(r"$\mathcal{D}_{KL}($"+"Fully Trained " + r"$|| \cdot)$")
-                    ax.set_ylabel(r"$\mathcal{D}_{KL}($"+"Echo State " + r"$|| \cdot)$")
-                    ax.set_title("Relative " + r"$\mathcal{D}_{KL}$")
-                    ax.set_xlim([-.3, JN_sym[-1] + .1])
-                    ax.set_ylim([-1.3, JN_sym[-1] + .1])
-                    ax.set_xticks([0,1,2,3])
-                    ax.set_yticks([-1, 0,1,2,3])
-                    ax.legend(loc = 'lower right')
-                    ax.annotate('start', (0,0), xytext=(-15, -15), textcoords='offset points')
+            #         ax.plot(np.linspace(-5, JN_sym[-1], 2), np.ones(2) * JN_sym[-1], c = 'r', ls = '--', label = r"$\mathcal{D}_{KL}($"+"Joint" + r"$||$" + " Independent" +  r"$)$", zorder= 0, lw = 1)
+            #         ax.plot(np.ones(2) * JN_sym[-1], np.linspace(-5, JN_sym[-1], 2), c = 'r', ls = '--', zorder= 0, lw = 1)
+            #         ax.set_xlabel(r"$\mathcal{D}_{KL}($"+"Fully Trained " + r"$|| \cdot)$")
+            #         ax.set_ylabel(r"$\mathcal{D}_{KL}($"+"Echo State " + r"$|| \cdot)$")
+            #         ax.set_title("Relative " + r"$\mathcal{D}_{KL}$")
+            #         ax.set_xlim([-.3, JN_sym[-1] + .1])
+            #         ax.set_ylim([-1.3, JN_sym[-1] + .1])
+            #         ax.set_xticks([0,1,2,3])
+            #         ax.set_yticks([-1, 0,1,2,3])
+            #         ax.legend(loc = 'lower right')
+            #         ax.annotate('start', (0,0), xytext=(-15, -15), textcoords='offset points')
 
 
         self.finish_plot(save)
@@ -378,7 +384,7 @@ class Collection_Plotters():
 
         for r,agent in enumerate(("bayes","net")):
             axs=axses[r]; TP=self.goal_TP[0] if agent=="bayes" else self.goal_TP[1]
-            prefix=["Joint Inference","Independent Inference"] if agent=="bayes" else ["Fully Trained Network","Echo State Network"]
+            prefix=["Joint","Naive"] if agent=="bayes" else ["Fully Trained Network","Echo State Network"]
             expert,baseline=TP[0,1],TP[1,1]
             pj=np.zeros((T,bins)); pn=np.zeros((T,bins))
             for t in range(T):

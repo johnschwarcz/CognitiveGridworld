@@ -45,7 +45,7 @@ class Sanity_Collector(Collection_Plotters):
         self.WITHOUT_net = not WITH_net
         self.linestyles = ['-', '--'] if WITH_net else ['-']
         self.labels = ["joint inference", "independent inference"] 
-        net_envs = ["fully_trained","reservoir"]
+        net_envs = ["/sanity/fully_trained","/sanity/reservoir"]
         if WITH_net:
             self.labels += net_envs
 

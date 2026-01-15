@@ -6,13 +6,14 @@ from main.model.model_architecture import Model_architecture as Model
 class Env_model_data_manager(Env_control_manager):
 
     def prep_data_manager(self):
-        self.test_model_update_dim, self.test_model_update_dim_ratio, self.test_model_input_dim, self.test_model_input_dim_ratio\
-                                                                        = [np.zeros((self.episodes, self.hid_dim)) for _ in range(4)]
-        self.classifier_loss_log, self.generator_loss_log, self.test_SII_score, self.test_SII_coef, self.readin_grad_log, self.readout_grad_log \
-                                                                                                    = [np.zeros(self.episodes) for _ in range(6)]
-        self.test_net_joint_DKL, self.test_net_naive_DKL, self.test_accs, self.train_accs, self.test_TPs, self.train_TPs, self.test_mses, self.train_mses \
-                                                                                             = [np.zeros((self.episodes, self.step_num)) for _ in range(8)]
         self.test_e = 0
+
+        self.test_model_update_dim, self.test_model_input_dim, self.test_model_input_stim_dim, self.test_model_update_stim_dim \
+                                                                    = [np.zeros((self.episodes, self.hid_dim)) for _ in range(4)]
+        self.classifier_loss_log, self.generator_loss_log, self.test_SII_score, self.test_SII_coef, self.readin_grad_log, self.readout_grad_log, \
+                                                                                                       = [np.zeros(self.episodes) for _ in range(6)]
+        self.test_net_joint_DKL, self.test_net_naive_DKL, self.test_accs, self.train_accs, self.test_TPs, self.train_TPs, self.test_mses, self.train_mses \
+                                                                                            = [np.zeros((self.episodes, self.step_num)) for _ in range(8)]
 
     def log_model(self):
         if self.test_set:
@@ -44,13 +45,17 @@ class Env_model_data_manager(Env_control_manager):
             self.test_SII_score[self.test_e] = reg.score(X, Y)
             self.test_SII_coef[self.test_e] = reg.coef_[0][0]
 
-            # Get dimensionality of LSTM input and output 
+            # Get total dimensionality of LSTM input and output 
             pca = PCA(n_components = self.hid_dim).fit(self.model_update_flat.reshape(-1, self.hid_dim))
-            self.test_model_update_dim_ratio[self.test_e] = pca.explained_variance_ratio_
             self.test_model_update_dim[self.test_e] = pca.explained_variance_
             pca = PCA(n_components = self.hid_dim).fit(self.model_input_flat.reshape(-1, self.hid_dim))
-            self.test_model_input_dim_ratio[self.test_e] = pca.explained_variance_ratio_
             self.test_model_input_dim[self.test_e] = pca.explained_variance_
+
+            # Get trial averaged dimensionality of LSTM input and output 
+            pca = PCA(n_components = self.hid_dim).fit(self.model_update_flat[:, -1])
+            self.test_model_update_stim_dim[self.test_e] = pca.explained_variance_
+            pca = PCA(n_components = self.hid_dim).fit(self.model_input_flat[:, -1])
+            self.test_model_input_stim_dim[self.test_e] = pca.explained_variance_
 
     def save(self):
         save_path = self.DATA_path + self.save_env + "_net.pth"
@@ -59,8 +64,8 @@ class Env_model_data_manager(Env_control_manager):
                 "readout_grad_log_through_training": self.readout_grad_log[:self.test_e],
                 "test_model_input_dim_through_training": self.test_model_input_dim[:self.test_e], 
                 "test_model_update_dim_through_training": self.test_model_update_dim[:self.test_e], 
-                "test_model_input_dim_ratio_through_training": self.test_model_input_dim_ratio[:self.test_e], 
-                "test_model_update_dim_ratio_through_training": self.test_model_update_dim_ratio[:self.test_e], 
+                "test_model_update_stim_dim_through_training": self.test_model_update_stim_dim[:self.test_e], 
+                "test_model_input_stim_dim_through_training": self.test_model_input_stim_dim[:self.test_e],
                 "test_net_joint_DKL_through_training": self.test_net_joint_DKL[:self.test_e], 
                 "test_net_naive_DKL_through_training": self.test_net_naive_DKL[:self.test_e], 
                 "test_SII_score_through_training": self.test_SII_score[:self.test_e],
@@ -94,8 +99,8 @@ class Env_model_data_manager(Env_control_manager):
             self.readout_grad_log_through_training = self.skippable_load(load_dict, "readout_grad_log_through_training")
             self.test_model_input_dim_through_training = self.skippable_load(load_dict, "test_model_input_dim_through_training")
             self.test_model_update_dim_through_training = self.skippable_load(load_dict, "test_model_update_dim_through_training")
-            self.test_model_input_dim_ratio_through_training = self.skippable_load(load_dict, "test_model_input_dim_ratio_through_training")
-            self.test_model_update_dim_ratio_through_training = self.skippable_load(load_dict, "test_model_update_dim_ratio_through_training")
+            self.test_model_input_stim_dim_through_training = self.skippable_load(load_dict, "test_model_input_stim_dim_through_training")
+            self.test_model_update_stim_dim_through_training = self.skippable_load(load_dict, "test_model_update_stim_dim_through_training")
             self.test_SII_coef_through_training = self.skippable_load(load_dict, "test_SII_coef_through_training")
             self.test_SII_score_through_training = self.skippable_load(load_dict, "test_SII_score_through_training")
             self.test_net_joint_DKL_through_training = self.skippable_load(load_dict, "test_net_joint_DKL_through_training")

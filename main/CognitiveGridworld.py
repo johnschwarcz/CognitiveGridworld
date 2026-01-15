@@ -26,7 +26,6 @@ class CognitiveGridworld(Env_model_manager):
         self.load_warnings = init.get('load_warnings', False)
         self.checkpoint_every = init.get('checkpoint_every', 500)
         self.plot_every = init.get('plot_every', 5)
-        # self.test_eps = init.get('test_eps', min(self.episodes, 5))
         self.test_states = init.get('test_states', self.state_num // 10)
 
         self.likelihood_temp = init.get('likelihood_temp', 2)
