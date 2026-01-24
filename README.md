@@ -4,7 +4,7 @@
 
 ## Installation
 
-The project is built for Python 3.8+ and relies on libraries such as NumPy & PyTorch. To reproduce the environment do:
+The project is built for Python 3.8+. To reproduce the environment do:
 
 ```sh
    conda create --name CG --file packages.txt
@@ -13,9 +13,7 @@ The project is built for Python 3.8+ and relies on libraries such as NumPy & Py
 
 ## Quick start
 
-The easiest way to get started is with `example.py`. 
-
-`example.py` is an example entrypoint which will preprocess an environment and loop through episodes. 
+The easiest way to get started is with `example.py` entropypoint, which will preprocess and simulate an environment. 
 
 Default values of all tune-able hyperparameters can be found in `main/CognitiveGridworld.py`. 
 
