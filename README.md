@@ -83,5 +83,5 @@ CognitiveGridworld/
 ```
 
 ## Customization
-Customization is built into the foundation of the pipeline. Custom functions are checked before default functions can be run. '_Customization.py' files in env/ & model/ are designed for convenient modification to the environment, Bayesian observers and neural networks.
+Customization is built into the foundation of the CognitiveGridworld. Custom functions in '_Customization.py' files are checked before default functions are run. '_Customization.py' files in env/ & model/ are designed for convenient modification to: environments, Bayesian observers and neural networks.
 
