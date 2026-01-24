@@ -45,17 +45,19 @@ class Env_model_data_manager(Env_control_manager):
             self.test_SII_score[self.test_e] = reg.score(X, Y)
             self.test_SII_coef[self.test_e] = reg.coef_[0][0]
 
-            # Get total dimensionality of LSTM input and output 
-            pca = PCA(n_components = self.hid_dim).fit(self.model_update_flat.reshape(-1, self.hid_dim))
-            self.test_model_update_dim[self.test_e] = pca.explained_variance_
-            pca = PCA(n_components = self.hid_dim).fit(self.model_input_flat.reshape(-1, self.hid_dim))
-            self.test_model_input_dim[self.test_e] = pca.explained_variance_
-
-            # Get trial averaged dimensionality of LSTM input and output 
-            pca = PCA(n_components = self.hid_dim).fit(self.model_update_flat[:, -1])
-            self.test_model_update_stim_dim[self.test_e] = pca.explained_variance_
-            pca = PCA(n_components = self.hid_dim).fit(self.model_input_flat[:, -1])
-            self.test_model_input_stim_dim[self.test_e] = pca.explained_variance_
+            if (self.batch_num < self.hid_dim) and (self.test_e == 0):
+                print("BATCH SIZE < HID DIM: {self.batch_num} < {self.hid_dim}, SKIPPING PCA".format(self=self))
+            else:
+                # Get total dimensionality of LSTM input and output 
+                pca = PCA(n_components = self.hid_dim).fit(self.model_update_flat.reshape(-1, self.hid_dim))
+                self.test_model_update_dim[self.test_e] = pca.explained_variance_
+                pca = PCA(n_components = self.hid_dim).fit(self.model_input_flat.reshape(-1, self.hid_dim))
+                self.test_model_input_dim[self.test_e] = pca.explained_variance_
+                # Get trial averaged dimensionality of LSTM input and output 
+                pca = PCA(n_components = self.hid_dim).fit(self.model_update_flat[:, -1])
+                self.test_model_update_stim_dim[self.test_e] = pca.explained_variance_
+                pca = PCA(n_components = self.hid_dim).fit(self.model_input_flat[:, -1])
+                self.test_model_input_stim_dim[self.test_e] = pca.explained_variance_
 
     def save(self):
         save_path = self.DATA_path + self.save_env + "_net.pth"

@@ -14,7 +14,7 @@ class Env_control_manager(Env_preprocessing):
             'example_policy': np.zeros((self.reps, self.controller_training_episodes, *self.ctx_dims)),
             'prefence_landscape': np.zeros((self.reps, *self.ctx_dims)), 'optimality': np.zeros(self.reps)}
         
-        for self.rep in tqdm(range(reps),  desc = f"{offline_teacher or "ONLINE"}"):
+        for self.rep in tqdm(range(reps),  desc = f"{offline_teacher or 'ONLINE'}"):
             self.EC_gen_context()
             self.EC_gen_likelihoods()
             self.get_opt_preference()
