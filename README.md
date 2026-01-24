@@ -13,9 +13,11 @@ The project is built for Python 3.8+ and relies on libraries such as NumPy, PyT
 
 ## Quick start
 
-The easiest way to get started is with `example.py`, an example entrypoint which will preprocess an environment and loop through episodes.
+The easiest way to get started is with `example.py`. 
 
-The default values of all tune-able hyperparameters can be found in `main/CognitiveGridworld.py`. 
+`example.py` is an example entrypoint which will preprocess an environment and loop through episodes. 
+
+Default values of all tune-able hyperparameters can be found in `main/CognitiveGridworld.py`. 
 
 When initializing a `CognitiveGridworld`, you can pass a dictionary of keyword arguments.  Notable options include:
 * `episodes`: total number of learning episodes for networks.
