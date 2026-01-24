@@ -4,7 +4,7 @@
 
 ## Installation
 
-The project is built for Python 3.8+ and relies on libraries such as NumPy and PyTorch. To reproduce the environment do:
+The project is built for Python 3.8+ and relies on libraries such as NumPy & PyTorch. To reproduce the environment do:
 
 ```sh
    conda create --name CG --file packages.txt
