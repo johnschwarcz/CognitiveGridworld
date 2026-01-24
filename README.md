@@ -83,8 +83,7 @@ CognitiveGridworld/
 ```
 
 ## Customization
-Customization is built into the foundation of the CognitiveGridworld. 
-'_Customization.py' files are:
+Customization, through '_Customization.py' files, is built into the foundation of the CognitiveGridworld. These files are:
 * Checked before default functions are run.
 * Located in env/ & model/.
 * Designed for modification to environments, Bayesian observers and neural networks.
