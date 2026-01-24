@@ -50,9 +50,9 @@ Upon instantiation the simulator will preprocess the environment, generate state
 
 A standard example environment is located in example.py. 
 
-### Environment customisation
+### Environment
 
-When initializing `CognitiveGridworld`, you can pass a dictionary of keyword arguments to customise the simulation.  Some notable options include:
+When initializing `CognitiveGridworld`, you can pass a dictionary of keyword arguments to customise the simulation.  Notable options include:
 
 * `episodes`: total number of learning episodes for networks.
 * `state_num`: size of the State Space.
@@ -63,10 +63,9 @@ When initializing `CognitiveGridworld`, you can pass a dictionary of keyword arg
 * `hid_dim`: size of the hidden layer used in neural models.
 * `learn_embeddings`: whether to learn the embeddings (`True`) or provide the true embeddings (`False`).
 * `reservoir`: toggles the use of a reservoir network.
-* `mode`: selects between using only Bayesian observers / no network ('None') and 2 training modes RL (`"RL"`) and supervised (`"SANITY"`). In RL mode, a classifier and generator are trained jointly; in sanity mode, only a classifer is trained.
+* `mode`: selects between no network (`None`) (only Bayes) and 2 training (if `training=True`) modes RL (`"RL"`) and supervised (`"SANITY"`). In RL mode, a classifier and generator are trained jointly; in sanity mode, only a classifer is trained.
 
-All tune-able hyperparameters can be found in main/CognitiveGridworld.py. Hyperparameters that are not set manually will default to the values in this script.
-
+The default values of all tune-able hyperparameters can be found in `main/CognitiveGridworld.py`.
 ## Directory structure
 
 ```text
@@ -84,8 +83,8 @@ CognitiveGridworld/
 ```
 
 ## Customization
-Customization, through '_Customization.py' files, is built into the foundation of the CognitiveGridworld. These files are:
-* Checked before default functions are run.
-* Located in env/ & model/.
-* Designed for modification to environments, Bayesian observers and neural networks.
+Customization is built into the foundation of the CognitiveGridworld. 
+* ...`_Customization.py` files are located in env/ & model/.
+* ...`_Customization.py` files are checked before default functions are run.
+* ...`_Customization.py` files are designed for modification to environments, Bayesian observers and neural networks.
 
