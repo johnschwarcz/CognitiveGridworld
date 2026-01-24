@@ -48,7 +48,7 @@ cg = CognitiveGridworld(episodes=10,
 
 Upon instantiation the simulator will preprocess the environment, generate state embeddings and loop through episodes. If `show_plots=True` the likelihood, Bayesian performance and a sample trajectory will be displayed.
 
-A standard example environment is located in main/__init__.py. 
+A standard example environment is located in example.py. 
 
 ### Environment customisation
 
@@ -73,12 +73,13 @@ All tune-able hyperparameters can be found in main/CognitiveGridworld.py. Hyperp
 CognitiveGridworld/
 ├── README.md                 
 ├── packages.txt              ← Conda environment specification
+├── example.py                ← Example entrypoint
 └── main/
     ├── CognitiveGridworld.py ← top‑level class containing default hyperparameters
-    ├── env/                  ← environment definitions, generators and preprocessing
+    ├── env/                  ← Preprocessing / generating trials / running Bayesian and network simulations
     ├── env_plotting/         ← plotting helpers
-    ├── model/                ← neural architectures
-    ├── REPLICATE_RESULTS/    ← scripts to reproduce experiments and generate plots
+    ├── model/                ← neural networks
+    ├── REPLICATE_RESULTS/    ← Entrypoints for training networks / analyzing data / generating plots
     └── utils.py              ← utility functions
 ```
 
