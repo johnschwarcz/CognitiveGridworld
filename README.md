@@ -14,10 +14,10 @@ The repository is organised into several modules.  The root contains a `packages
 - **`utils.py`** – A small utility file with helper functions used throughout the project.
 
 The top‑level module `CognitiveGridworld.py` ties everything together.  When you instantiate `CognitiveGridworld`:
-- **1.0:** The environment is preprocessed
-- **1.1:** The embedding space are generated
-- **2.0:** Episodes (contexts, realizations and observations) are generated
-- **2.1:** Bayesian & Network agents are run with diagnostic plots every 'checkpoint_every' episodes.
+-  The environment is preprocessed
+-  The embedding space are generated
+-  Episodes (contexts, realizations and observations) are generated
+-  Bayesian & Network agents are run with diagnostic plots every 'checkpoint_every' episodes.
 
 ## Installation
 
@@ -83,5 +83,8 @@ CognitiveGridworld/
 ```
 
 ## Customization
-Customization is built into the foundation of the pipeline. Custom functions are checked before default functions can be run. '_Customization.py' files in env/ & model/ are designed for convenient modification to the environment, Bayesian observers and neural networks.
+Customization, through '_Customization.py' files, is built into the foundation of the CognitiveGridworld. These files are:
+* Checked before default functions are run.
+* Located in env/ & model/.
+* Designed for modification to environments, Bayesian observers and neural networks.
 
