@@ -14,10 +14,10 @@ The repository is organised into several modules.  The root contains a `packages
 - **`utils.py`** – A small utility file with helper functions used throughout the project.
 
 The top‑level module `CognitiveGridworld.py` ties everything together.  When you instantiate `CognitiveGridworld`:
-- **1.0:** The environment is preprocessed
-- **1.1:** The embedding space are generated
-- **2.0:** Episodes (contexts, realizations and observations) are generated
-- **2.1:** Bayesian & Network agents are run with diagnostic plots every 'checkpoint_every' episodes.
+-  The environment is preprocessed
+-  The embedding space are generated
+-  Episodes (contexts, realizations and observations) are generated
+-  Bayesian & Network agents are run with diagnostic plots every 'checkpoint_every' episodes.
 
 ## Installation
 
