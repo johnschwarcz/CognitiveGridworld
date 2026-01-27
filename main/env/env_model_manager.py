@@ -51,9 +51,8 @@ class Env_model_manager(Env_model_data_manager):
     def forward_backward(self):
         if self.test_set:
             with torch.no_grad():
-                model_belief_flat, self.model_goal_belief, self.model_input_flat, self.model_update_flat = self.model.forward_pass()        
+                self.model_belief_flat, self.model_goal_belief, self.model_input_flat, self.model_update_flat = self.model.forward_pass()        
         else:  
-            model_belief_flat, self.model_goal_belief, self.model_input_flat, self.model_update_flat = self.model.forward_pass()        
+            self.model_belief_flat, self.model_goal_belief, self.model_input_flat, self.model_update_flat = self.model.forward_pass()        
             self.classifier_loss, self.generator_loss, self.readin_grad, self.readout_grad = self.model.backward_pass()
-        self.model_est, _, self.model_acc, self.model_TP, self.model_mse = self.get_goal_performance(model_belief_flat)   
-        
+        self.model_est, _, self.model_acc, self.model_TP, self.model_mse = self.get_goal_performance(self.model_belief_flat)   

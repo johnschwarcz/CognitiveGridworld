@@ -24,8 +24,9 @@ class Model_backward(Model_Customization):
         optim.step()
 
     def classifier_gradients(self):
-        self.readin_grad = self.get_gradient_norm(self.classifier_readin)
-        self.readout_grad = self.get_gradient_norm(self.classifier_readout)
+        if self.mode == "SANITY" :
+            self.readin_grad = self.get_gradient_norm(self.classifier_readin)
+            self.readout_grad = self.get_gradient_norm(self.classifier_readout)
 
     ########################################################################################################
     """ default loss functions """ 

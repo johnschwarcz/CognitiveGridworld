@@ -17,8 +17,8 @@ class Model_architecture(Model_controller):
         self.ctx_range, self.batch_range, self.step_range, self.roll_V_range, self.realization_range, self.roll_realization_range, self.obs_range, self.all_K, self.all_Q =\
             tnp([self.ctx_range, self.batch_range, self.step_range, self.roll_V_range, self.realization_range, self.roll_realization_range, self.obs_range, self.all_K, self.all_Q], 'torch', self.device)
         (self.realization_range,self.ctx_range,self.batch_range,self.step_range,self.obs_range) = (x.long() for x in (self.realization_range,self.ctx_range,self.batch_range,self.step_range,self.obs_range))
+        self.generator_loss = self.classifier_loss = self.readin_grad = self.readout_grad = torch.zeros(1, device = self.device)
         self.classifier_belief_flat = torch.ones(self.BSCR_dims,device = self.device)/self.realization_num
-        self.generator_loss = self.classifier_loss = torch.zeros(1, device = self.device)
         self.batch_range_ = self.batch_range[:, None]
         self.step_range_ = self.step_range[None,:]
         self.ctx_range_ = self.ctx_range[None,:]
