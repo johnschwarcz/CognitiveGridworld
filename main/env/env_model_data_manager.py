@@ -46,18 +46,26 @@ class Env_model_data_manager(Env_control_manager):
             self.test_SII_score[self.test_e] = reg.score(X, Y)
             self.test_SII_coef[self.test_e] = reg.coef_[0][0]
 
-            # Get total dimensionality of LSTM input and output 
-            update_pca = PCA(n_components = self.hid_dim).fit(self.model_update_flat.reshape(-1, self.hid_dim))
-            input_pca = PCA(n_components = self.hid_dim).fit(self.model_input_flat.reshape(-1, self.hid_dim))
-            self.test_model_update_dim[self.test_e] = update_pca.explained_variance_
-            self.test_model_input_dim[self.test_e] = input_pca.explained_variance_
-
+            try:
+                # Get total dimensionality of LSTM input and output 
+                update_pca = PCA(n_components = self.hid_dim).fit(self.model_update_flat.reshape(-1, self.hid_dim))
+                input_pca = PCA(n_components = self.hid_dim).fit(self.model_input_flat.reshape(-1, self.hid_dim))
+                self.test_model_update_dim[self.test_e] = update_pca.explained_variance_
+                self.test_model_input_dim[self.test_e] = input_pca.explained_variance_
+            except:
+                self.test_model_update_dim[self.test_e] = np.nan
+                self.test_model_input_dim[self.test_e] = np.nan
+            
             # Get per step dimensionality of LSTM input and output 
             for t in self.step_range:
-                update_pca = PCA(n_components = self.hid_dim).fit(self.model_update_flat[:, t])
-                input_pca = PCA(n_components = self.hid_dim).fit(self.model_input_flat[:, t])
-                self.test_model_update_dim_per_step[self.test_e, :, t] = update_pca.explained_variance_
-                self.test_model_input_dim_per_step[self.test_e, :, t] = input_pca.explained_variance_
+                try:
+                    update_pca = PCA(n_components = self.hid_dim).fit(self.model_update_flat[:, t])
+                    input_pca = PCA(n_components = self.hid_dim).fit(self.model_input_flat[:, t])
+                    self.test_model_update_dim_per_step[self.test_e, :, t] = update_pca.explained_variance_
+                    self.test_model_input_dim_per_step[self.test_e, :, t] = input_pca.explained_variance_
+                except:
+                    self.test_model_update_dim_per_step[self.test_e, :, t] = np.nan
+                    self.test_model_input_dim_per_step[self.test_e, :, t] = np.nan
 
     def save(self):
         save_path = self.DATA_path + self.save_env + "_net.pth"

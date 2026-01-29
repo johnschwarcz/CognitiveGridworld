@@ -16,18 +16,14 @@ class Env_model_manager(Env_model_data_manager):
     def episode_loop(self):
         for self.e in tqdm(range(self.episodes)):   
             self.log_ind = self.e % self.checkpoint_every
-            # self.test_set = (self.log_ind < self.test_eps) or (self.training == False)
             self.test_set = (self.log_ind == 0) or (self.training == False)
-
             if (self.e == self.episodes - 1) or (self.log_ind == 0):
                 if self.show_plots * (self.e > 1) * (self.test_e % self.plot_every == 0):
                    self.plot_model_perf()
                 self.preprocess_env()
-
             self.run_generators()
             if self.test_set or self.mode == "SANITY":
                 self.run_inference() 
-
             self.prep_model()
             self.forward_backward()
             self.log_model()
