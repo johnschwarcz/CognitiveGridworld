@@ -7,13 +7,12 @@ class Env_model_data_manager(Env_control_manager):
 
     def prep_data_manager(self):
         self.test_e = 0
-
-        self.test_model_update_dim, self.test_model_input_dim = [np.zeros((self.episodes, self.hid_dim)) for _ in range(2)]
-        self.test_model_update_dim_per_step, self.test_model_input_dim_per_step = [np.zeros((self.episodes, self.hid_dim, self.step_num)) for _ in range(2)]
+        test_episodes = 2 + self.episodes // self.checkpoint_every
+        self.test_model_update_dim, self.test_model_input_dim = [np.zeros((test_episodes, self.hid_dim)) for _ in range(2)]
         self.classifier_loss_log, self.generator_loss_log, self.test_SII_score, self.test_SII_coef, self.readin_grad_log, self.readout_grad_log, \
-                                                                                                       = [np.zeros(self.episodes) for _ in range(6)]
+                                                                                                       = [np.zeros(test_episodes) for _ in range(6)]
         self.test_net_joint_DKL, self.test_net_naive_DKL, self.test_accs, self.train_accs, self.test_TPs, self.train_TPs, self.test_mses, self.train_mses \
-                                                                                            = [np.zeros((self.episodes, self.step_num)) for _ in range(8)]
+                                                                                            = [np.zeros((test_episodes, self.step_num)) for _ in range(8)]
 
     def log_model(self):
         if self.test_set:
@@ -36,36 +35,24 @@ class Env_model_data_manager(Env_control_manager):
     def perform_sanity_training_analyses(self):
             self.test_net_joint_DKL[self.test_e, :] = self.DKL(self.model_goal_belief, self.joint_goal_belief)
             self.test_net_naive_DKL[self.test_e, :] = self.DKL(self.model_goal_belief, self.naive_goal_belief)
-
-            # Get SII prediction of accuracy
-            SII = self.DKL(self.joint_goal_belief, self.naive_goal_belief, avg_over_batch=False, sym = True)
-            X = SII[:, -1].reshape(-1, 1)
+            X = self.SII[:, -1].reshape(-1, 1)            
             Y = self.model_acc[:, -1]
 
             reg = LogisticRegression().fit(X, Y) # predict final step acc from final step SII
             self.test_SII_score[self.test_e] = reg.score(X, Y)
             self.test_SII_coef[self.test_e] = reg.coef_[0][0]
 
-            try:
-                # Get total dimensionality of LSTM input and output 
-                update_pca = PCA(n_components = self.hid_dim).fit(self.model_update_flat.reshape(-1, self.hid_dim))
-                input_pca = PCA(n_components = self.hid_dim).fit(self.model_input_flat.reshape(-1, self.hid_dim))
-                self.test_model_update_dim[self.test_e] = update_pca.explained_variance_
-                self.test_model_input_dim[self.test_e] = input_pca.explained_variance_
-            except:
-                self.test_model_update_dim[self.test_e] = np.nan
-                self.test_model_input_dim[self.test_e] = np.nan
-            
-            # Get per step dimensionality of LSTM input and output 
-            for t in self.step_range:
+            if self.hid_dim < 2000:
                 try:
-                    update_pca = PCA(n_components = self.hid_dim).fit(self.model_update_flat[:, t])
-                    input_pca = PCA(n_components = self.hid_dim).fit(self.model_input_flat[:, t])
-                    self.test_model_update_dim_per_step[self.test_e, :, t] = update_pca.explained_variance_
-                    self.test_model_input_dim_per_step[self.test_e, :, t] = input_pca.explained_variance_
+                    # Get total dimensionality of LSTM input and output 
+                    update_pca = PCA(n_components = self.hid_dim).fit(self.model_update_flat.reshape(-1, self.hid_dim))
+                    input_pca = PCA(n_components = self.hid_dim).fit(self.model_input_flat.reshape(-1, self.hid_dim))
+                    self.test_model_update_dim[self.test_e] = update_pca.explained_variance_
+                    self.test_model_input_dim[self.test_e] = input_pca.explained_variance_
                 except:
-                    self.test_model_update_dim_per_step[self.test_e, :, t] = np.nan
-                    self.test_model_input_dim_per_step[self.test_e, :, t] = np.nan
+                    self.test_model_update_dim[self.test_e] = np.nan
+                    self.test_model_input_dim[self.test_e] = np.nan
+
 
     def save(self):
         save_path = self.DATA_path + self.save_env + "_net.pth"
@@ -74,8 +61,6 @@ class Env_model_data_manager(Env_control_manager):
                 "readout_grad_log_through_training": self.readout_grad_log[:self.test_e],
                 "test_model_input_dim_through_training": self.test_model_input_dim[:self.test_e], 
                 "test_model_update_dim_through_training": self.test_model_update_dim[:self.test_e], 
-                "test_model_update_dim_per_step_through_training": self.test_model_update_dim_per_step[:self.test_e], 
-                "test_model_input_dim_per_step_through_training": self.test_model_input_dim_per_step[:self.test_e],
                 "test_net_joint_DKL_through_training": self.test_net_joint_DKL[:self.test_e], 
                 "test_net_naive_DKL_through_training": self.test_net_naive_DKL[:self.test_e], 
                 "test_SII_score_through_training": self.test_SII_score[:self.test_e],
@@ -109,8 +94,6 @@ class Env_model_data_manager(Env_control_manager):
             self.readout_grad_log_through_training = self.skippable_load(load_dict, "readout_grad_log_through_training")
             self.test_model_input_dim_through_training = self.skippable_load(load_dict, "test_model_input_dim_through_training")
             self.test_model_update_dim_through_training = self.skippable_load(load_dict, "test_model_update_dim_through_training")
-            self.test_model_input_dim_per_step_through_training = self.skippable_load(load_dict, "test_model_input_dim_per_step_through_training")
-            self.test_model_update_dim_per_step_through_training = self.skippable_load(load_dict, "test_model_update_dim_per_step_through_training")
             self.test_SII_coef_through_training = self.skippable_load(load_dict, "test_SII_coef_through_training")
             self.test_SII_score_through_training = self.skippable_load(load_dict, "test_SII_score_through_training")
             self.test_net_joint_DKL_through_training = self.skippable_load(load_dict, "test_net_joint_DKL_through_training")

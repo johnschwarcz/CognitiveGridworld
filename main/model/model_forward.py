@@ -34,20 +34,39 @@ class Model_forward(Model_backward):
         self.Z_count += 1 
 
     def default_classification(self):
-        inp = self.forward_readin()
-        if self.testing:
-            self.input_flat = inp.detach()        
+        if self.mode == "FF":
+            self.FF_classification()
+        else:
+            self.RNN_classification()
 
+    def FF_classification(self):
+        Z = self.active_Z.detach()
+        Z = Z.reshape(self.batch_num, 1, -1)
+        O = self.obs_flat.mean(1, keepdims = True)
+        inp = torch.cat((O, Z), dim = -1)
+        inp = torch.relu(self.classifier_readin(inp))
+        update = self.classifier_readout(inp)
+        belief = update.expand(-1, self.step_num, -1)
+        belief = belief.reshape(self.BSCR_dims) 
+        belief = torch.softmax(belief, -1)
+        self.postprocess_belief(belief)
+    
+    def RNN_classification(self):
+        inp = self.RNN_readin()
         stm = self.STM.expand(-1, self.batch_num, -1).contiguous()
         ltm = self.LTM.expand(-1, self.batch_num, -1).contiguous()
-        update, _ = self.LSTM(inp, (stm, ltm))     
-        if self.testing:
-            self.update_flat = update.detach()        
-
-        belief = self.forward_readout(update)
+        update, _ = self.LSTM(inp, (stm, ltm))   
+        belief = self.RNN_readout(update)
         self.postprocess_belief(belief)
 
-    def forward_readin(self):
+        if self.testing and (self.mode == "SANITY"):
+            self.update_flat = update.detach()        
+            self.input_flat = inp.detach()    
+        else:
+            self.update_flat = torch.zeros(1, device = self.device)    
+            self.input_flat = torch.zeros(1, device = self.device)
+
+    def RNN_readin(self):
         Z = self.active_Z.detach()
         Z = Z.reshape(self.batch_num, 1, -1)
         Z = Z.expand(-1, self.step_num, -1)
@@ -55,7 +74,7 @@ class Model_forward(Model_backward):
         inp = torch.relu(self.classifier_readin(inp))
         return inp
 
-    def forward_readout(self, update):
+    def RNN_readout(self, update):
         update = self.classifier_readout(update)
         update = update.reshape(self.BSCR_dims)
         belief = update.cumsum(1)
@@ -67,7 +86,7 @@ class Model_forward(Model_backward):
         self.classifier_goal_belief = belief[self.batch_range, :, self.goal_ind]
         self.classifier_goal_selection = Categorical(self.classifier_goal_belief).sample()
         self.ACC = (self.classifier_goal_selection == self.goal_value[:,None]).float() 
-    
+        
     def default_pobs(self, train_controller = False):
         if self.learn_embeddings or train_controller: 
             CBF = self.classifier_belief_flat[:, -1]

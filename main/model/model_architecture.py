@@ -9,6 +9,7 @@ class Model_architecture(Model_controller):
         self.MC_init_internal_embeddings()
         self.MC_init_classifier()
         self.MC_init_generator()
+        self.scaler = torch.amp.GradScaler('cuda', enabled=self.device_type != "cpu")
         super().to(self.device)
         print("running on:", self.device)
 
@@ -17,7 +18,7 @@ class Model_architecture(Model_controller):
         self.ctx_range, self.batch_range, self.step_range, self.roll_V_range, self.realization_range, self.roll_realization_range, self.obs_range, self.all_K, self.all_Q =\
             tnp([self.ctx_range, self.batch_range, self.step_range, self.roll_V_range, self.realization_range, self.roll_realization_range, self.obs_range, self.all_K, self.all_Q], 'torch', self.device)
         (self.realization_range,self.ctx_range,self.batch_range,self.step_range,self.obs_range) = (x.long() for x in (self.realization_range,self.ctx_range,self.batch_range,self.step_range,self.obs_range))
-        self.generator_loss = self.classifier_loss = self.readin_grad = self.readout_grad = torch.zeros(1, device = self.device)
+        self.generator_loss = self.classifier_loss = self.readin_grad = self.readout_grad = self.input_flat = self.update_flat = torch.zeros(1, device = self.device)
         self.classifier_belief_flat = torch.ones(self.BSCR_dims,device = self.device)/self.realization_num
         self.batch_range_ = self.batch_range[:, None]
         self.step_range_ = self.step_range[None,:]
@@ -34,12 +35,15 @@ class Model_architecture(Model_controller):
     def default_classifier(self):
         inp_dims = (self.Z_num + 1) * self.obs_num
         self.classifier_readin = nn.Linear(inp_dims, self.hid_dim)   
-        self.LSTM = nn.LSTM(self.hid_dim, self.hid_dim, batch_first = True)  
         self.classifier_readout = nn.Linear(self.hid_dim, self.realization_num * self.ctx_num)
-        self.STM, self.LTM = [nn.Parameter(torch.randn(1, 1, self.hid_dim)) for _ in range(2)]
-        params = [self.STM, self.LTM] + list(self.classifier_readin.parameters()) + list(self.classifier_readout.parameters())
-        if not self.reservoir:
-            params += list(self.LSTM.parameters()) 
+        params = list(self.classifier_readin.parameters()) + list(self.classifier_readout.parameters())
+        if self.mode != "FF":
+            self.LSTM = nn.LSTM(self.hid_dim, self.hid_dim, batch_first = True)  
+            self.STM, self.LTM = [nn.Parameter(torch.randn(1, 1, self.hid_dim)) for _ in range(2)]
+            params = params + [self.STM, self.LTM]
+            if not self.reservoir:
+                params += list(self.LSTM.parameters()) 
+
         self.classifier_optim = optim.Adam([{'params': params,'lr': self.classifier_LR}]) 
 
     def default_generator(self):

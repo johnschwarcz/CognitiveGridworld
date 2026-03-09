@@ -5,11 +5,11 @@ class Bayes_inference(Plotters):
 
     @print_time()
     def run_inference(self):
-        self.joint_belief, self.joint_goal_belief,\
+        self.joint_px, self.joint_belief, self.joint_goal_belief,\
         self.joint_est, self.joint_acc, self.joint_TP, self.joint_mse\
             = self.forward_inference(self.joint_likelihood)
 
-        self.naive_belief,  self.naive_goal_belief,\
+        self.naive_px, self.naive_belief,  self.naive_goal_belief,\
         self.naive_est, self.naive_acc, self.naive_TP, self.naive_mse\
             = self.forward_inference(self.naive_likelihood, naive = True)
 
@@ -29,12 +29,12 @@ class Bayes_inference(Plotters):
 
             dist_flat[:, t] = p / self.avg_until(p, override = "sum", stop_shape = 2 if naive else 1)    
 
-        return self.postprocess_belief(dist_flat, naive)
+        return self.postprocess_belief(p_x, dist_flat, naive)
 
-    def postprocess_belief(self, dist_flat, naive):                            # Functions in inference_helpers
+    def postprocess_belief(self, p_x, dist_flat, naive):                            # Functions in inference_helpers
         belief = dist_flat if naive else self.marginalize(dist_flat)
         est, goal_belief, acc, TP, mse = self.get_goal_performance(belief)      
-        return belief, goal_belief, est, acc, TP, mse
+        return p_x, belief, goal_belief, est, acc, TP, mse
      
     def marginalize(self, p_x__s):
         marginalized = np.zeros(self.BSCR_dims)                         
@@ -43,6 +43,7 @@ class Bayes_inference(Plotters):
         return marginalized                                                    # Dims: batch, time, ctx, realizations        
 
     def get_goal_performance(self, belief):
+
         R = self.realization_range[None, None, None,:]
         I = self.goal_ind[:,None,None]
         V = self.goal_value[:,None]
@@ -58,6 +59,7 @@ class Bayes_inference(Plotters):
         return est, GB, acc, TP, mse
 
     def log_outcomes(self):
+        self.SII = self.DKL(self.joint_goal_belief, self.naive_goal_belief, avg_over_batch=False, sym = True)
         self.agent_beliefs = [self.joint_belief, self.naive_belief]
         self.mse_diff = self.joint_mse - self.naive_mse
         self.agent_ests = [self.joint_est, self.naive_est]

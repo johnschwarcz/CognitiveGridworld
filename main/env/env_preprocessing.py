@@ -6,6 +6,7 @@ class Env_preprocessing(Env_generators):
     def preprocess_env(self):
         self.pre_ctx_dims = 2 
         self.test_set = True # default true 
+        self.skip_inference = self.mode == "RL" # skip inference during training that does not use Bayesian beliefs
 
         self.V_num = 1 + 2 * self.realization_num # enables probabilities to go 'out of bounds' of the likelihood during roll
         self.Z_num = max(1, self.ctx_num * (self.ctx_num-1))

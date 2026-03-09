@@ -8,6 +8,8 @@ class Model_backward(Model_Customization):
             self.RL_loss()  
         if self.mode == "SANITY":        
             self.SANITY_loss()
+        if self.mode == "FF":
+            self.FF_loss()
         if self.learn_embeddings:
             self.SSL_loss()
             self.update(self.generator_loss, self.generator_optim)  
@@ -18,10 +20,11 @@ class Model_backward(Model_Customization):
     def update(self, loss, optim, collect_grad = None):
         optim.zero_grad()
         torch.cuda.empty_cache()
-        loss.backward()
+        self.scaler.scale(loss).backward()  # Scale loss to prevent underflow
         if collect_grad is not None:
             collect_grad()
-        optim.step()
+        self.scaler.step(optim)
+        self.scaler.update()  
 
     def classifier_gradients(self):
         if self.mode == "SANITY" :
@@ -31,6 +34,13 @@ class Model_backward(Model_Customization):
     ########################################################################################################
     """ default loss functions """ 
     ########################################################################################################
+    
+    def FF_loss(self, eps = 1e-8):
+        P = self.joint_goal_belief[:, -1]
+        Q = self.classifier_goal_belief[:, -1]
+        DKL = self.DKL_sym(Q, P, PM=False)
+        DKL = (DKL - DKL.detach().min() + eps)**0.5
+        self.classifier_loss = DKL.mean()
 
     def SANITY_loss(self, eps = 1e-8):
         P = self.joint_goal_belief

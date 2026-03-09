@@ -19,6 +19,7 @@ class CognitiveGridworld(Env_model_manager):
         gpu_available = torch.cuda.is_available()
         self.device_type = gpu if gpu_available else "cpu"
         self.device = torch.device(self.device_type)
+        
         project_root = os.path.dirname(os.path.abspath(__file__))
         self.DATA_path = os.path.join(project_root, 'DATA/')
     
@@ -28,7 +29,7 @@ class CognitiveGridworld(Env_model_manager):
         self.show_plots = init.get('show_plots', True)
         self.load_warnings = init.get('load_warnings', False)
         self.checkpoint_every = init.get('checkpoint_every', 500)
-        self.plot_every = init.get('plot_every', 5)
+        self.plot_every = init.get('plot_every', 2)
         self.test_states = init.get('test_states', self.state_num // 10)
 
         self.likelihood_temp = init.get('likelihood_temp', 2)
