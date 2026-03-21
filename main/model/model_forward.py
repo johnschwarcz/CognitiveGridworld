@@ -87,15 +87,15 @@ class Model_forward(Model_backward):
         self.classifier_goal_selection = Categorical(self.classifier_goal_belief).sample()
         self.ACC = (self.classifier_goal_selection == self.goal_value[:,None]).float() 
         
-    def default_pobs(self, train_controller = False):
-        if self.learn_embeddings or train_controller: 
+    def default_pobs(self, training_controller = False):
+        if self.learn_embeddings or training_controller: 
             CBF = self.classifier_belief_flat[:, -1]
             sample = CBF.reshape(self.batch_num, -1)
             sample = torch.distributions.Categorical(probs = sample).sample()
             sample = torch.stack(torch.unravel_index(sample, self.ctx_dims),1)
             sample[self.batch_range, self.goal_ind] = self.classifier_goal_selection[:, -1]
 
-            if train_controller:
+            if training_controller:
                 conf = torch.ones(*self.batch_ctx_dims, device = self.device)
                 sample = self.controller_actions
             else:

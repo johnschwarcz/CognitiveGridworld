@@ -235,14 +235,14 @@ if __name__ == "__main__":
     load = False
     save = False
 
-    reps = 10
+    reps = 20 # 10
     obs_num = 5
     step_num = 30
     hid_dim = 1000
     state_num = 500
-    batch_num = 50 if load else 8000
+    batch_num = 50 if load else 2000 # 8000
     realization_num = 10
-    controller_LR = .0005
+    controller_LR = .0001 # .0005
     eps = 2 if load else 10000
 
     joint, naive, online_net, offline_net = [ CognitiveGridworld(**{'mode': "RL", 'cuda': cuda, 'load_env': 'RL', 'show_plots': False,
@@ -250,39 +250,44 @@ if __name__ == "__main__":
         'hid_dim': hid_dim,  'obs_num': obs_num, 'state_num': state_num, 'step_num': step_num,
         'controller_LR': controller_LR, 'learn_embeddings': True}) for _ in range(4)]
 
-    online_net.train_controller(eps = eps, reps = reps)
     offline_net.train_controller(eps = eps, reps = reps, offline_teacher = 'generator')
-    joint.train_controller(eps = eps, reps = reps, offline_teacher = 'joint')
-    naive.train_controller(eps = eps, reps = reps, offline_teacher = 'naive')
-
     if save:
-        with open(os.path.join("main//DATA", "online_net.pkl"), 'wb') as f:
-            pickle.dump(online_net.controller_training_logs, f)
-        with open(os.path.join("main//DATA", "offline_net.pkl"), 'wb') as f:
+        with open(os.path.join("main//DATA//controller", "offline_net.pkl"), 'wb') as f:
             pickle.dump(offline_net.controller_training_logs, f)
-        with open(os.path.join("main//DATA", "joint.pkl"), 'wb') as f:
+            
+    online_net.train_controller(eps = eps, reps = reps)
+    if save:
+        with open(os.path.join("main//DATA//controller", "online_net.pkl"), 'wb') as f:
+            pickle.dump(online_net.controller_training_logs, f)
+
+    joint.train_controller(eps = eps, reps = reps, offline_teacher = 'joint')
+    if save:
+        with open(os.path.join("main//DATA//controller", "joint.pkl"), 'wb') as f:
             pickle.dump(joint.controller_training_logs, f)
-        with open(os.path.join("main//DATA", "naive.pkl"), 'wb') as f:
+
+    naive.train_controller(eps = eps, reps = reps, offline_teacher = 'naive')
+    if save:
+        with open(os.path.join("main//DATA//controller", "naive.pkl"), 'wb') as f:
             pickle.dump(naive.controller_training_logs, f)
 
     if load:
-        with open(os.path.join("main//DATA", "online_net.pkl"), 'rb') as f:
+        with open(os.path.join("main//DATA//controller", "online_net.pkl"), 'rb') as f:
             online_net.controller_training_logs = pickle.load(f)
-        with open(os.path.join("main//DATA", "offline_net.pkl"), 'rb') as f:
+        with open(os.path.join("main//DATA//controller", "offline_net.pkl"), 'rb') as f:
             offline_net.controller_training_logs = pickle.load(f)
-        with open(os.path.join("main//DATA", "joint.pkl"), 'rb') as f:
+        with open(os.path.join("main//DATA//controller", "joint.pkl"), 'rb') as f:
             joint.controller_training_logs = pickle.load(f)
-        with open(os.path.join("main//DATA", "naive.pkl"), 'rb') as f:
+        with open(os.path.join("main//DATA//controller", "naive.pkl"), 'rb') as f:
             naive.controller_training_logs = pickle.load(f)
         print("Done loading.")
               
 
 
-    plot_controllers_and_trajectories(
-        naive, joint, online_net, offline_net, reps, title=0, batches=(8, 5, 7),
-        alpha=.0005, power=.3, width_ratios=(.8,1), traj_wspace=0.0, figsize=(16, 4.5),
-        bar_title="Controller Learning Curves", traj_title="Example Offline Learning Trajectories w/Generator",
-        cbar_label_pad=-10, cbar_tick_pad=2.4, bar_title_pad=8, traj_title_pad=8,
-        show_full_curves=True, full_curve_alpha=1, full_curve_lw=1,
-        full_curve_fill=True, full_curve_fill_alpha=0.12,
-        match_traj_height_to_bar=True, traj_height_scale=0.96)
+        plot_controllers_and_trajectories(
+            naive, joint, online_net, offline_net, reps, title=0, batches=(8, 5, 7),
+            alpha=.0005, power=.3, width_ratios=(.8,1), traj_wspace=0.0, figsize=(16, 4.5),
+            bar_title="Controller Learning Curves", traj_title="Example Offline Learning Trajectories w/Generator",
+            cbar_label_pad=-10, cbar_tick_pad=2.4, bar_title_pad=8, traj_title_pad=8,
+            show_full_curves=True, full_curve_alpha=1, full_curve_lw=1,
+            full_curve_fill=True, full_curve_fill_alpha=0.12,
+            match_traj_height_to_bar=True, traj_height_scale=0.96)

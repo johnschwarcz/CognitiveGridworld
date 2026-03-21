@@ -10,6 +10,8 @@ class Env_control_manager(Env_preprocessing):
         self.test_set = True
 
         self.controller_training_logs = {
+            'preferences': np.zeros((self.reps, self.obs_num)),
+            'likelihoods': np.zeros((self.reps, self.obs_num, *self.ctx_dims)),
             'reward': np.zeros((self.reps, self.controller_training_episodes)),
             'example_policy': np.zeros((self.reps, self.controller_training_episodes, *self.ctx_dims)),
             'prefence_landscape': np.zeros((self.reps, *self.ctx_dims)), 'optimality': np.zeros(self.reps)}
@@ -18,6 +20,7 @@ class Env_control_manager(Env_preprocessing):
             self.EC_gen_context()
             self.EC_gen_likelihoods()
             self.get_opt_preference()
+            self.log_controller_rep()
             self.init_controller()
             self.controller_loop()
 
@@ -25,11 +28,14 @@ class Env_control_manager(Env_preprocessing):
         self.preferences = (np.random.rand(self.obs_num) > 0.5)
         P = self.preferences.reshape(1, self.obs_num, *([1]*self.ctx_num))
         PL = P * np.log(self.joint_likelihood) + (1-P) * np.log(1-self.joint_likelihood)
-
         self.prefence_landscape = np.exp( (PL).sum(1) / self.obs_num)
+        
+    def log_controller_rep(self):
+        self.controller_training_logs['preferences'][self.rep] = self.preferences[0]
+        self.controller_training_logs['likelihoods'][self.rep] = self.joint_likelihood[0]
         self.controller_training_logs['prefence_landscape'][self.rep] = self.prefence_landscape.copy()[0]
-        peak = self.prefence_landscape.max(axis = tuple(range(-self.ctx_num, 0)), keepdims = True).mean()
-        self.controller_training_logs['optimality'][self.rep] = peak
+        self.controller_training_logs['optimality'][self.rep] = \
+            self.prefence_landscape.max(axis = tuple(range(-self.ctx_num, 0)), keepdims = True).mean()
 
     def init_controller(self):
         self.EC_gen_realizations()

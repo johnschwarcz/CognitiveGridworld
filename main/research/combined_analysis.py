@@ -622,6 +622,7 @@ def plot_boundary_shape_combined(trained):
     bix = bix.astype(np.int64) if bix is not None else np.arange(Pj_full.shape[0], dtype=np.int64)
     Pj, Pn = renorm(Pj_full[bix]), renorm(Pn_full[bix]); B, T, S, R = Pj.shape
     Tp = T if CFG["T_PLOT"] is None else int(np.clip(int(CFG["T_PLOT"]), 1, T))
+
     gBT = coerce_goal_ind(trained.goal_ind, B, T)
     ctx = npy(trained.ctx_vals)[bix]
     while ctx.ndim > 3 and ctx.shape[-1] == 1: ctx = ctx[..., 0]
@@ -898,10 +899,10 @@ def plot_re_evaluation(trained):
 # Main
 # ═══════════════════════════════════════════════════════════════════
 if __name__ == "__main__":
-    common = dict(mode="SANITY", cuda=0, episodes=1, checkpoint_every=5,
-                  realization_num=10, hid_dim=1000, obs_num=5, show_plots=False,
-                  batch_num=15000, step_num=30, state_num=500,
-                  learn_embeddings=False, classifier_LR=.001, ctx_num=2, training=False)
+    # common = dict(mode="SANITY", cuda=0, episodes=1, checkpoint_every=5,
+    #               realization_num=10, hid_dim=1000, obs_num=5, show_plots=False,
+    #               batch_num=15000, step_num=30, state_num=500,
+    #               learn_embeddings=False, classifier_LR=.001, ctx_num=2, training=False)
     # echo    = CognitiveGridworld(**{**common, 'reservoir': True,  'load_env': "/sanity/reservoir_ctx_2_e5"})
     # trained = CognitiveGridworld(**{**common, 'reservoir': False, 'load_env': "/sanity/fully_trained_ctx_2_e5"})
 

@@ -49,7 +49,7 @@ class Model_controller(Model_forward):
     def get_pred_pobs(self):
         if self.offline_teacher == "generator":
             with torch.no_grad():
-                self.default_pobs(train_controller = True)
+                self.default_pobs(training_controller = True)
                 self.O = self.pred_pobs
 
         if self.offline_teacher == "joint":
@@ -75,9 +75,16 @@ class Model_controller(Model_forward):
         CPE_loss = (CPE**2).mean()
 
         loss = PG_loss + CPE_loss - ent_loss
+        # self.controller_optim.zero_grad()
+        # loss.backward()
+        # self.controller_optim.step()
+
         self.controller_optim.zero_grad()
-        loss.backward()
-        self.controller_optim.step()
+        torch.cuda.empty_cache()
+        self.scaler.scale(loss).backward()  # Scale loss to prevent underflow
+        self.scaler.step(self.controller_optim)
+        self.scaler.update()  
+
 
     def update_environment(self):
         self.controller_forward()
