@@ -240,9 +240,9 @@ if __name__ == "__main__":
     step_num = 30
     hid_dim = 1000
     state_num = 500
-    batch_num = 50 if load else 2000 # 8000
+    batch_num = 50 if load else 8000
     realization_num = 10
-    controller_LR = .0001 # .0005
+    controller_LR = .0005 # .0001
     eps = 2 if load else 10000
 
     joint, naive, online_net, offline_net = [ CognitiveGridworld(**{'mode': "RL", 'cuda': cuda, 'load_env': 'RL', 'show_plots': False,

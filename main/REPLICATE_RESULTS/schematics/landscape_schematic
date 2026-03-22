@@ -38,10 +38,13 @@ def draw_expected_obs_column(ax, probs_one, size_lo=25.0, size_hi=125.0):
     x = np.zeros(n, np.float64)
     cols = DARK_DOT[None, :] * (1.0 - p[:, None]) + LIGHT_DOT[None, :] * p[:, None]
     sizes = size_lo + (size_hi - size_lo) * p
-    ax.scatter(x, y, s=sizes, c=cols, edgecolors='k', linewidth=.5, zorder=3)
-    ax.set_xlim(-0.72, 0.72)
-    ax.set_ylim(-0.55, n - 0.45)
-    ax.set_aspect(0.85)
+    # CHANGED: Added clip_on=False
+    ax.scatter(x, y, s=sizes, c=cols, edgecolors='k', linewidth=.5, zorder=3, clip_on=False)
+    # CHANGED: Widened the invisible boundaries to prevent any clipping on large dots
+    ax.set_xlim(-1.0, 1.0)
+    ax.set_ylim(-0.8, float(n) - 0.2)
+    # UPDATED: Changed from 0.85 to 'auto' to allow the column to stretch to fit the box height
+    ax.set_aspect('auto') 
     ax.patch.set_alpha(0.0)
     ax.axis('off')
 
@@ -52,19 +55,13 @@ def draw_expected_obs_strip(ax, probs_by_step, size_lo, size_hi, edge_lw=1.0):
     yy = np.repeat(np.arange(n - 1, -1, -1, dtype=np.float64)[None, :], T, axis=0)
     cols = DARK_DOT[None, None, :] * (1.0 - p[..., None]) + LIGHT_DOT[None, None, :] * p[..., None]
     sizes = size_lo + (size_hi - size_lo) * p
-    ax.scatter(xx.reshape(T * n), yy.reshape(T * n), s=sizes.reshape(T * n), c=cols.reshape(T * n, 3), edgecolors='k', linewidth=edge_lw, zorder=3)
-    ax.set_ylim(-0.55, n - 0.45)
+    # CHANGED: Added clip_on=False
+    ax.scatter(xx.reshape(T * n), yy.reshape(T * n), s=sizes.reshape(T * n), c=cols.reshape(T * n, 3), edgecolors='k', linewidth=edge_lw, zorder=3, clip_on=False)
+    # CHANGED: Widened the invisible boundaries to prevent clipping the first/last columns or top/bottom rows
+    ax.set_xlim(-0.8, float(T) - 0.2)
+    ax.set_ylim(-0.8, float(n) - 0.2)
     ax.patch.set_alpha(0.0)
     ax.axis('off')
-
-def draw_start_end_block(ax, label_fs=15):
-    ax.set_xlim(0.0, 1.0)
-    ax.set_ylim(0.0, 1.0)
-    ax.axis('off')
-    ax.plot(0.41, 0.68, marker='o', ms=10, mfc='red', mec='red', clip_on=False)
-    ax.text(0.41, 0.28, 'Start', ha='center', va='center', fontsize=label_fs)
-    ax.plot(0.82, 0.68, marker='*', ms=15, mfc='lime', mec='k', clip_on=False)
-    ax.text(0.82, 0.28, 'End', ha='center', va='center', fontsize=label_fs)
 
 def draw_generated_obs_block(
     fig,
@@ -73,16 +70,20 @@ def draw_generated_obs_block(
     cmap_traj,
     strip_size_lo=25.0,
     strip_size_hi=100.0,
-    strip_y=0.48,
-    strip_h=0.36,
+    strip_y=0.35,  
+    strip_h=0.55,  
     strip_xpad=None,
     cbar_y=0.14,
     cbar_h=0.09,
-    cbar_xpad=0.12,
+    cbar_xpad=0.15,
     title_fs=16,
     label_fs=14,
 ):
     ax_anchor.axis('off')
+    # Lock the axes to 0.0 - 1.0 so the fraction math works perfectly
+    ax_anchor.set_xlim(0.0, 1.0)
+    ax_anchor.set_ylim(0.0, 1.0)
+    
     if strip_xpad is None:
         strip_xpad = cbar_xpad
     strip_w = 1.0 - 2.0 * strip_xpad
@@ -99,6 +100,20 @@ def draw_generated_obs_block(
     cbar.set_label('Controller Training', labelpad=6, fontsize=label_fs)
     cbar.set_ticks(())
     cbar.ax.tick_params(pad=2, labelsize=12)
+
+    # --- Start and End scatter/labels ---
+    cy = cbar_y + cbar_h / 2.0
+    
+    # Start: Placed on the left of the cbar
+    start_x = cbar_xpad * 0.4
+    ax_anchor.plot(start_x, cy, marker='o', ms=10, mfc='red', mec='red', clip_on=False)
+    ax_anchor.text(start_x, cbar_y - 0.02, 'Start', ha='center', va='top', fontsize=label_fs)
+    
+    # End: Placed on the right of the cbar
+    end_x = 1.0 - cbar_xpad * 0.4
+    ax_anchor.plot(end_x, cy, marker='*', ms=15, mfc='lime', mec='k', clip_on=False)
+    ax_anchor.text(end_x, cbar_y - 0.02, 'End', ha='center', va='top', fontsize=label_fs)
+
 
 def get_obs_steps(num_steps, obs_every):
     step = max(1, int(obs_every))
@@ -181,18 +196,29 @@ def plot_controller_training_panel(ax, naive_agent, joint_agent, online_net, off
     if ax_leg is not None:
         h, lab = ax.get_legend_handles_labels()
         ax_leg.axis('off')
-        ax_leg.legend(tuple(h), tuple(lab), loc='center', ncol=4, frameon=False, fontsize=14)
+        ax_leg.legend(tuple(h), tuple(lab), loc='center', ncol=2, frameon=False, fontsize=14)
     else:
-        ax.legend(loc='lower left', ncol=1, frameon=False, fontsize=15)
+        ax.legend(loc='lower left', ncol=2, frameon=False, fontsize=15)
         
     ax.set_title("Controller Learning Curves", fontsize=18, pad=15)
+
 
 def plot_landscape_generation(
     offline_net,    rep,    target_prefs=None,
     obs_every=3,    obs_where="below",
     naive_agent=None,    joint_agent=None,    online_net=None,
     train_bar_block_width=1200.0,
-    batches=(8, 5, 7, 2), alpha_traj=0.0005, power_traj=0.3
+    batches=(8, 5, 7, 2), alpha_traj=0.0005, power_traj=0.3,
+    
+    # =========================================================================
+    # LAYOUT CONTROLS 
+    # =========================================================================
+    figsize=(25.0, 8.0), 
+    main_width_ratios=(0.18, 0.85, 1.1, 0.05, 1.2), 
+    main_wspace=0.15,
+    train_leg_height_ratio=0.10, 
+    traj_grid_wspace=0.1,       
+    traj_grid_hspace=0.1        
 ):
     JL_full = np.squeeze(offline_net.joint_likelihood)
     JL = JL_full[rep] if JL_full.ndim > 3 else JL_full
@@ -218,28 +244,24 @@ def plot_landscape_generation(
         pref_landscape *= preferred_likelihood
     pref_landscape = np.power(pref_landscape, 1.0 / obs_num)
 
-    fig = plt.figure(figsize=(24.0, 8.0), constrained_layout=False)
+    fig = plt.figure(figsize=figsize, constrained_layout=False)
     
-    # Switched to a 4-column layout: Col 2 acts as the horizontal spacer.
-    # Col 0 (Landscape) is significantly tightened to perfectly fit the 1:1 image.
+    # --- MAIN GRID ---
     gs_main = fig.add_gridspec(
-        2, 4, left=0.03, right=0.98, top=0.94, bottom=0.10,
-        width_ratios=(1.15, 1., 0.15, 1),  height_ratios=(0.06, 1.0),
-        wspace=0.04, hspace=0.08 )
+        2, 5, left=0.02, right=0.98, top=0.92, bottom=0.12,
+        width_ratios=main_width_ratios,  height_ratios=(0.04, 1.0),
+        wspace=main_wspace, hspace=0.08 )
 
-    gs_mid = gs_main[1, 0].subgridspec(
-        2, 2,
-        height_ratios=(2.5, 0.95),
-        width_ratios=(0.34, 1.00),
-        wspace=0.0,
-        hspace=0.18
-    )
+    # --- LIKELIHOODS (Col 0) ---
+    ax_pref_bg = fig.add_subplot(gs_main[1, 0])
+    ax_pref_bg.axis('off')
+    ax_pref_bg.set_title("Target\nPreferences", fontsize=18, pad=15)
 
-    gs_pref = gs_mid[0, 0].subgridspec(
+    gs_pref = gs_main[1, 0].subgridspec(
         obs_num, 3,
         width_ratios=(0.60, 1.0, 1.0),
-        hspace=0.12,
-        wspace=0.0
+        hspace=0.45, 
+        wspace=0.1
     )
 
     for i in range(obs_num):
@@ -247,8 +269,11 @@ def plot_landscape_generation(
         ax_p0 = fig.add_subplot(gs_pref[i, 1])
         ax_p1 = fig.add_subplot(gs_pref[i, 2])
 
-        ax_dot.scatter((0.0,), (0.0,), s=(1000.0,) if opt_obs[i] else (500.0,), c=('#4BC4D6',) if opt_obs[i] else ('#1E464E',), edgecolors='none', zorder=3)
-        ax_dot.set(xlim=(-1, 1), ylim=(-0.8, 0.8))
+        ax_dot.scatter((0.0,), (0.0,), s=(400.0,) if opt_obs[i] else (150.0,), 
+                       c=('#4BC4D6',) if opt_obs[i] else ('#1E464E',), 
+                       edgecolors='none', zorder=3, clip_on=False)
+        
+        ax_dot.set(xlim=(-1.2, 1.2), ylim=(-1.2, 1.2))
         ax_dot.axis('off')
 
         if opt_obs[i] == 1:
@@ -257,32 +282,40 @@ def plot_landscape_generation(
             ax_p1.set_xticks(())
             ax_p1.set_yticks(())
             for spine in ax_p1.spines.values():
-                spine.set_linewidth(0)
+                spine.set_linewidth(1.5)
         else:
             alpha_p0, alpha_p1 = 1.0, 0.18
+            ax_p1.axis('off')
             ax_p0.set_xticks(())
             ax_p0.set_yticks(())
             for spine in ax_p0.spines.values():
-                spine.set_linewidth(0)
-            ax_p1.axis('off')
+                spine.set_linewidth(1.5)
 
         ax_p0.imshow(1.0 - JL[i], cmap='viridis', origin='upper', extent=(0, W, H, 0), alpha=alpha_p0)
         ax_p1.imshow(JL[i], cmap='viridis', origin='upper', extent=(0, W, H, 0), alpha=alpha_p1)
 
-    ax_land = fig.add_subplot(gs_mid[0, 1])
-    ax_pref_markers = fig.add_subplot(gs_mid[1, 0])
-    ax_gen_block = fig.add_subplot(gs_mid[1, 1])
+    # --- LANDSCAPE & OBS AREA (Col 1) ---
+    gs_mid = gs_main[1, 1].subgridspec(
+        2, 1,
+        height_ratios=(2.5, 0.95),
+        hspace=0.15
+    )
+
+    ax_land = fig.add_subplot(gs_mid[0, 0])
+    ax_gen_block = fig.add_subplot(gs_mid[1, 0])
 
     ax_land.imshow(pref_landscape, cmap='magma', origin='upper', extent=(0, W, H, 0))
     ax_land.set_xticks(())
     ax_land.set_yticks(())
-    ax_land.set_aspect('equal', adjustable='box', anchor='N')
+    
+    ax_land.set_aspect('equal', adjustable='box', anchor='W')
+    
     for spine in ax_land.spines.values():
         spine.set_linewidth(3.5)
 
     start_r, start_c = np.unravel_index(np.argmin(pref_landscape), pref_landscape.shape)
     end_r, end_c = np.unravel_index(np.argmax(pref_landscape), pref_landscape.shape)
-    num_steps = 20
+    num_steps = 15
     rr_traj, cc_traj = make_trajectory(start_r, start_c, end_r, end_c, num_steps)
     rr_traj += 0.5
     cc_traj += 0.5
@@ -305,7 +338,8 @@ def plot_landscape_generation(
 
     steps = get_obs_steps(num_steps, obs_every)
     box_w = 0.055
-    box_h = 0.165
+    # UPDATED: Increased box_h from 0.165 to 0.25 to make the observation columns taller
+    box_h = 0.25 
     gap = 0.022
 
     traj_pts = np.empty((num_steps, 2), np.float64)
@@ -345,10 +379,7 @@ def plot_landscape_generation(
     r_idx = np.clip(np.round(rr_traj).astype(np.int64), 0, H - 1)
     c_idx = np.clip(np.round(cc_traj).astype(np.int64), 0, W - 1)
     obs_probs_full = JL[:, r_idx, c_idx].T
-
-    draw_start_end_block(ax_pref_markers, label_fs=16)
     
-    # We set xpad=0.0 to allow ax_gen_block bounds mapping below
     draw_generated_obs_block(
         fig,
         ax_gen_block,
@@ -356,23 +387,22 @@ def plot_landscape_generation(
         cmap_traj,
         strip_size_lo=25.0,
         strip_size_hi=100.0,
-        strip_y=0.48,
-        strip_h=0.34,
+        strip_y=0.35,  
+        strip_h=0.55,  
         strip_xpad=0.0,
         cbar_y=0.14,
         cbar_h=0.09,
-        cbar_xpad=0.0,
+        cbar_xpad=0.15,
         title_fs=16,
-        label_fs=14)
+        label_fs=16)
 
-    # Force the Generated Obs block to match Landscape bounding box explicitly
     fig.canvas.draw()
     pos_land = ax_land.get_position()
     pos_gen = ax_gen_block.get_position()
     ax_gen_block.set_position([pos_land.x0, pos_gen.y0, pos_land.width, pos_gen.height])
 
-    # Creating a subgridspec to hold the training plot and its new horizontal legend
-    gs_train = gs_main[1, 1].subgridspec(2, 1, height_ratios=(1.0, 0.12), hspace=0.15)
+    # --- TRAINING CURVE AREA (Col 2) ---
+    gs_train = gs_main[1, 2].subgridspec(2, 1, height_ratios=(1.0, train_leg_height_ratio), hspace=0.2)
     ax_train = fig.add_subplot(gs_train[0, 0])
     ax_train_leg = fig.add_subplot(gs_train[1, 0])
 
@@ -383,16 +413,15 @@ def plot_landscape_generation(
         ax_train_leg.axis('off')
         ax_train.text(0.5, 0.5, "Controller panel needs\nnaive, joint, online,\nand offline agents.", ha='center', va='center', fontsize=15)
 
+    # --- OFFLINE TRAJECTORIES AREA (Col 4) ---
     if batches is not None and len(batches) > 0:
         n_traj = len(batches)
         cols = 2
         rows = int(np.ceil(n_traj / cols))
         
-        # 2x2 Grid setup mapped to Col 3
-        gs_traj = gs_main[1, 3].subgridspec(rows, cols, wspace=0.06, hspace=0.08)
+        gs_traj = gs_main[1, 4].subgridspec(rows, cols, wspace=traj_grid_wspace, hspace=traj_grid_hspace)
         
-        # Super-Title for the grid 
-        ax_title = fig.add_subplot(gs_main[1, 3])
+        ax_title = fig.add_subplot(gs_main[1, 4])
         ax_title.axis('off')
         ax_title.set_title("Example Offline Learning Trajectories w/Generator", fontsize=18, pad=15)
 
@@ -441,7 +470,6 @@ def plot_landscape_generation(
             ax.plot(cc_pol[0], rr_pol[0], 'o', ms=4, mec='red', mfc='red', mew=4, zorder=1000, alpha=.5)
             ax.plot(cc_pol[-1], rr_pol[-1], marker='*', ms=12, mec='k', mfc='lime', mew=1, zorder=1000)
 
-            # Assign labels dynamically based on location in the 2x2 grid
             if c_idx == 0: ax.set_ylabel(r"$r_c$", fontsize=15)
             if r_idx == rows - 1: ax.set_xlabel(r"$r_{c'}$", fontsize=15)
 
@@ -497,7 +525,6 @@ def plot_controllers_and_trajectories(
     ax_bar_leg = fig.add_subplot(outer[1, 0])
     ax_traj_leg = fig.add_subplot(outer[1, 1])
 
-    # width = 0.18
     width = 0.125
     colors = plt.cm.viridis(np.linspace(0, 1, 5))
     ekw = dict(capsize=3, elinewidth=1, capthick=1)
@@ -518,7 +545,7 @@ def plot_controllers_and_trajectories(
         plot_mean_fill(R_joint, colors[3])
 
     ax_bar.bar(x - 1.5 * width, m_naive, width, yerr=se_naive, label='w/ Naive Bayes', color=colors[0], error_kw=ekw, zorder=3, alpha = 0.85)
-    ax_bar.bar(x - 0.5 * width, m_on, width, yerr=se_on, label='Online', color=colors[1], error_kw=ekw, zorder=3, alpha = 0.85)
+    ax_bar.bar(x - 0.5 * width, m_on, width, yerr=se_on, label='Online RL', color=colors[1], error_kw=ekw, zorder=3, alpha = 0.85)
     ax_bar.bar(x + 0.5 * width, m_off, width, yerr=se_off, label='w/ Generator', color=colors[2], error_kw=ekw, zorder=3, alpha = 0.85)
     ax_bar.bar(x + 1.5 * width, m_joint, width, yerr=se_joint, label='w/ Joint Bayes', color=colors[3], error_kw=ekw, zorder=3, alpha = 0.85)
 
@@ -610,7 +637,6 @@ def plot_controllers_and_trajectories(
 
     fig.canvas.draw()
 
-    # Disable manual layout matching if utilizing rows, as constrained_layout naturally distributes height 
     if match_traj_height_to_bar and rows == 1:
         bp = ax_bar.get_position()
         bh = bp.height * float(traj_height_scale)
@@ -621,7 +647,6 @@ def plot_controllers_and_trajectories(
         fig.canvas.draw()
 
     if traj_title:
-        # Re-implemented super title approach to work gracefully with multi-row grids
         ax_title = fig.add_subplot(outer[0, 1])
         ax_title.axis('off')
         ax_title.set_title(traj_title, fontsize=18, pad=traj_title_pad)
@@ -632,46 +657,45 @@ def plot_controllers_and_trajectories(
 
 if __name__ == "__main__":
     
-    # cuda = 0
-    # reps = 10
-    # eps = 2
-    # env_args = {
-    #     'mode': "RL",
-    #     'cuda': cuda,
-    #     'load_env': 'RL',
-    #     'show_plots': False,
-    #     'episodes': 2,
-    #     'ctx_num': 2,
-    #     'realization_num': 10,
-    #     'batch_num': 10,
-    #     'training': False,
-    #     'hid_dim': 1000,
-    #     'obs_num': 5,
-    #     'state_num': 500,
-    #     'step_num': 30,
-    #     'learn_embeddings': True}
+    cuda = 0
+    reps = 10
+    eps = 2
+    env_args = {
+        'mode': "RL",
+        'cuda': cuda,
+        'load_env': 'RL',
+        'show_plots': False,
+        'episodes': 2,
+        'ctx_num': 2,
+        'realization_num': 10,
+        'batch_num': 10,
+        'training': False,
+        'hid_dim': 1000,
+        'obs_num': 5,
+        'state_num': 500,
+        'step_num': 30,
+        'learn_embeddings': True}
 
-    # joint, naive, online_net, offline_net = tuple(CognitiveGridworld(**env_args) for _ in range(4))
+    joint, naive, online_net, offline_net = tuple(CognitiveGridworld(**env_args) for _ in range(4))
 
-    # agents = {
-    #     'online_net': (online_net, None),
-    #     'offline_net': (offline_net, 'generator'),
-    #     'joint': (joint, 'joint'),
-    #     'naive': (naive, 'naive')}
+    agents = {
+        'online_net': (online_net, None),
+        'offline_net': (offline_net, 'generator'),
+        'joint': (joint, 'joint'),
+        'naive': (naive, 'naive')}
     
-    # for name, pair in agents.items():
-    #     agent, teacher = pair
-    #     agent.train_controller(eps=eps, reps=reps, offline_teacher=teacher)
-    #     filepath = os.path.join("main/DATA", f"{name}.pkl")
-    #     with open(filepath, 'rb') as f:
-    #         agent.controller_training_logs = pickle.load(f)
+    for name, pair in agents.items():
+        agent, teacher = pair
+        agent.train_controller(eps=eps, reps=reps, offline_teacher=teacher)
+        filepath = os.path.join("main/DATA", f"{name}.pkl")
+        with open(filepath, 'rb') as f:
+            agent.controller_training_logs = pickle.load(f)
     
-    # rep_to_plot = 3
-    # manual_prefs = np.array((1, 0, 0, 0, 1), np.int64)
+    manual_prefs = np.array((1, 0, 0, 0, 1), np.int64)
 
     plot_landscape_generation(
         offline_net,
-        rep=rep_to_plot,
+        rep=7,
         target_prefs=manual_prefs,
         obs_every=5,
         obs_where="above",
@@ -679,16 +703,14 @@ if __name__ == "__main__":
         joint_agent=joint,
         online_net=online_net,
         train_bar_block_width=2500.0,
-        batches=(8, 5, 7, 1), 
+        batches=(8, 5, 7, 9), 
         alpha_traj=0.0005, 
-        power_traj=0.3
+        power_traj=0.3,
+        
+        figsize=(25.0, 8.0), 
+        main_width_ratios=(0.18, 0.85, 1.1, 0.0, 1), 
+        main_wspace=0.15,
+        train_leg_height_ratio=0.1,
+        traj_grid_wspace=0.1,
+        traj_grid_hspace=0.1
     )
-    
-    plot_controllers_and_trajectories(
-        naive, joint, online_net, offline_net, reps, title=0, batches=(8, 5, 7, 2),
-        alpha=.0005, power=.3, width_ratios=(.8,1), traj_wspace=0.0, figsize=(16, 4.5),
-        bar_title="Controller Learning Curves", traj_title="Example Offline Learning Trajectories w/Generator",
-        cbar_label_pad=-10, cbar_tick_pad=2.4, bar_title_pad=8, traj_title_pad=8,
-        show_full_curves=True, full_curve_alpha=1, full_curve_lw=1,
-        full_curve_fill=True, full_curve_fill_alpha=0.12,
-        match_traj_height_to_bar=True, traj_height_scale=0.96)
