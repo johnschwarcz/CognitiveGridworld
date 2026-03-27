@@ -52,7 +52,7 @@ class Model_architecture(Model_controller):
             self.Z_to_pobs = nn.Linear(self.Z_num , self.hid_dim)            
             self.sample_to_emb = nn.Embedding(self.realization_num, self.hid_dim)
             self.sample_to_hid = nn.Linear(self.hid_dim * self.ctx_num, self.hid_dim)
-
+            self.gen_hid2hid = nn.Linear(self.hid_dim, self.hid_dim)
             self.conf_to_hid = nn.Linear(self.ctx_num, self.hid_dim)
             self.K_downscale = nn.Linear(self.hid_dim, self.KQ_dim)
             self.Q_downscale = nn.Linear(self.hid_dim, self.KQ_dim)
@@ -61,7 +61,8 @@ class Model_architecture(Model_controller):
             params = [{'params': [self.all_K, self.all_Q] +
                         list(self.Z_to_pobs.parameters()) +
                         list(self.sample_to_emb.parameters()) +          
-                        list(self.sample_to_hid.parameters()) +          
+                        list(self.sample_to_hid.parameters()) +  
+                        list(self.gen_hid2hid.parameters()) +        
                         list(self.hid_to_pobs.parameters()) +
                         list(self.K_downscale.parameters()) +
                         list(self.Q_downscale.parameters()) +     

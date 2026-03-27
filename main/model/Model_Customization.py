@@ -24,9 +24,9 @@ class Model_Customization(nn.Module):
         if not self.custom_classification():
             self.default_classification()
 
-    def MC_to_pobs(self):
+    def MC_to_pobs(self, training_controller = False):
         if not self.custom_pobs():
-            self.default_pobs()
+            self.default_pobs(training_controller = training_controller)
 
     ########################################################################################################
     def custom_internal_embeddings(self, using_custom = False):

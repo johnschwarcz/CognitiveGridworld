@@ -39,12 +39,11 @@ class Env_control_manager(Env_preprocessing):
 
     def controller_training_loop(self):
         self.init_controller()
-
         for e in range(self.controller_training_episodes):
             if self.offline_teacher is None:
                 self.EC_gen_observations()
-                O = self.obs_flat.mean(1)
-                self.ctx_vals, argmax_policy, example_policy  = self.model.forward_controller(O)
+                self.model.obs_flat = tnp(self.obs_flat, 'torch', self.device)
+                self.ctx_vals, argmax_policy, example_policy  = self.model.forward_controller()
             else:
                 _, argmax_policy, example_policy  = self.model.forward_controller()
 

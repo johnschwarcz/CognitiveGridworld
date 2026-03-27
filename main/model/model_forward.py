@@ -89,16 +89,15 @@ class Model_forward(Model_backward):
         
     def default_pobs(self, training_controller = False):
         if self.learn_embeddings or training_controller: 
-            CBF = self.classifier_belief_flat[:, -1]
-            sample = CBF.reshape(self.batch_num, -1)
-            sample = torch.distributions.Categorical(probs = sample).sample()
-            sample = torch.stack(torch.unravel_index(sample, self.ctx_dims),1)
-            sample[self.batch_range, self.goal_ind] = self.classifier_goal_selection[:, -1]
-
             if training_controller:
                 conf = torch.ones(*self.batch_ctx_dims, device = self.device)
                 sample = self.controller_actions
             else:
+                CBF = self.classifier_belief_flat[:, -1]
+                sample = CBF.reshape(self.batch_num, -1)
+                sample = torch.distributions.Categorical(probs = sample).sample()
+                sample = torch.stack(torch.unravel_index(sample, self.ctx_dims),1)
+                sample[self.batch_range, self.goal_ind] = self.classifier_goal_selection[:, -1]
                 conf = CBF[self.BR, self.CR, sample]
                 conf[self.batch_range, self.goal_ind] = self.ACC[:,-1]
  
@@ -109,5 +108,7 @@ class Model_forward(Model_backward):
             s = self.sample_to_hid(sample_emb).unsqueeze(1)
             c = self.conf_to_hid(conf).unsqueeze(1)
             z = self.Z_to_pobs(self.active_Z)
-            x = self.hid_to_pobs(torch.relu(s + c + z))
+            x = torch.relu(s + c + z)
+            x = self.gen_hid2hid(x)
+            x = self.hid_to_pobs(torch.relu(x))
             self.pred_pobs = torch.sigmoid(x).squeeze()

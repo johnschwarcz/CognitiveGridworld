@@ -32,28 +32,30 @@ class Model_controller(Model_forward):
         self.update_environment()
         return tnp(self.controller_actions, 'np')
 
-    def forward_controller(self, O = None):
-        if O is None:
-            self.get_pred_pobs()        
+    def forward_controller(self):
+        if self.offline_teacher is None: 
+            self.get_online_pobs()
         else:
-            self.O = tnp(O, 'torch', self.device)
+            self.get_offline_pobs()        
+
         self.evaluate_control()
         self.update_controller()
         self.update_environment()
         return tnp([self.controller_actions, self.argmax_vals, self.controller_policy[0]],'np')
 
-    def evaluate_control(self, eps = 1e-6):       
-        self.O = self.O.clip(eps, 1 - eps)
-        O = self.O.log() * self.preferences
-        O_ = (1 - self.O).log() * (1 - self.preferences)
-        self.intrinsic_value = ((O + O_).sum(1) / self.obs_num).exp() 
+    def get_online_pobs(self):
+        self.MC_to_interactions()
+        self.O = self.obs_flat.mean(1)
+        self.MC_to_pobs(training_controller = True)
+        self.SSL_loss(training_controller = True)
+        self.update(self.generator_loss, self.generator_optim)  
 
-    def get_pred_pobs(self):
+    def get_offline_pobs(self):
         if self.offline_teacher == "generator":
             with torch.no_grad():
-                self.default_pobs(training_controller = True)
+                self.MC_to_pobs(training_controller = True)
                 self.O = self.pred_pobs
-                
+
         if self.offline_teacher == "joint":
             O=self.obs_num
             B=self.batch_num
@@ -69,6 +71,12 @@ class Model_controller(Model_forward):
             OLLR = torch.logit(torch.take_along_dim(O, r, dim=-1)).squeeze()
             self.O = torch.sigmoid(OLLR.sum(2) - (self.ctx_num -1) * norm)
 
+    def evaluate_control(self, eps = 1e-6):       
+        self.O = self.O.clip(eps, 1 - eps)
+        O = self.O.log() * self.preferences
+        O_ = (1 - self.O).log() * (1 - self.preferences)
+        self.intrinsic_value = ((O + O_).sum(1) / self.obs_num).exp() 
+
     def update_controller(self):
         self.control_ent_bonus = self.control_ent_bonus * self.control_ent_bonus_decay 
         CPE = self.intrinsic_value - self.predicted_intrinsic_value  
@@ -76,13 +84,9 @@ class Model_controller(Model_forward):
         PG_loss = (self.control_NLL * CPE.detach()).mean()
         CPE_loss = (CPE**2).mean()
 
-        loss = PG_loss + CPE_loss - ent_loss
-        self.controller_optim.zero_grad()
-        torch.cuda.empty_cache()
-        self.scaler.scale(loss).backward() 
-        self.scaler.step(self.controller_optim)
-        self.scaler.update()  
-
+        controller_loss = PG_loss + CPE_loss - ent_loss
+        self.update(controller_loss, self.controller_optim)         
+                    
     def update_environment(self):
         self.controller_forward()
         dist = self.controller_postprocess()

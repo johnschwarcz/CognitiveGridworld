@@ -49,12 +49,15 @@ class Model_backward(Model_Customization):
         DKL = (DKL - DKL.detach().min() + eps)**0.5
         self.classifier_loss = DKL.mean()
         
-    def SSL_loss(self):
+    def SSL_loss(self, training_controller = False):
         chance = 1/self.realization_num
         last_ACC = self.ACC[:, -1, None]
         OPE = self.DKL_sym(self.pred_pobs, self.obs_flat.mean(1))
-        OPE__ACC = (last_ACC * OPE).sum() / last_ACC.sum()
-        OPE = OPE.mean() * chance + (1 - chance) * OPE__ACC
+        if training_controller:
+            OPE = OPE.mean() 
+        else:
+            OPE__ACC = (last_ACC * OPE).sum() / last_ACC.sum()
+            OPE = OPE.mean() * chance + (1 - chance) * OPE__ACC
 
         K_norm = (torch.norm(self.active_K, dim=-1)-1) ** 2
         Q_norm = (torch.norm(self.active_Q, dim=-1)-1) ** 2

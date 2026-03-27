@@ -93,10 +93,10 @@ def robust_lo_hi(v, qhi):
 def mass_level(H, mass, normalize=False):
     H = np.asarray(H, dtype=np.float64); s = H.sum()
     if s <= 0: return np.nan
-    flat = (H/s if normalize else H).ravel(); flat = flat[flat > 0]
-    if flat.size == 0: return np.nan
-    flat = np.sort(flat)[::-1]; c = np.cumsum(flat)
-    return float(flat[np.searchsorted(c, mass * c[-1], side="left")])
+    平 = (H/s if normalize else H).ravel(); 平 = 平[平 > 0]
+    if 平.size == 0: return np.nan
+    平 = np.sort(平)[::-1]; c = np.cumsum(平)
+    return float(平[np.searchsorted(c, mass * c[-1], side="left")])
 
 def project_pca(X, mode="all"):
     X = npy(X)
@@ -279,6 +279,21 @@ def full_trial_mean_matrix(x_btf):
 def prep_model(model, prm, rng):
     logit, entropy = get_logit_entropy(model); B, T = logit.shape
     sii = get_sii_bt(model, B, T)
+    
+    # ADDED: Compute re-evaluation dynamically for event alignment
+    eps = 1e-99
+    j_px_raw = getattr(model, "joint_px", None)
+    j_bel = getattr(model, "joint_belief", None)
+    if j_px_raw is not None and j_bel is not None:
+        j_px_raw = npy(j_px_raw).astype(np.float64)
+        j_px_raw = j_px_raw / np.maximum(j_px_raw.sum(axis=(-1, -2), keepdims=True), eps)
+        j_px = np.stack([j_px_raw.sum(axis=-1), j_px_raw.sum(axis=-2)], axis=2).astype(np.float64)
+        j_bel = npy(j_bel).astype(np.float64)
+        app_px = approximate_likelihood(j_bel, eps)
+        reval = compute_stepwise_dkl(j_px, app_px, eps).mean(axis=-1)
+    else:
+        reval = np.full((B, T), np.nan, np.float64)
+    
     upd, z_all, evr = pca_from_updates(model, prm["K_PCA"])
     pc_norm, cent, sp_ent, p = metrics_from_scores(z_all)
     bands, bid, bcnt = make_bands(p, evr, prm["P_BANDS"])
@@ -286,8 +301,11 @@ def prep_model(model, prm, rng):
     k_show = int(min(prm["K_SHOW_PCS"], z_all.shape[2]))
     n_show = int(min(prm["N_SHOW_NEUR"], upd.shape[2]))
     idx_n = rng.choice(upd.shape[2], n_show, replace=False) if n_show > 0 else np.zeros(0, np.int64)
-    beh = np.stack([_z(logit), _z(entropy), _z(sii)], axis=-1).astype(np.float64, copy=False)
-    return {"logit": logit, "entropy": entropy, "sii": sii,
+    
+    # UPDATED: Included reval in behavior stack
+    beh = np.stack([_z(logit), _z(entropy), _z(sii), _z(reval)], axis=-1).astype(np.float64, copy=False)
+    
+    return {"logit": logit, "entropy": entropy, "sii": sii, "reval": reval,
         "metrics_z": (_z(pc_norm).astype(np.float64), _z(cent).astype(np.float64), _z(sp_ent).astype(np.float64)),
         "bands_z": _z3(bands).astype(np.float64, copy=False), "behavior_z": beh,
         "z_show_z": _z3(z_all[:, :, :k_show]).astype(np.float64, copy=False),
@@ -316,7 +334,8 @@ def _plot_row_pair(ax_evt, ax_full, data_3d, e, c, tau, label, subtitle, cmap_na
 def plot_event_dynamics(d_tr, d_ec, prm):
     fig, ax = plt.subplots(5, 4, figsize=(20, 16), dpi=prm["FIG_DPI"])
     met_cols, met_names = ("C0", "C2", "C3"), ("pc_norm", "centralization", "spectral_entropy")
-    beh_cols, beh_names = ("C1", "C4", "C5"), ("logit", "entropy", "SII")
+    # UPDATED: Added re-evaluation line to the behavior color scheme and labels list
+    beh_cols, beh_names = ("C1", "C4", "C5", "C6"), ("logit", "entropy", "SII", "re-evaluation")
     w = int(max(1, prm["EVENT_WIN"])); tau = np.arange(-w, w + 1, dtype=np.int64)
     for mi, (d, label) in enumerate(((d_tr, "trained"), (d_ec, "echo"))):
         c_evt, c_full = 2 * mi, 2 * mi + 1; e, c = d["e_ctr"], d["c_ctr"]
@@ -337,11 +356,14 @@ def plot_event_dynamics(d_tr, d_ec, prm):
         a2, b2 = ax[2, c_evt], ax[2, c_full]
         md, sd = event_diff(d["behavior_z"], e, c, tau, matrix=True)
         mu_bh, se_bh = full_trial_mean_matrix(d["behavior_z"]); tt = np.arange(d["behavior_z"].shape[1], dtype=np.int64)
-        for k in range(3):
+        
+        # UPDATED: Loop to 4 elements now to handle re-evaluation
+        for k in range(4):
             a2.plot(tau, md[:, k], lw=2, color=beh_cols[k], label=beh_names[k] if mi == 0 else None)
             a2.fill_between(tau, md[:, k] - sd[:, k], md[:, k] + sd[:, k], color=beh_cols[k], alpha=0.12, lw=0)
             b2.plot(tt, mu_bh[:, k], lw=2, color=beh_cols[k])
             b2.fill_between(tt, mu_bh[:, k] - se_bh[:, k], mu_bh[:, k] + se_bh[:, k], color=beh_cols[k], alpha=0.12, lw=0)
+        
         for x in (a2, b2): x.axhline(0, color="k", lw=1, alpha=0.5); x.grid(alpha=0.25); _min_ylim(x, prm["MIN_YABS"])
         a2.axvline(0, color="k", ls="--", lw=1, alpha=0.5)
         a2.set_title(f"{label} | behavior | beneficial"); a2.set_xlabel("tau"); a2.set_ylabel("z")
