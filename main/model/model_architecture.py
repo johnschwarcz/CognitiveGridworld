@@ -54,8 +54,6 @@ class Model_architecture(Model_controller):
             self.sample_to_hid = nn.Linear(self.hid_dim * self.ctx_num, self.hid_dim)
 
             self.conf_to_hid = nn.Linear(self.ctx_num, self.hid_dim)
-            # self.hid_to_hid = nn.Linear(self.hid_dim, self.hid_dim)
-            # self.hid_to_hid2 = nn.Linear(self.hid_dim, self.hid_dim)
             self.K_downscale = nn.Linear(self.hid_dim, self.KQ_dim)
             self.Q_downscale = nn.Linear(self.hid_dim, self.KQ_dim)
             self.hid_to_pobs = nn.Linear(self.hid_dim, 1)
@@ -66,9 +64,7 @@ class Model_architecture(Model_controller):
                         list(self.sample_to_hid.parameters()) +          
                         list(self.hid_to_pobs.parameters()) +
                         list(self.K_downscale.parameters()) +
-                        list(self.Q_downscale.parameters()) +
-                        # list(self.hid_to_hid.parameters()) +
-                        # list(self.hid_to_hid2.parameters()) +          
+                        list(self.Q_downscale.parameters()) +     
                         list(self.conf_to_hid.parameters()), 'lr': self.generator_LR}]                
             self.generator_optim = optim.Adam(params)
 

@@ -77,29 +77,11 @@ class Model_controller(Model_forward):
         CPE_loss = (CPE**2).mean()
 
         loss = PG_loss + CPE_loss - ent_loss
-        # self.controller_optim.zero_grad()
-        # loss.backward()
-        # self.controller_optim.step()
-
         self.controller_optim.zero_grad()
         torch.cuda.empty_cache()
-        self.scaler.scale(loss).backward()  # Scale loss to prevent underflow
+        self.scaler.scale(loss).backward() 
         self.scaler.step(self.controller_optim)
         self.scaler.update()  
-
-        # SANITY CHECKING 
-        import numpy as np
-        if np.random.rand() < 0.002:
-            print( PG_loss.mean().item(), CPE_loss.mean().item(), ent_loss.mean().item())
-            print("Generator pred_pobs:", self.O.mean().item())
-            O=self.obs_num
-            B=self.batch_num
-            OR=self.obs_range[None,:].expand(B,O)
-            BR=self.batch_range[:,None].expand(B,O)
-            ix=tuple(self.controller_actions[:,i][:,None].expand(B,O) for i in range(self.ctx_num))
-            self.O = self.joint_likelihood[BR, OR, *ix].squeeze() 
-            print("joint pred_pobs:", self.O.mean().item())
-
 
     def update_environment(self):
         self.controller_forward()
@@ -108,10 +90,8 @@ class Model_controller(Model_forward):
 
     def controller_forward(self):
         z = self.active_Z.reshape(self.batch_num,-1).detach()
-
         v = torch.relu(self.critic_hid2hid(torch.relu(self.critic_readin(z))))
         self.predicted_intrinsic_value = torch.sigmoid(self.critic_readout(v)).squeeze()
-
         a = self.actor_readout(torch.relu(self.actor_hid2hid(torch.relu(self.actor_readin(z)))))
         self.controller_policy = torch.softmax(a, dim = -1).reshape(self.batch_num, *self.ctx_dims)
 

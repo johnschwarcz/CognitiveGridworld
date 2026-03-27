@@ -101,7 +101,10 @@ class Model_forward(Model_backward):
             else:
                 conf = CBF[self.BR, self.CR, sample]
                 conf[self.batch_range, self.goal_ind] = self.ACC[:,-1]
+ 
+            self.get_prediction(sample, conf)
                 
+    def get_prediction(self, sample, conf):
             sample_emb = self.sample_to_emb(sample).reshape(self.batch_num, -1)
             s = self.sample_to_hid(sample_emb).unsqueeze(1)
             c = self.conf_to_hid(conf).unsqueeze(1)
