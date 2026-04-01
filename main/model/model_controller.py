@@ -15,7 +15,6 @@ class Model_controller(Model_forward):
         self.offline_teacher = offline_teacher
         self.controller_actions = self.ctx_vals
         self.O = self.obs_flat.mean(1)
-        self.control_ent_bonus = 1
         self.joint_likelihood = JL
         self.naive_likelihood = NL
 
@@ -78,7 +77,6 @@ class Model_controller(Model_forward):
         self.intrinsic_value = ((O + O_).sum(1) / self.obs_num).exp() 
 
     def update_controller(self):
-        self.control_ent_bonus = self.control_ent_bonus * self.control_ent_bonus_decay 
         CPE = self.intrinsic_value - self.predicted_intrinsic_value  
         ent_loss = self.control_ent_bonus * self.control_ent.mean()
         PG_loss = (self.control_NLL * CPE.detach()).mean()
@@ -106,7 +104,7 @@ class Model_controller(Model_forward):
         return torch.distributions.Categorical(probs = dist)
 
     def controller_sample_actions(self, dist):
-        actions = dist.sample()
+        actions = dist.sample()       
         self.control_ent = dist.entropy() 
         self.control_NLL = -dist.log_prob(actions)
         a = torch.unravel_index(actions, self.ctx_dims)

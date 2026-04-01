@@ -1,3 +1,5 @@
+from pyexpat import model
+
 import torch; import torch.nn as nn; import math; import torch.nn.functional as F; from torch.distributions import Categorical;
 from main.model.Model_Customization import Model_Customization; from main.utils import tnp;
 
@@ -20,9 +22,10 @@ class Model_backward(Model_Customization):
     def update(self, loss, optim, collect_grad = None):
         optim.zero_grad()
         torch.cuda.empty_cache()
-        self.scaler.scale(loss).backward()  # Scale loss to prevent underflow
+        self.scaler.scale(loss).backward()  
         if collect_grad is not None:
             collect_grad()
+        
         self.scaler.step(optim)
         self.scaler.update()  
 

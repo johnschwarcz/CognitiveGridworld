@@ -14,6 +14,7 @@ sys.path.insert(0, path + '/main')
 sys.path.insert(0, path + '/main/bayes')
 sys.path.insert(0, path + '/main/model')
 from main.CognitiveGridworld import CognitiveGridworld
+logscale = 1
 
 plt.rcParams.update({
     'font.family': 'serif',
@@ -21,12 +22,12 @@ plt.rcParams.update({
     'font.sans-serif': 'cmss10',
     'font.monospace': 'cmtt10',
     'axes.formatter.use_mathtext': True,
-    'font.size': 15,
-    'axes.labelsize': 15,
+    'font.size': 18,
+    'axes.labelsize': 18,
     'axes.titlesize': 18,
-    'xtick.labelsize': 15,
-    'ytick.labelsize': 15,
-    'legend.fontsize': 15,
+    'xtick.labelsize': 18,
+    'ytick.labelsize': 18,
+    'legend.fontsize': 18,
 })
 
 DARK_DOT = np.array((30.0, 70.0, 78.0), np.float64) / 255.0
@@ -73,8 +74,8 @@ def draw_generated_obs_block(
     cbar_y=0.14,
     cbar_h=0.09,
     cbar_xpad=0.15,
-    title_fs=16,
-    label_fs=14,
+    title_fs=18,
+    label_fs=18,
 ):
     ax_anchor.axis('off')
     ax_anchor.set_xlim(0.0, 1.0)
@@ -160,59 +161,69 @@ def make_trajectory(start_r, start_c, end_r, end_c, num_steps):
 def get_controller_reward(agent):
     return np.asarray(agent.controller_training_logs['reward']) / np.asarray(agent.controller_training_logs['optimality'])[:, None]
 
-def plot_controller_training_panel(ax_curve, joint_agent, online_net, offline_net):
+def plot_controller_training_panel(ax_curve, ax_legend, joint_agent, online_net, offline_net):
     R_online = get_controller_reward(online_net)
     R_offline = get_controller_reward(offline_net)
     R_joint = get_controller_reward(joint_agent)
 
+    # Use modern colormap fetching
+    cmap_base = plt.colormaps['viridis'] if hasattr(plt, 'colormaps') else cm.get_cmap('viridis')
+
     agents_data = (
-        (R_online, 'Online', plt.cm.viridis(0.25)),
-        (R_joint, 'Offline w/ Joint', plt.cm.viridis(0.75)),
-        (R_offline, 'Offline w/ Generator', plt.cm.viridis(0.50)),
+        (R_online, 'Online', cmap_base(0.25)),
+        (R_joint, 'Offline w/ Joint', cmap_base(0.75)),
+        (R_offline, 'Offline w/ Generator', cmap_base(0.50)),
     )
 
-    T_min = min(R.shape[1] for R, _, _ in agents_data)
-    
-    if T_min < 1:
+    max_T = 0
+    for R, label, col in agents_data:
+        agent_reps, agent_T = R.shape        
+        max_T = max(max_T, agent_T)
+        x_agent = np.arange(1, agent_T + 1, dtype=np.float64)
+        mu_agent = R.mean(axis=0)
+        se_agent = R.std(axis=0) / np.sqrt(float(agent_reps))
+        ax_curve.fill_between(x_agent, mu_agent - se_agent, mu_agent + se_agent, color=col, label = label, alpha=0.5, zorder=-20)
+    max_T = 0
+    for R, label, col in agents_data:
+        agent_reps, agent_T = R.shape        
+        max_T = max(max_T, agent_T)
+        x_agent = np.arange(1, agent_T + 1, dtype=np.float64)
+        mu_agent = R.mean(axis=0)
+        se_agent = R.std(axis=0) / np.sqrt(float(agent_reps))
+        ax_curve.plot(x_agent, mu_agent - se_agent, color=col, lw=2, zorder=20)
+        ax_curve.plot(x_agent, mu_agent + se_agent, color=col, lw=2, zorder=20)
+                
+    if max_T < 1:
         ax_curve.axis('off')
         return
-
-    x_full = np.arange(1, T_min + 1, dtype=np.float64)
-    x_last = float(T_min)
-
-    for idx in range(3):
-        R, label, col = agents_data[idx]
-        
-        # Calculate reps specifically for THIS agent to handle varying rep numbers
-        agent_reps = R.shape[0]
-        R = R[:, :T_min]
-        
-        mu_full = R.mean(0)
-        se_full = R.std(0) / np.sqrt(float(agent_reps))
-        
-        # Plot Log Scale Curves
-        ax_curve.fill_between(x_full, mu_full - se_full, mu_full + se_full, color=col, alpha=0.2, zorder=0)
-        ax_curve.plot(x_full, mu_full, color=col, lw=4, label=label, zorder=20, alpha = 1)
         
     # -------------------------------------------------------------
     # Formatting for Curve Axes (Log-Log)
     # -------------------------------------------------------------
-    ax_curve.set_xscale('log')
-    # ax_curve.set_yscale('log')
+    if logscale:
+        ax_curve.set_xscale('log')
+        ax_curve.set_yscale('log')
     ax_curve.axhline(1.0, color='k', ls='--', lw=2.5, alpha=1, zorder=100)
-    ax_curve.set_xlim(1.0, x_last)
-    ax_curve.set_ylim(0.63, 1.01)
+    ax_curve.set_xlim(1.0, float(max_T))
     
     # Ensure tick labels look like standard numbers instead of scientific notation
     ax_curve.xaxis.set_major_formatter(ScalarFormatter())
     ax_curve.yaxis.set_major_formatter(ScalarFormatter())
     
-    ax_curve.set_ylabel("% Max Reward", fontsize=15)
+    ax_curve.set_ylabel("% Max Reward", fontsize=18)
     ax_curve.grid(axis='y', alpha=0.15)
-    ax_curve.legend(loc='lower right', ncol=1, frameon=False, fontsize=15)
+    
+    # MODIFIED: Extract handles/labels from ax_curve and explicitly give them to ax_legend
+    handles, labels = ax_curve.get_legend_handles_labels()
+    ax_legend.legend(handles, labels, loc='center', ncol=3, frameon=False, fontsize=18)
+    ax_legend.axis('off') 
+    
     ax_curve.set_title("Learning Curves", fontsize=18, pad=15)
-    ax_curve.set_xlabel("Controller Training Episodes", fontsize=15, labelpad=10)
+    ax_curve.set_xlabel("Controller Training Episodes", fontsize=18, labelpad=10)
 
+    ax_curve.set_ylim([.6, 1.05])
+    ax_curve.set_yticks([.6, .7, .8, .9, 1.0])
+    ax_curve.set_xticks([1, 10, 100, 1000])
 
 # =============================================================================
 # ALIGNED: Combined Observation Likelihoods & Landscape Plot
@@ -223,11 +234,11 @@ def plot_combined_figure(
     joint_agent=None,    online_net=None,
     
     # Layout Controls
-    figsize=(16, 6), 
+    figsize=(18, 6), 
     master_width_ratios=(0.4, 1.3), 
     master_wspace=0.1,
     main_width_ratios=(0.4, 1), 
-    main_wspace=0.05
+    main_wspace=0.1
 ):
     JL_full = np.squeeze(offline_net.joint_likelihood)
     JL = JL_full[rep] if JL_full.ndim > 3 else JL_full
@@ -276,7 +287,7 @@ def plot_combined_figure(
 
         # Left the Omegas untouched, but removed the large scatter points
         ax_dot.set(xlim=(-1.2, 1.2), ylim=(-1.2, 1.2))
-        ax_dot.set_ylabel(rf"$\Omega^{{{i+1}}} = {opt_obs[i]}$", fontsize=15, rotation=0, labelpad=0, va='center')
+        ax_dot.set_ylabel(rf"$\Omega^{{{i+1}}} = {opt_obs[i]}$", fontsize=18, rotation=0, labelpad=0, va='center')
         ax_dot.set_xticks([])
         ax_dot.set_yticks([])
         for spine in ax_dot.spines.values(): spine.set_visible(False)
@@ -309,8 +320,8 @@ def plot_combined_figure(
         
         if i == 0:
             pad_val = 10
-            ax_p1.set_title(r"$\ell_{\mathbf{z}^i}(\mathbf{r})$", x=.5, pad=pad_val, va='bottom', ha='center', fontsize=12)
-            ax_p0.set_title(r"$1 - \ell_{\mathbf{z}^i}(\mathbf{r})$", x=.5, pad=pad_val, va='bottom', ha='center', fontsize=12)
+            ax_p1.set_title(r"$\ell_{\mathbf{z}^i}(\mathbf{r})$", x=.5, pad=pad_val, va='bottom', ha='center', fontsize=15)
+            ax_p0.set_title(r"$1 - \ell_{\mathbf{z}^i}(\mathbf{r})$", x=.5, pad=pad_val, va='bottom', ha='center', fontsize=15)
             ax_cum.set_title("Cum.", pad=pad_val, va='bottom', ha='center')
 
     # =========================================================================
@@ -353,7 +364,7 @@ def plot_combined_figure(
     rr_traj += 0.5
     cc_traj += 0.5
 
-    cmap_traj = cm.get_cmap('viridis')
+    cmap_traj = plt.colormaps['viridis'] if hasattr(plt, 'colormaps') else cm.get_cmap('viridis')
     power = 0.8
 
     ax_land.plot(cc_traj, rr_traj, c='k', lw=10, alpha=.15)
@@ -413,20 +424,21 @@ def plot_combined_figure(
         strip_size_lo=25.0, strip_size_hi=100.0,
         strip_y=0.15, strip_h=0.75, strip_xpad=0.0,
         cbar_y=-0.1, cbar_h=0.15, cbar_xpad=0.15,
-        title_fs=16, label_fs=15)
+        title_fs=18, label_fs=18)
 
     # --- TRAINING CURVE AREA (Col 1) ---
     gs_train = gs_right[1].subgridspec(
         2, 2, 
-        width_ratios = (.1, 0.9),
-        height_ratios=(1, 0), 
-        hspace=shared_hs,
-        wspace=0.1
+        width_ratios=(.1, 0.9), 
+        height_ratios=(0.9, 0.1), 
+        hspace=.1, 
+        wspace=0.1 
     )
     
-    ax_curve = fig.add_subplot(gs_train[0, 1])
+    ax_curve = fig.add_subplot(gs_train[0, 1]) 
+    ax_legend = fig.add_subplot(gs_train[1, 1]) 
     
-    plot_controller_training_panel(ax_curve, joint_agent, online_net, offline_net)
+    plot_controller_training_panel(ax_curve, ax_legend, joint_agent, online_net, offline_net)
 
     plt.rcParams['svg.fonttype'] = 'none'
     plt.savefig("combined_landscape_aligned.svg", bbox_inches="tight", dpi=600)
@@ -442,7 +454,7 @@ def plot_example_trajectories_1x6(offline_net, batches=(8, 5, 7, 9, 4, 1), alpha
     if n_traj == 1:
         axs = [axs]
 
-    cmap_traj = cm.get_cmap('viridis')
+    cmap_traj = plt.colormaps['viridis'] if hasattr(plt, 'colormaps') else cm.get_cmap('viridis')
 
     for i in range(n_traj):
         bi = int(batches[i])
@@ -460,8 +472,8 @@ def plot_example_trajectories_1x6(offline_net, batches=(8, 5, 7, 9, 4, 1), alpha
         flat = pol.reshape(T_pol, -1)
         arg = np.argmax(flat, axis=1).astype(np.int64)
         rr_pol, cc_pol = np.divmod(arg, W_pol)
-        rr_pol = rr_pol.astype(np.float128)
-        cc_pol = cc_pol.astype(np.float128)
+        rr_pol = rr_pol.astype(np.float64)
+        cc_pol = cc_pol.astype(np.float64)
 
         for t in range(1, T_pol):
             rr_pol[t] = rr_pol[t - 1] + alpha_traj * (rr_pol[t] - rr_pol[t - 1])
@@ -478,9 +490,10 @@ def plot_example_trajectories_1x6(offline_net, batches=(8, 5, 7, 9, 4, 1), alpha
         segs[:, 0, 1] = rr_pol[:-1]
         segs[:, 1, 0] = cc_pol[1:]
         segs[:, 1, 1] = rr_pol[1:]
-        # prog = np.linspace(0.0, 0.9, nseg, endpoint=True) ** power_traj
-        prog = - np.log(.05) + np.log(np.linspace(0.05, .5, nseg, endpoint=True))
         
+        prog = np.log(np.linspace(1, 5.5, segs.shape[0]))
+
+
         LC = LineCollection(segs, colors=cmap_traj(prog), linewidths=2, capstyle='round', joinstyle='round')
         LC.set_rasterized(True)
         LC.set_zorder(100)
@@ -498,7 +511,6 @@ def plot_example_trajectories_1x6(offline_net, batches=(8, 5, 7, 9, 4, 1), alpha
 
 
 if __name__ == "__main__":
-    
     cuda = 0
     reps = 20
     eps = 2
@@ -528,15 +540,14 @@ if __name__ == "__main__":
     
     for name, pair in agents.items():
         agent, teacher = pair
-        agent.train_controller(eps=eps, reps=reps, offline_teacher=teacher)
         filepath = os.path.join("main/DATA/controller", f"{name}.pkl")
         with open(filepath, 'rb') as f:
             agent.controller_training_logs = pickle.load(f)
     
     rep = 0
     pref = np.array((1, 0, 0, 0, 1), np.int64)
-    batches_to_plot = (4, 5, 7, 9, 11, 18)
-
+    batches_to_plot = (10, 18, 2, 6, 8, 0)
+    
     # Run the perfectly aligned combination (example landscapes removed)
     plot_combined_figure(
         offline_net,
@@ -552,6 +563,6 @@ if __name__ == "__main__":
     plot_example_trajectories_1x6(
         offline_net,
         batches=batches_to_plot,
-        alpha_traj=.008,
+        alpha_traj=.005,
     )
     plt.show()

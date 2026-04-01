@@ -14,6 +14,7 @@ class Env_control_manager(Env_preprocessing):
             'preferences': np.zeros((self.reps, self.obs_num)),
             'likelihoods': np.zeros((self.reps, self.obs_num, *self.ctx_dims)),
             'reward': np.zeros((self.reps, self.controller_training_episodes)),
+            'percent_max': np.zeros((self.reps, self.controller_training_episodes)),
             'example_policy': np.zeros((self.reps, self.controller_training_episodes, *self.ctx_dims)),
             'prefence_landscape': np.zeros((self.reps, *self.ctx_dims)), 'optimality': np.zeros(self.reps)}
         
@@ -50,6 +51,11 @@ class Env_control_manager(Env_preprocessing):
             reward = self.prefence_landscape[(self.batch_range,)+tuple(argmax_policy.T)].mean()   
             self.controller_training_logs['example_policy'][self.rep, e] = example_policy
             self.controller_training_logs['reward'][self.rep, e] = reward 
+            self.controller_training_logs['percent_max'][self.rep, e] = \
+                reward / self.controller_training_logs['optimality'][self.rep]
+                
+            if (e+1) in [10, 50, 100, 200, 500, 1000, 2000]:
+                print(f"Episode {e+1} : {self.controller_training_logs['percent_max'][self.rep, e]:.3f}")
 
     def init_controller(self):
         self.EC_gen_realizations()

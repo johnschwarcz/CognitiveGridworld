@@ -40,7 +40,7 @@ class CognitiveGridworld(Env_model_manager):
         self.obs_num = init.get('obs_num', 5)
         self.KQ_dim = init.get('KQ_dim', 30)
 
-        self.control_ent_bonus_decay = init.get('control_ent_bonus_decay', .999)
+        self.control_ent_bonus_decay = init.get('control_ent_bonus', .05)
         self.classifier_ent_bonus = init.get('classifier_ent_bonus', 0.1)
         self.classifier_LR = init.get('classifier_LR', 0.0005)
         self.controller_LR = init.get('controller_LR', 0.001)
