@@ -54,9 +54,6 @@ class Env_control_manager(Env_preprocessing):
             self.controller_training_logs['percent_max'][self.rep, e] = \
                 reward / self.controller_training_logs['optimality'][self.rep]
                 
-            if (e+1) in [10, 50, 100, 200, 500, 1000, 2000]:
-                print(f"Episode {e+1} : {self.controller_training_logs['percent_max'][self.rep, e]:.3f}")
-
     def init_controller(self):
         self.EC_gen_realizations()
         self.EC_gen_observations()
