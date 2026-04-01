@@ -1,6 +1,7 @@
 # CognitiveGridworld
 
 **CognitiveGridworld** is a stationary POMDP for studying compositional generalization in latent space.
+The associated article can be found here https://arxiv.org/abs/2603.27134.
 
 ## Installation
 
