@@ -739,10 +739,10 @@ def plot_boundary_shape_combined(trained):
 # ═══════════════════════════════════════════════════════════════════
 def plot_manifold_evolution(trained, echo, timesteps=[0, 15, -1]):
     agents = {
-        "Trained": (trained.model_belief_flat, trained),
+        "Trained": (trained.model_belief, trained),
         "Joint":   (trained.joint_belief, trained),
         "Naive":   (echo.naive_belief, echo),
-        "Echo":    (echo.model_belief_flat, echo)}
+        "Echo":    (echo.model_belief, echo)}
     names = list(agents.keys())
     nS = len(timesteps)
     nM = len(names)
@@ -939,8 +939,8 @@ if __name__ == "__main__":
     plt.show()
 
     """ Paired PCA grids """
-    # render_paired_pca_grids([_pca(trained,"model_belief_flat","TRAINED"), _pca(trained,"joint_belief","JOINT")], fig_title="Trained + Joint")
-    # render_paired_pca_grids([_pca(echo,"model_belief_flat","ECHO"), _pca(echo,"naive_belief","NAIVE")], fig_title="Echo + Naive")
+    # render_paired_pca_grids([_pca(trained,"model_belief","TRAINED"), _pca(trained,"joint_belief","JOINT")], fig_title="Trained + Joint")
+    # render_paired_pca_grids([_pca(echo,"model_belief","ECHO"), _pca(echo,"naive_belief","NAIVE")], fig_title="Echo + Naive")
 
     """ Boundary shapes, manifold evolution, diagnostics, re-evaluation """
     # plot_boundary_shape_combined(trained)

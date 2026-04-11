@@ -33,10 +33,10 @@ class Sanity_Collector(Collection_Plotters):
     def collect_bayes(self, rep = 1):
         self.collect(rep = rep)
 
-    def collect_net(self, mode, rep = 1, bayes_on_cond = 0):
-        self.collect(WITH_net = True, mode = mode, rep = rep, bayes_on_cond = bayes_on_cond)
+    def collect_net(self, mode, rep = 1, bayes_on_cond = 0, hid_dims = None):
+        self.collect(WITH_net = True, mode = mode, rep = rep, bayes_on_cond = bayes_on_cond, hid_dims = hid_dims)
         
-    def collect(self, WITH_net = False, mode = None, rep = 1, bayes_on_cond = 0):
+    def collect(self, WITH_net = False, mode = None, rep = 1, bayes_on_cond = 0, hid_dims = None):
         #######################################
         """ COLLECT DATA """
         #######################################        
@@ -56,6 +56,7 @@ class Sanity_Collector(Collection_Plotters):
         self.joint_naive_DKL, self.naive_joint_DKL = self.zeros((self.ctx_num, self.step_num), 2)
 
         for ctx in tqdm(range(self.ctx_num)):
+            hid_dim = hid_dims[ctx] if WITH_net else 10
             for cond in range(self.pairs):
                 if WITH_net:
                     load = net_envs[cond] + f"_ctx_{ctx+1}"
@@ -64,7 +65,7 @@ class Sanity_Collector(Collection_Plotters):
                     load = False
 
                 for r in range(rep):
-                    agent = CognitiveGridworld(**{'mode': mode, 'cuda': self.cuda, 'ctx_num':  ctx + 1, 'state_num': self.state_num,
+                    agent = CognitiveGridworld(**{'mode': mode, 'cuda': self.cuda, 'ctx_num':  ctx + 1, 'state_num': self.state_num, 'hid_dim': hid_dim,
                         'load_env': load, 'training': False, 'batch_num': self.batch_num, 'obs_num': self.obs_num, 'show_plots' : False,
                         'step_num': self.step_num, 'episodes': 1, 'realization_num': self.realization_num, 'learn_embeddings': False})    
 

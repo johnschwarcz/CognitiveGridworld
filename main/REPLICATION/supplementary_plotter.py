@@ -184,12 +184,12 @@ def plot_pca_combined(ax_grid, agent, name):
     """Maps manifolds to their designated columns in the combined 3x9 PCA grid."""
     if name == "Trained":
         models_cfg = [
-            {"bel": agent.model_belief_flat, "ctx": agent.ctx_vals, "name": "Trained", "c_offset": 0},
+            {"bel": agent.model_belief, "ctx": agent.ctx_vals, "name": "Trained", "c_offset": 0},
             {"bel": agent.joint_belief, "ctx": agent.ctx_vals, "name": "Joint", "c_offset": 1}
         ]
     else: # Echo
         models_cfg = [
-            {"bel": agent.model_belief_flat, "ctx": agent.ctx_vals, "name": "Echo", "c_offset": 2},
+            {"bel": agent.model_belief, "ctx": agent.ctx_vals, "name": "Echo", "c_offset": 2},
             {"bel": agent.naive_belief, "ctx": agent.ctx_vals, "name": "Naive", "c_offset": 3}
         ]
     

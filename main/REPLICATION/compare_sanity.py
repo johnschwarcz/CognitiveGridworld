@@ -30,7 +30,18 @@ if __name__ == "__main__":
     ctx_num = 2
     rep = 10
     train_v_random = Sanity_Collector(cuda, state_num, batch_num, realization_num, step_num, ctx_num, obs_num)
-    train_v_random.collect_net(mode="SANITY", rep = rep)
+    train_v_random.collect_net(mode="SANITY", rep = rep, hid_dims = [1000, 1000])
+    train_v_random.plot_likelihood()
+    train_v_random.plot_belief()
+    train_v_random.plot_perf()
+    train_v_random.plot_density_curves(bins=100, ymax = .07, sigma = 3)
+    
+    batch_num = 1000
+    step_num = 30
+    ctx_num = 3
+    rep = 100
+    train_v_random = Sanity_Collector(cuda, state_num, batch_num, realization_num, step_num, ctx_num, obs_num)
+    train_v_random.collect_net(mode="SANITY", rep = rep, hid_dims = [1000, 1000, 5000])
     train_v_random.plot_likelihood()
     train_v_random.plot_belief()
     train_v_random.plot_perf()

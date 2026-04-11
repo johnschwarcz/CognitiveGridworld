@@ -6,6 +6,8 @@ from matplotlib.ticker import MultipleLocator, NullFormatter
 from matplotlib.ticker import MultipleLocator
 from matplotlib.gridspec import GridSpec
 import matplotlib.ticker as mticker
+import matplotlib.lines as mlines
+from matplotlib.lines import Line2D
 import matplotlib as mpl
 from tqdm import tqdm
 
@@ -187,21 +189,15 @@ class Collection_Plotters():
         T = self.step_num
         t = np.arange(T)
         relative_labels = [r"$\frac{\text{Joint}}{\text{Naive}}$", 
-                        r"$\frac{\text{Fully Trained}}{\text{Echo State}}$"]
+                            r"$\frac{\text{Fully Trained}}{\text{Echo State}}$"]
         markers = ['o', '^']
         mecs = ['k', 'r']
 
         if self.WITHOUT_net:
             fig, axs = plt.subplots(2, 2, figsize=(8, 8), tight_layout=True)
         if self.WITH_net:
-            # fig, axs = plt.subplots(1, 4, figsize=(16, 5), tight_layout=True,
-            # gridspec_kw={'width_ratios':  (1, 1, 1, .4)})
-
-            # fig, axs = plt.subplots(1, 4, figsize=(16,5), tight_layout=True,
-            # gridspec_kw={'width_ratios':  (.7, .7, 1, 1)})
-
             fig, axs = plt.subplots(1, 3, figsize=(12, 5), tight_layout=True,
-            gridspec_kw={'width_ratios':  (1, 1, 1)})
+                                    gridspec_kw={'width_ratios': (1, 1, 1)})
         
         for cond in range(self.pairs):
             marker = markers[cond]
@@ -234,26 +230,25 @@ class Collection_Plotters():
                 ax = axs[0, 0]
                 ax.set_ylim(0, 1.1)
 
+            # --- Panel 1: Experts ---
             for c in range(self.ctx_num):
+                label = None
                 if self.WITHOUT_net:
                     label = f'$C={c+1}$'
-                if self.WITH_net:
-                    if c > 0:
-                        label = None 
-                    elif cond == 0:
-                        label = "Joint"
-                    else:
-                        label = "Fully Trained"
+                # (For WITH_net, custom legends are drawn at the end)
 
-                ax.plot(t, mj[c], c=col[c], lw=lw, ls = ls)
-                ax.scatter(t[idx], mj[c, idx], s=50, marker=marker, label = label,
-                    facecolors=col[c], edgecolors=mecs[cond], zorder=3)
+                ax.plot(t, mj[c], c=col[c], lw=lw, ls=ls)
+                ax.scatter(t[idx], mj[c, idx], s=50, marker=marker, label=label, linewidths = 1.5,
+                            facecolors=col[c], edgecolors=mecs[cond], zorder=3)
+            
             title = "Joint" if self.WITHOUT_net else "Experts"
-
             ax.set(title=title, xlabel='Inference Time', ylabel='Accuracy')
             ax.set_yticks(np.linspace(0, 1, 6))
-            ax.legend()
+            
+            if self.WITHOUT_net:
+                ax.legend()
 
+            # --- Panel 2: Baselines ---
             if self.WITH_net:
                 ax = axs[1]
                 ax.set_ylim(.2, .8)
@@ -262,116 +257,327 @@ class Collection_Plotters():
                 ax.set_ylim(0, 1.1)
 
             for c in range(self.ctx_num):
-                if (c > 0) or (self.WITHOUT_net):
-                    label = None 
-                elif cond == 0:
-                    label = "Naive"
-                else:
-                    label = "Echo State"
-
-                ax.plot(t, mn[c], c=col[c], lw=lw, ls = ls)
-                ax.scatter(t[idx], mn[c, idx], s=50, marker=marker, label = label,
-                    facecolors=col[c], edgecolors=mecs[cond], zorder=3)               
+                label = None  # Handled automatically or skipped
+                ax.plot(t, mn[c], c=col[c], lw=lw, ls=ls)
+                ax.scatter(t[idx], mn[c, idx], s=50, marker=marker, label=label,
+                            facecolors=col[c], edgecolors=mecs[cond], zorder=3)              
+            
             title = "Naive" if self.WITHOUT_net else "Baselines"
             ax.set(title=title, xlabel='Inference Time')
             ax.set_yticks(np.linspace(0, 1, 6))
 
-            # 3) Joint vs Naive scatter–curve
-
+            # --- Panel 3: Relative Accuracy ---
             if self.WITH_net:
-                ax.legend()
                 ax = axs[2]
             if self.WITHOUT_net:
                 ax = axs[1, 0]
 
-            ax.plot([0, 1], [0, 1], ls = '-', c='gray', lw=1, alpha=1)
+            ax.plot([0, 1], [0, 1], ls='-', c='gray', lw=1, alpha=1)
             for c in range(self.ctx_num):
-                if (self.WITH_net):
-                    label = f'$C={c+1}$ ' + (relative_labels[cond] if c == 0 else "")
-                else:
-                    label = ""
-                ax.plot(mn[c], mj[c], c=col[c], lw=lw, ls = ':' if cond == 0 else '--')
-                ax.scatter(mn[c, idx], mj[c, idx], s=50, marker=marker, label = label,
-                    facecolors=col[c], edgecolors=mecs[cond], zorder=3)
+                label = None
+                ax.plot(mn[c], mj[c], c=col[c], lw=lw, ls=':' if cond == 0 else '--')
+                ax.scatter(mn[c, idx], mj[c, idx], s=50, marker=marker, label=label,
+                            facecolors=col[c], edgecolors=mecs[cond], zorder=3)
+                
                 if (self.WITHOUT_net) or (cond == 1): 
-                    # shows net accs if with net
                     text_col = 'k' if self.WITHOUT_net else 'r'
-                    ax.annotate(r"$\times$" + f'{mj[c,-1]/mn[c,-1]:.0f}',(mn[c,-1], mj[c,-1]),
-                        xytext=(-10, 10), textcoords='offset points', color = text_col)
+                    ax.annotate(r"$\times$" + f'{mj[c,-1]/mn[c,-1]:.0f}', (mn[c,-1], mj[c,-1]),
+                                xytext=(-20, 10), textcoords='offset points', color=text_col)
+            
             if cond == 0:
                 ax.annotate('start', (mn[0,0], mj[0,0]), xytext=(-25, -30), textcoords='offset points')
+            
             if self.WITHOUT_net:
-                ax.set(xlabel= 'Naive', ylabel='Joint')
+                ax.set(xlabel='Naive', ylabel='Joint')
                 ax.set_ylim(.1, 1.1)
                 ax.set_xlim(.1, 1)
             else:
-                ax.set(xlabel= 'Accuracy')
+                ax.set(xlabel='Accuracy')
                 ax.set_ylim(.1, .85)
                 ax.set_xlim(.1, .85)
 
-            ax.set_title("Relative Accuracy")               
+            ax.set_title("Relative Accuracy")              
             ax.grid(alpha=.3)
             ax.set_yticks([.2, .4, .6, .8], labels=[.2, .4, .6, .8])
 
-            # 4) DKL
-
+            # --- Panel 4: DKL (WITHOUT_net only) ---
             if self.WITHOUT_net:
                 ax = axs[1, 1]
                 dkl = self.joint_naive_DKL
                 for c in range(self.ctx_num):
-                    ax.plot(t, dkl[c], c=col[c], ls = '--', lw=1.5)
+                    ax.plot(t, dkl[c], c=col[c], ls='--', lw=1.5)
                     ax.scatter(t[idx], dkl[c, idx], s=50, marker='o',
-                        facecolors=col[c], edgecolors='k', zorder=3
-                    )
+                                facecolors=col[c], edgecolors='k', zorder=3)
                 ax.set(ylabel='KL-divergence', xlabel='Inference Time', title='Semantic Interaction Information')
                 max_d = dkl.max() * 1.05
                 ax.set_ylim(None, max_d)
                 ax.set_yticks([0, 4, 8, 12])
-            else:
-                ax.legend()
 
-            # if self.WITH_net:
-            #     c = 1
-            #     ax.legend(loc = 'lower right')
-            #     ax = axs[3]
-            #     if cond == 0:
-            #         TJ_dkl = self.net_joint_DKL[0,1]
-            #         RJ_dkl = self.net_joint_DKL[1,1]
-            #         TN_dkl = self.net_naive_DKL[0,1]
-            #         RN_dkl = self.net_naive_DKL[1,1]
-            #         JT_dkl = self.joint_net_DKL[0,1]
-            #         JR_dkl = self.joint_net_DKL[1,1]
-            #         NR_dkl = self.naive_net_DKL[1,1]
-            #         NT_dkl = self.naive_net_DKL[0,1]
-            #         JN_dkl = self.joint_naive_DKL[1]
-            #         NJ_dkl = self.naive_joint_DKL[1]
-            #         JN_sym = (JN_dkl + NJ_dkl)/2
-            #         TN_sym = (TN_dkl + NT_dkl)/2
-            #         JR_sym = (RJ_dkl + JR_dkl)/2
-            #         NR_sym = (RN_dkl + NR_dkl)/2
-            #         JT_sym = (TJ_dkl + JT_dkl)/2
+        # --- Custom WITH_net Legends ---
+        if self.WITH_net:
+            col = plt.cm.viridis(np.linspace(0.15, 0.85, self.ctx_num))
+            
+            # Panel 1: Agents & Contexts
+            ax0 = axs[0]
+            agent_handles = [
+                mlines.Line2D([], [], color='none', marker='o', markeredgecolor='k', markerfacecolor='none', markersize=8, label='Joint'),
+                mlines.Line2D([], [], color='none', marker='^', markeredgecolor='r', markerfacecolor='none', markersize=8, label='Fully Trained')
+            ]
+            leg_agents = ax0.legend(handles=agent_handles, ncol=2, loc='upper left', columnspacing=0.8, handletextpad=0.5)
+            ax0.add_artist(leg_agents)
+            
+            c_handles = [mlines.Line2D([], [], color=col[c], lw=2.5, label=f'$C={c+1}$') for c in range(self.ctx_num)]
+            # Vertical legend, bottom right
+            ax0.legend(handles=c_handles, ncol=1, loc='lower right')
 
-            #         ax.plot(JT_sym, JR_sym, c = '#CBE79D', zorder = 5)
-            #         ax.plot(TN_sym, NR_sym, c = '#8A9776', zorder = 5)
-            #         ax.scatter(JT_sym[idx], JR_sym[idx], marker = 'h', s = 75, c = "#CBE79D", edgecolors = 'k', label = r"$\mathcal{D}_{KL}(\cdot || $" + " Joint" + r"$)$", zorder = 10)
-            #         ax.scatter(TN_sym[idx], NR_sym[idx], marker = 'h', s = 75, c = "#8A9776", edgecolors = 'k', label =r"$\mathcal{D}_{KL}(\cdot || $" + " Independent" + r"$)$", zorder = 10)
-            #         ax.scatter(JT_sym[-1], JR_sym[-1], marker = 'h', s = 75, c = "#CBE79D", edgecolors = 'r', zorder = 20, linewidths = 1.5)
-            #         ax.scatter(TN_sym[-1], NR_sym[-1], marker = 'h', s = 75, c = "#8A9776", edgecolors = 'r', zorder = 20, linewidths = 1.5)
+            # Panel 2: Baselines
+            ax1 = axs[1]
+            base_handles = [
+                mlines.Line2D([], [], color='none', marker='o', markeredgecolor='k', markerfacecolor='none', markersize=8, label='Naive'),
+                mlines.Line2D([], [], color='none', marker='^', markeredgecolor='r', markerfacecolor='none', markersize=8, label='Echo State')
+            ]
+            ax1.legend(handles=base_handles, ncol=2, loc='upper left', columnspacing=0.8, handletextpad=0.5)
 
-            #         ax.plot(np.linspace(-5, JN_sym[-1], 2), np.ones(2) * JN_sym[-1], c = 'r', ls = '--', label = r"$\mathcal{D}_{KL}($"+"Joint" + r"$||$" + " Independent" +  r"$)$", zorder= 0, lw = 1)
-            #         ax.plot(np.ones(2) * JN_sym[-1], np.linspace(-5, JN_sym[-1], 2), c = 'r', ls = '--', zorder= 0, lw = 1)
-            #         ax.set_xlabel(r"$\mathcal{D}_{KL}($"+"Fully Trained " + r"$|| \cdot)$")
-            #         ax.set_ylabel(r"$\mathcal{D}_{KL}($"+"Echo State " + r"$|| \cdot)$")
-            #         ax.set_title("Relative " + r"$\mathcal{D}_{KL}$")
-            #         ax.set_xlim([-.3, JN_sym[-1] + .1])
-            #         ax.set_ylim([-1.3, JN_sym[-1] + .1])
-            #         ax.set_xticks([0,1,2,3])
-            #         ax.set_yticks([-1, 0,1,2,3])
-            #         ax.legend(loc = 'lower right')
-            #         ax.annotate('start', (0,0), xytext=(-15, -15), textcoords='offset points')
-
+            # Panel 3: Relative Accuracy Formulas Only (No C)
+            ax2 = axs[2]
+            rel_handles = [
+                mlines.Line2D([], [], color='none', marker='o', markeredgecolor='k', markerfacecolor='none', markersize=10, label=relative_labels[0]),
+                mlines.Line2D([], [], color='none', marker='^', markeredgecolor='r', markerfacecolor='none', markersize=10, label=relative_labels[1])
+            ]
+            # Vertical legend, bottom right
+            ax2.legend(handles=rel_handles, ncol=1, loc='lower right', fontsize = 16)
 
         self.finish_plot(save)
+        
+        # #######################################
+        # """ PLOTTING PERFORMANCE """
+        # #######################################
+        
+        # B = self.batch_num 
+        # T = self.step_num
+        # t = np.arange(T)
+        # relative_labels = [r"$\frac{\text{Joint}}{\text{Naive}}$", 
+        #                 r"$\frac{\text{Fully Trained}}{\text{Echo State}}$"]
+        # markers = ['o', '^']
+        # mecs = ['k', 'r']
+
+        # if self.WITHOUT_net:
+        #     fig, axs = plt.subplots(2, 2, figsize=(8, 8), tight_layout=True)
+        # if self.WITH_net:
+
+        #     fig, axs = plt.subplots(1, 3, figsize=(12, 5), tight_layout=True,
+        #     gridspec_kw={'width_ratios':  (1, 1, 1)})
+        
+        # for cond in range(self.pairs):
+        #     marker = markers[cond]
+        #     lw = 2.5
+        #     j_acc = self.accs[cond, 0]
+        #     n_acc = self.accs[cond, 1]
+        #     mj = j_acc.mean(1)
+        #     mn = n_acc.mean(1)
+        #     sdn = n_acc.std(1)/np.sqrt(B)
+        #     sdj = j_acc.std(1)/np.sqrt(B)
+        #     ls = self.linestyles[cond]
+
+        #     col = plt.cm.viridis(np.linspace(0.15, 0.85, self.ctx_num))
+        #     idx = np.linspace(0, T-1, 4, dtype=int)
+
+        #     if self.WITH_net:
+        #         for ax in axs:
+        #             ax.grid(alpha=.3)
+        #             for s in ('top', 'right'):
+        #                 ax.spines[s].set_visible(False)
+        #         ax = axs[0]
+        #         ax.set_ylim(.2, .8)
+
+        #     if self.WITHOUT_net:
+        #         for ax_ in axs:
+        #             for ax in ax_:
+        #                 ax.grid(alpha=.3)
+        #                 for s in ('top', 'right'):
+        #                     ax.spines[s].set_visible(False)
+        #         ax = axs[0, 0]
+        #         ax.set_ylim(0, 1.1)
+
+        #     for c in range(self.ctx_num):
+        #         if self.WITHOUT_net:
+        #             label = f'$C={c+1}$'
+        #         if self.WITH_net:
+        #             if c > 0:
+        #                 label = None 
+        #             elif cond == 0:
+        #                 label = "Joint"
+        #             else:
+        #                 label = "Fully Trained"
+
+        #         ax.plot(t, mj[c], c=col[c], lw=lw, ls = ls)
+        #         ax.scatter(t[idx], mj[c, idx], s=50, marker=marker, label = label,
+        #             facecolors=col[c], edgecolors=mecs[cond], zorder=3)
+        #     title = "Joint" if self.WITHOUT_net else "Experts"
+
+        #     ax.set(title=title, xlabel='Inference Time', ylabel='Accuracy')
+        #     ax.set_yticks(np.linspace(0, 1, 6))
+        #     ax.legend()
+
+        #     if self.WITH_net:
+        #         ax = axs[1]
+        #         ax.set_ylim(.2, .8)
+        #     if self.WITHOUT_net:
+        #         ax = axs[0, 1]
+        #         ax.set_ylim(0, 1.1)
+
+        #     for c in range(self.ctx_num):
+        #         if (c > 0) or (self.WITHOUT_net):
+        #             label = None 
+        #         elif cond == 0:
+        #             label = "Naive"
+        #         else:
+        #             label = "Echo State"
+
+        #         ax.plot(t, mn[c], c=col[c], lw=lw, ls = ls)
+        #         ax.scatter(t[idx], mn[c, idx], s=50, marker=marker, label = label,
+        #             facecolors=col[c], edgecolors=mecs[cond], zorder=3)               
+        #     title = "Naive" if self.WITHOUT_net else "Baselines"
+        #     ax.set(title=title, xlabel='Inference Time')
+        #     ax.set_yticks(np.linspace(0, 1, 6))
+
+        #     # 3) Joint vs Naive scatter–curve
+
+        #     if self.WITH_net:
+        #         ax.legend()
+        #         ax = axs[2]
+        #     if self.WITHOUT_net:
+        #         ax = axs[1, 0]
+
+        #     ax.plot([0, 1], [0, 1], ls = '-', c='gray', lw=1, alpha=1)
+        #     for c in range(self.ctx_num):
+        #         if (self.WITH_net):
+        #             label = f'$C={c+1}$ ' + (relative_labels[cond] if c == 0 else "")
+        #         else:
+        #             label = ""
+        #         ax.plot(mn[c], mj[c], c=col[c], lw=lw, ls = ':' if cond == 0 else '--')
+        #         ax.scatter(mn[c, idx], mj[c, idx], s=50, marker=marker, label = label,
+        #             facecolors=col[c], edgecolors=mecs[cond], zorder=3)
+        #         if (self.WITHOUT_net) or (cond == 1): 
+        #             # shows net accs if with net
+        #             text_col = 'k' if self.WITHOUT_net else 'r'
+        #             ax.annotate(r"$\times$" + f'{mj[c,-1]/mn[c,-1]:.0f}',(mn[c,-1], mj[c,-1]),
+        #                 xytext=(-10, 10), textcoords='offset points', color = text_col)
+        #     if cond == 0:
+        #         ax.annotate('start', (mn[0,0], mj[0,0]), xytext=(-25, -30), textcoords='offset points')
+        #     if self.WITHOUT_net:
+        #         ax.set(xlabel= 'Naive', ylabel='Joint')
+        #         ax.set_ylim(.1, 1.1)
+        #         ax.set_xlim(.1, 1)
+        #     else:
+        #         ax.set(xlabel= 'Accuracy')
+        #         ax.set_ylim(.1, .85)
+        #         ax.set_xlim(.1, .85)
+
+        #     ax.set_title("Relative Accuracy")               
+        #     ax.grid(alpha=.3)
+        #     ax.set_yticks([.2, .4, .6, .8], labels=[.2, .4, .6, .8])
+
+        #     # 4) DKL
+
+        #     if self.WITHOUT_net:
+        #         ax = axs[1, 1]
+        #         dkl = self.joint_naive_DKL
+        #         for c in range(self.ctx_num):
+        #             ax.plot(t, dkl[c], c=col[c], ls = '--', lw=1.5)
+        #             ax.scatter(t[idx], dkl[c, idx], s=50, marker='o',
+        #                 facecolors=col[c], edgecolors='k', zorder=3
+        #             )
+        #         ax.set(ylabel='KL-divergence', xlabel='Inference Time', title='Semantic Interaction Information')
+        #         max_d = dkl.max() * 1.05
+        #         ax.set_ylim(None, max_d)
+        #         ax.set_yticks([0, 4, 8, 12])
+        #     else:
+        #         ax.legend()
+
+        # self.finish_plot(save)
+
+    def plot_relative_DKL(self, save = None):
+        fig, ax = plt.subplots(figsize=(3.5, 5))
+        idx = np.linspace(0, self.step_num - 1, 4, dtype=int)
+        colors = plt.cm.viridis(np.linspace(0.15, 0.85, 3))
+
+        cond = 0
+        max_jn_sym = 0  # Track maximum reference bound to sync axes limits
+
+        for c in [1, 2]:
+            color = colors[c]
+            
+            # Extract data directly from the self object
+            TJ_dkl = self.net_joint_DKL[0, c]
+            RJ_dkl = self.net_joint_DKL[1, c]
+            TN_dkl = self.net_naive_DKL[0, c]
+            RN_dkl = self.net_naive_DKL[1, c]
+            JT_dkl = self.joint_net_DKL[0, c]
+            JR_dkl = self.joint_net_DKL[1, c]
+            NR_dkl = self.naive_net_DKL[1, c]
+            NT_dkl = self.naive_net_DKL[0, c]
+            JN_dkl = self.joint_naive_DKL[c]
+            NJ_dkl = self.naive_joint_DKL[c]
+
+            # Symmetrize the DKLs
+            JN_sym = (JN_dkl + NJ_dkl) / 2
+            TN_sym = (TN_dkl + NT_dkl) / 2  # Fully Trained vs Naive
+            JR_sym = (RJ_dkl + JR_dkl) / 2  # Echo State vs Joint
+            NR_sym = (RN_dkl + NR_dkl) / 2  # Echo State vs Naive
+            JT_sym = (TJ_dkl + JT_dkl) / 2  # Fully Trained vs Joint
+            
+            # Update max reference line for axis limits
+            max_jn_sym = max(max_jn_sym, JN_sym[-1])
+
+            # ==========================================
+            # Plot 1: Fully Trained Network (Solid Lines)
+            # ==========================================
+            # X: DKL with Naive (TN), Y: DKL with Joint (JT)
+            ax.plot(TN_sym, JT_sym, c=color, ls='-', zorder=5, lw=2)
+            
+            ax.scatter(TN_sym[idx], JT_sym[idx], marker='h', s=75, c=[color], edgecolors='k', zorder=10)
+            ax.scatter(TN_sym[-1], JT_sym[-1], marker='h', s=75, c=[color], edgecolors='r', zorder=20, linewidths=1.5)
+            
+            # ==========================================
+            # Plot 2: Echo State Network (Dashed Lines)
+            # ==========================================
+            # X: DKL with Naive (NR), Y: DKL with Joint (JR)
+            ax.plot(NR_sym, JR_sym, c=color, ls='--', zorder=5, lw=2)
+            
+            ax.scatter(NR_sym[idx], JR_sym[idx], marker='h', s=75, c=[color], edgecolors='k', zorder=10)
+            ax.scatter(NR_sym[-1], JR_sym[-1], marker='h', s=75, c=[color], edgecolors='r', zorder=20, linewidths=1.5)
+
+            # Start annotation
+            if c == 1:
+                ax.annotate('start', (0, 0), xytext=(13, 13), textcoords='offset points')
+
+        # ==========================================
+        # Global Formatting & Custom Legends
+        # ==========================================
+        ax.set_title("Relative Divergence")
+        ax.set_xlabel(r"$\mathcal{D}_{KL}( \cdot$" + r"$||$" + " Naive" + r"$)$", fontsize=14)
+        ax.set_ylabel(r"$\mathcal{D}_{KL}( \cdot$" + r"$||$" + " Joint" + r"$)$", fontsize=14)
+        ax.set_xlim([-.2, 6])
+        ax.set_ylim([-.2, 4.2])
+        # Legend 1: Colors indicating the Context 'C'
+        color_lines = [Line2D([0], [0], color=colors[c], lw=3, label=r"$C = $" + f"{c+1}") for c in [1, 2]]
+        legend_colors = ax.legend(handles=color_lines, loc='upper center', ncols=2, fontsize=12)
+        # ax.add_artist(legend_colors)  # Add the first legend manually so it isn't overwritten
+
+        # Legend 2: Linestyles indicating the Network Type
+        style_lines = [
+            Line2D([0], [0], color='gray', lw=2, ls='-', label=r"$\mathcal{D}_{KL}( \text{Fully Trained} || \cdot )$"),
+            Line2D([0], [0], color='gray', lw=2, ls='--', label=r"$\mathcal{D}_{KL}( \text{Echo State} || \cdot )$")
+        ]
+        ax.legend(handles=style_lines, loc='upper right', fontsize=12)
+        ax.set_xticks([0,1,2,3,4,5,6])
+        ax.set_yticks([0,1,2,3,4])
+        plt.tight_layout()
+        self.finish_plot(save)
+
+
+
 
     def plot_density_curves(self, bins=60, sigma=0, ymax=1, save=None):
         B=self.batch_num; T=self.step_num
