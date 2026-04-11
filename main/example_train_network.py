@@ -15,4 +15,4 @@ if __name__ == "__main__":
     self = CognitiveGridworld(**{'mode': "SANITY", 'cuda': cuda, 'episodes': 150000, 'plot_every': 10,
         'realization_num': 10,  'hid_dim': hid_dim,  'obs_num': 5, 'training': True,
         'batch_num': batch_num, 'step_num': 30, 'state_num': 500, 'learn_embeddings': False,
-        'reservoir': False, 'classifier_LR': .0005, 'ctx_num': 3, 'save_env': "/sanity/fully_trained_ctx_3"})
+        'reservoir': True, 'classifier_LR': .0005, 'ctx_num': 3, 'save_env': "/sanity/reservoir_ctx_3"})
