@@ -20,7 +20,7 @@ Default values of all tune-able hyperparameters can be found in `main/CognitiveG
 
 When initializing a `CognitiveGridworld`, you can pass a dictionary of keyword arguments.  Notable options include:
 * `episodes`: total number of learning episodes for networks.
-* `state_num`: size of the State Space.
+* `state_num`: size of the State Space (i.e. the number of latent variables).
 * `obs_num`: dimensionality of the Observation Space.
 * `ctx_num`: number of active states per contexts.
 * `realization_num`: number of potential realizations of an active state.
