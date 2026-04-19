@@ -282,18 +282,12 @@ def prep_model(model, prm, rng):
     
     # ADDED: Compute re-evaluation dynamically for event alignment
     eps = 1e-99
-    j_px_raw = getattr(model, "joint_px", None)
     j_bel = getattr(model, "joint_belief", None)
-    if j_px_raw is not None and j_bel is not None:
-        j_px_raw = npy(j_px_raw).astype(np.float64)
-        j_px_raw = j_px_raw / np.maximum(j_px_raw.sum(axis=(-1, -2), keepdims=True), eps)
-        j_px = np.stack([j_px_raw.sum(axis=-1), j_px_raw.sum(axis=-2)], axis=2).astype(np.float64)
-        j_bel = npy(j_bel).astype(np.float64)
-        app_px = approximate_likelihood(j_bel, eps)
-        reval = compute_stepwise_dkl(j_px, app_px, eps).mean(axis=-1)
-    else:
-        reval = np.full((B, T), np.nan, np.float64)
-    
+    j_px = getattr(model, "joint_nx", None)
+    j_bel = npy(j_bel).astype(np.float64)
+    app_px = approximate_likelihood(j_bel, eps)
+    reval = compute_stepwise_dkl(j_px, app_px, eps).mean(axis=-1)
+
     upd, z_all, evr = pca_from_updates(model, prm["K_PCA"])
     pc_norm, cent, sp_ent, p = metrics_from_scores(z_all)
     bands, bid, bcnt = make_bands(p, evr, prm["P_BANDS"])
@@ -890,7 +884,7 @@ def plot_post_training_diagnostics(trained, echo, D=3):
 def plot_re_evaluation(trained):
     n_px = trained.naive_px / trained.naive_px.sum(axis=-1, keepdims=True)
     j_px_raw = trained.joint_px / trained.joint_px.sum(axis=(-1, -2), keepdims=True)
-    j_px = np.stack([j_px_raw.sum(axis=-1), j_px_raw.sum(axis=-2)], axis=2)
+    j_px = n_px #np.stack([j_px_raw.sum(axis=-1), j_px_raw.sum(axis=-2)], axis=2)
     reval_n = compute_stepwise_dkl(n_px, approximate_likelihood(trained.naive_belief))
     reval_j = compute_stepwise_dkl(j_px, approximate_likelihood(trained.joint_belief))
     time_len = n_px.shape[1]
@@ -928,15 +922,15 @@ if __name__ == "__main__":
     # echo    = CognitiveGridworld(**{**common, 'reservoir': True,  'load_env': "/sanity/reservoir_ctx_2_e5"})
     # trained = CognitiveGridworld(**{**common, 'reservoir': False, 'load_env': "/sanity/fully_trained_ctx_2_e5"})
 
-    _pca = lambda m, attr, lbl: (*project_pca(getattr(m, attr), mode=CFG["PLOT_MODE"]), npy(m.ctx_vals), lbl)
+    # _pca = lambda m, attr, lbl: (*project_pca(getattr(m, attr), mode=CFG["PLOT_MODE"]), npy(m.ctx_vals), lbl)
 
     """ Event-aligned dynamics """
     # run_event_dynamics(trained, echo, params={"P_BANDS": 100, "K_SHOW_PCS": 100, "N_SHOW_NEUR": 100, "EVENT_STD_MULT": 1})
     # plt.show()
 
-    """ heatmaps """
-    plot_network_flow_fields(trained, echo, metric_norm="none", cfg_override={"NX": 50, "NY": 50, "MIN_COUNT": 50})
-    plt.show()
+    # """ heatmaps """
+    # plot_network_flow_fields(trained, echo, metric_norm="none", cfg_override={"NX": 50, "NY": 50, "MIN_COUNT": 50})
+    # plt.show()
 
     """ Paired PCA grids """
     # render_paired_pca_grids([_pca(trained,"model_belief","TRAINED"), _pca(trained,"joint_belief","JOINT")], fig_title="Trained + Joint")

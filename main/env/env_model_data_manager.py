@@ -7,8 +7,9 @@ class Env_model_data_manager(Env_control_manager):
 
     def prep_data_manager(self):
         self.test_e = 0
+        self.hid_dim_or_1k = min(1000, self.hid_dim)
         test_episodes = 2 + self.episodes // self.checkpoint_every
-        self.test_model_update_dim, self.test_model_input_dim = [np.zeros((test_episodes, self.hid_dim)) for _ in range(2)]
+        self.test_model_update_dim, self.test_model_input_dim = [np.zeros((test_episodes, self.hid_dim_or_1k)) for _ in range(2)]
         self.classifier_loss_log, self.generator_loss_log, self.test_SII_score, self.test_SII_coef, self.readin_grad_log, self.readout_grad_log, \
                                                                                                        = [np.zeros(test_episodes) for _ in range(6)]
         self.test_net_joint_DKL, self.test_net_naive_DKL, self.test_accs, self.train_accs, self.test_TPs, self.train_TPs, self.test_mses, self.train_mses \
@@ -42,16 +43,15 @@ class Env_model_data_manager(Env_control_manager):
             self.test_SII_score[self.test_e] = reg.score(X, Y)
             self.test_SII_coef[self.test_e] = reg.coef_[0][0]
 
-            if self.hid_dim < 2000:
-                try:
-                    # Get total dimensionality of LSTM input and output 
-                    update_pca = PCA(n_components = self.hid_dim).fit(self.model_update_flat.reshape(-1, self.hid_dim))
-                    input_pca = PCA(n_components = self.hid_dim).fit(self.model_input_flat.reshape(-1, self.hid_dim))
-                    self.test_model_update_dim[self.test_e] = update_pca.explained_variance_
-                    self.test_model_input_dim[self.test_e] = input_pca.explained_variance_
-                except:
-                    self.test_model_update_dim[self.test_e] = np.nan
-                    self.test_model_input_dim[self.test_e] = np.nan
+            try:
+                # Get total dimensionality of LSTM input and output 
+                update_pca = PCA(n_components = self.hid_dim_or_1k).fit(self.model_update_flat.reshape(-1, self.hid_dim))
+                input_pca = PCA(n_components = self.hid_dim_or_1k).fit(self.model_input_flat.reshape(-1, self.hid_dim))
+                self.test_model_update_dim[self.test_e] = update_pca.explained_variance_
+                self.test_model_input_dim[self.test_e] = input_pca.explained_variance_
+            except:
+                self.test_model_update_dim[self.test_e] = np.nan
+                self.test_model_input_dim[self.test_e] = np.nan
 
 
     def save(self):
