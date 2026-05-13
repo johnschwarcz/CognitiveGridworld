@@ -243,7 +243,7 @@ def finalize_diagnostics(fig, ax_row):
     ax_row[1].axhline(0, c="black", ls="-", lw=1.2, alpha=0.6)
     apply_dynamic_ylim(ax_row[1])
     ax_row[1].set_ylabel("Coefficient")
-    ax_row[1].set_title("Accuracy-SII Correlation", loc="center", pad=15)
+    ax_row[1].set_title("Accuracy-FR Correlation", loc="center", pad=15)
     _format_academic_ax(ax_row[1])
 
     # PR DIFF [Col 2]

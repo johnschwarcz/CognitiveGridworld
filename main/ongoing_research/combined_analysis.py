@@ -283,7 +283,7 @@ def prep_model(model, prm, rng):
     # ADDED: Compute re-evaluation dynamically for event alignment
     eps = 1e-99
     j_bel = getattr(model, "joint_belief", None)
-    j_px = getattr(model, "joint_nx", None)
+    j_px = getattr(model, "naive_px", None)
     j_bel = npy(j_bel).astype(np.float64)
     app_px = approximate_likelihood(j_bel, eps)
     reval = compute_stepwise_dkl(j_px, app_px, eps).mean(axis=-1)
@@ -882,9 +882,8 @@ def plot_post_training_diagnostics(trained, echo, D=3):
 # Figure: Re-evaluation
 # ═══════════════════════════════════════════════════════════════════
 def plot_re_evaluation(trained):
-    n_px = trained.naive_px / trained.naive_px.sum(axis=-1, keepdims=True)
+    j_px = n_px = trained.naive_px / trained.naive_px.sum(axis=-1, keepdims=True)
     j_px_raw = trained.joint_px / trained.joint_px.sum(axis=(-1, -2), keepdims=True)
-    j_px = n_px #np.stack([j_px_raw.sum(axis=-1), j_px_raw.sum(axis=-2)], axis=2)
     reval_n = compute_stepwise_dkl(n_px, approximate_likelihood(trained.naive_belief))
     reval_j = compute_stepwise_dkl(j_px, approximate_likelihood(trained.joint_belief))
     time_len = n_px.shape[1]

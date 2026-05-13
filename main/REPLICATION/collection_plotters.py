@@ -308,7 +308,7 @@ class Collection_Plotters():
                     ax.plot(t, dkl[c], c=col[c], ls='--', lw=1.5)
                     ax.scatter(t[idx], dkl[c, idx], s=50, marker='o',
                                 facecolors=col[c], edgecolors='k', zorder=3)
-                ax.set(ylabel='KL-divergence', xlabel='Inference Time', title='Semantic Interaction Information')
+                ax.set(ylabel='KL-divergence', xlabel='Inference Time', title='Factorization Regret')
                 max_d = dkl.max() * 1.05
                 ax.set_ylim(None, max_d)
                 ax.set_yticks([0, 4, 8, 12])
@@ -488,7 +488,7 @@ class Collection_Plotters():
         #             ax.scatter(t[idx], dkl[c, idx], s=50, marker='o',
         #                 facecolors=col[c], edgecolors='k', zorder=3
         #             )
-        #         ax.set(ylabel='KL-divergence', xlabel='Inference Time', title='Semantic Interaction Information')
+        #         ax.set(ylabel='KL-divergence', xlabel='Inference Time', title='Factorization Regret')
         #         max_d = dkl.max() * 1.05
         #         ax.set_ylim(None, max_d)
         #         ax.set_yticks([0, 4, 8, 12])

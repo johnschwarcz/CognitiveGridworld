@@ -4,17 +4,17 @@ from main.model.model_architecture import Model_architecture as Model
 
 class Env_model_manager(Env_model_data_manager):
 
-    def run_model(self):        
+    def run_model(self, disable_tqdm = False):        
         self.model = Model(**vars(self))
         if type(self.load_env) == str:
             self.load() # Loads both env and model
         self.prep_data_manager()
-        self.episode_loop()
+        self.episode_loop(disable_tqdm)
         if self.save_env is not None:
             self.save() # Saves both env and model
 
-    def episode_loop(self):
-        for self.e in tqdm(range(self.episodes)):   
+    def episode_loop(self, disable_tqdm):
+        for self.e in tqdm(range(self.episodes), disable=disable_tqdm):   
             self.log_ind = self.e % self.checkpoint_every
             self.test_set = (self.log_ind == 0) or (self.training == False)
             if (self.e == self.episodes - 1) or (self.log_ind == 0):
