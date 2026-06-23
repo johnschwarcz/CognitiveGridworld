@@ -32,6 +32,9 @@ class Env_generators(Env_helpers):
         T = self.test_states
         train = S[T:]
         test = S[:T]
+        if self.subsample_states is not None:
+            train = np.random.choice(train, size=self.subsample_states, replace=False)
+            test = np.random.choice(test, size=self.subsample_states, replace=False)
 
         if self.test_set:
             ctx = np.random.choice(test, size=B_C)             # repeats allowed

@@ -20,7 +20,7 @@ class Env_model_data_manager(Env_control_manager):
             self.test_accs[self.test_e, :] = self.model_acc.mean(0)
             self.test_TPs[self.test_e, :] = self.model_TP.mean(0)
             self.test_mses[self.test_e, :] = self.model_mse.mean(0)
-            if self.training and (self.mode == "SANITY"):
+            if self.training and (self.mode == "SANITY") and (self.skip_training_analyses is False):
                 self.perform_sanity_training_analyses()
             self.test_e += 1
         else:

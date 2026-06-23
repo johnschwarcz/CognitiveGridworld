@@ -31,8 +31,10 @@ class CognitiveGridworld(Env_model_manager):
         self.checkpoint_every = init.get('checkpoint_every', 500)
         self.plot_every = init.get('plot_every', 2)
         self.test_states = init.get('test_states', self.state_num // 10)
+        self.subsample_states = init.get('subsample_states', None)
 
         self.likelihood_temp = init.get('likelihood_temp', 2)
+        self.likelihood_freq = init.get('likelihood_freq', 1)
         self.realization_num = init.get('realization_num', 10)
         self.batch_num = init.get('batch_num', 1000)
         self.step_num = init.get('step_num', 100)
@@ -40,13 +42,16 @@ class CognitiveGridworld(Env_model_manager):
         self.obs_num = init.get('obs_num', 5)
         self.KQ_dim = init.get('KQ_dim', 30)
 
+        self.skip_training_analyses = init.get('skip_training_analyses', False)
+        self.early_stopping = init.get('early_stopping', False)
+
         self.control_ent_bonus_decay = init.get('control_ent_bonus', .05)
         self.classifier_ent_bonus = init.get('classifier_ent_bonus', 0.1)
         self.classifier_LR = init.get('classifier_LR', 0.0005)
         self.controller_LR = init.get('controller_LR', 0.001)
         self.generator_LR = init.get('generator_LR', 0.001)
         self.hid_dim = init.get('hid_dim', 1000)
-
+        
         self.learn_embeddings = init.get('learn_embeddings', True)
         self.reservoir = init.get('reservoir', False)
         self.training = init.get('training', False)

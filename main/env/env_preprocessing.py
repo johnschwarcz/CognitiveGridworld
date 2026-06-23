@@ -25,7 +25,7 @@ class Env_preprocessing(Env_generators):
         self.state_to_the_ctx_range = self.state_num ** self.ctx_range
         self.R_to_the_ctx_range = self.realization_num ** self.ctx_range
 
-        V_range = self.likelihood_temp * np.sin(np.linspace(-1, 1, self.V_num + 1)[1:] * np.pi)
+        V_range = self.likelihood_temp * np.sin(np.linspace(-1, 1, self.V_num + 1)[1:] * np.pi * self.likelihood_freq)
         self.roll_V_range = np.zeros((self.realization_num, self.V_num))
         for r in range(self.realization_num):
             self.roll_V_range[r, :] = np.roll(V_range, r)

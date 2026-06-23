@@ -22,11 +22,18 @@ class Env_model_manager(Env_model_data_manager):
                    self.plot_model_perf()
                 self.preprocess_env()
             self.run_generators()
-            if (not self.skip_inference) or self.test_set:
+            if (self.skip_inference is False) or self.test_set:
                 self.run_inference() 
             self.prep_model()
             self.forward_backward()
             self.log_model()
+
+            if self.test_set and self.early_stopping:
+                net_acc = self.test_accs[self.test_e - 1, -1]
+                thresh = self.joint_acc.mean(0)[-1]
+                if net_acc > thresh:
+                    print("Stopping early: ", net_acc, " > ", thresh)
+                    return 
 
     def prep_model(self):               
         args_for_model = {
