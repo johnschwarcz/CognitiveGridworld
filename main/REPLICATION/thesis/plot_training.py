@@ -75,9 +75,9 @@ def plot_network_overlay(bayes_joint, bayes_naive, net_trained, net_echo, T, ctx
     # Formatting and reference line
     axs[2].plot([0.1, 1.0], [0.1, 1.0], ls='-', c='gray', lw=1, zorder=1)
 
-    axs[0].set(title="Experts", xlabel='Inference Time', ylabel='Accuracy', ylim=(0.0, 1.1))
-    axs[1].set(title="Baselines", xlabel='Inference Time', ylim=(0.0, 1.1))
-    axs[2].set(title="Relative Accuracy", xlabel='Factorized / Echo-state', ylabel='Exact / Trained', xlim=(0.1, 1.0), ylim=(0.1, 1.0))
+    axs[0].set(title="Experts", xlabel='Inference Time', ylabel='Accuracy', ylim=(0.1, .7))
+    axs[1].set(title="Baselines", xlabel='Inference Time', ylim=(0.1, .7))
+    axs[2].set(title="Relative Accuracy", xlabel='Factorized / Echo-state', ylabel='Exact / Trained', xlim=(0.1, 1.0), ylim=(0.1, .7))
 
     for ax in axs:
         ax.grid(alpha=0.3)
@@ -149,7 +149,7 @@ def plot_training_convergence(ft_test_accs, echo_test_accs, echo_k_test_accs, jo
         ax[i].text(100, opt_bound + 0.05, 'Exact Bound', color='k', fontsize=12)
         ax[i].text(100, fact_bound + 0.05, 'Factorized Bound', color='k', fontsize=12)
 
-        ax[i].set_ylim(0, 0.95)
+        ax[i].set_ylim(.1, 0.7)
         ax[i].grid(alpha=0.3)
         ax[i].spines['top'].set_visible(False)
         ax[i].spines['right'].set_visible(False)
@@ -170,7 +170,7 @@ if __name__ == "__main__":
     obs_num = 5 
     state_num = 500  
     realization_num = 10 
-    step_num = 30 
+    step_num = 10 # 30 
     
     base_kwargs = {
         'mode': "sanity", 'cuda': cuda, 'episodes': 1, 
@@ -182,10 +182,10 @@ if __name__ == "__main__":
     echo_k_test_accs, echo_k_train_accs = [np.empty(3, dtype=object) for _ in range(2)]
     
     agent_ft = CognitiveGridworld(**base_kwargs,
-        batch_num=5000, hid_dim=1000, load_env=f"/sanity/fully_trained_ctx_2")  
+        batch_num=5000, hid_dim=1000, load_env=f"/sanity/fully_trained_ctx_2_1k_10step")  
     
     agent_echo = CognitiveGridworld(**base_kwargs,
-        batch_num=20, hid_dim=1000, load_env=f"/sanity/reservoir_ctx_2")  
+        batch_num=20, hid_dim=1000, load_env=f"/sanity/reservoir_ctx_2_1k_10step")  
     
     ft_test_accs = agent_ft.test_acc_through_training
     ft_train_accs = agent_ft.train_acc_through_training
@@ -197,7 +197,7 @@ if __name__ == "__main__":
     for i, k in enumerate([2, 5, 10]):
         h = 1000 * k
         agent_echo_k = CognitiveGridworld(**base_kwargs,
-            batch_num=20, hid_dim=h, load_env=f"/sanity/reservoir_ctx_2_{k}k")  
+            batch_num=20, hid_dim=h, load_env=f"/sanity/reservoir_ctx_2_{k}k_10step")  
         echo_k_test_accs[i] = agent_echo_k.test_acc_through_training
         echo_k_train_accs[i] = agent_echo_k.train_acc_through_training
 

@@ -517,7 +517,7 @@ if __name__ == "__main__":
     env_args = {
         'mode': "RL",
         'cuda': cuda,
-        'load_env': 'RL',
+        'load_env': 'RL_2',
         'show_plots': False,
         'episodes': 2,
         'ctx_num': 2,

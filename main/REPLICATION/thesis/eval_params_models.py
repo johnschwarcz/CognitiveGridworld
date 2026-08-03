@@ -18,7 +18,7 @@ sys.path.insert(0, path + '/main/model')
 
 from main.CognitiveGridworld import CognitiveGridworld 
 
-def extract_data(likelihood_temps, likelihood_freqs, base_params, target_zs=[0.17, 0.37], tolerance=0.03):
+def extract_data(likelihood_temps, likelihood_freqs, base_params, root_path, target_zs=[0.17, 0.37], tolerance=0.03):
     """
     Iterates sequentially through parameter configurations, loads the models,
     runs 1 episode of inference, and extracts the accuracy arrays along with
@@ -28,46 +28,84 @@ def extract_data(likelihood_temps, likelihood_freqs, base_params, target_zs=[0.1
     results = {}
     grid_size = len(target_zs)
 
+    # Helper function to verify if an absolute path prefix exists
+    def path_exists(p):
+        if os.path.exists(p): return True
+        # Check common extensions, specifically _net.pth as observed in the file structure
+        for ext in ['_net.pth', '.pth', '.pt', '.pkl', '.npy', '.npz']:
+            if os.path.exists(p + ext): return True
+        return False
+
     for lt in likelihood_temps:
         for lf in likelihood_freqs:           
-            # Paths for both saved environments
-            res_path = f"/params3/reservoir_LT{lt}_LF{lf}"
-            ft_path = f"/params3/fully_trained_LT{lt}_LF{lf}"
+            # 1. Relative paths expected by CognitiveGridworld's internal loader
+            rel_res_path = f"/params/reservoir_LT{lt}_LF{lf}"
+            rel_ft_path = f"/params/fully_trained_LT{lt}_LF{lf}"
+            
+            # 2. Absolute prefixes strictly for the external existence check
+            abs_res_prefix = os.path.join(root_path, 'main', 'DATA', 'params', f'reservoir_LT{lt}_LF{lf}')
+            abs_ft_prefix = os.path.join(root_path, 'main', 'DATA', 'params', f'fully_trained_LT{lt}_LF{lf}')
+            
+            has_res = path_exists(abs_res_prefix)
+            has_ft = path_exists(abs_ft_prefix)
+
+            # Skip this configuration only if BOTH files are missing
+            if not has_res and not has_ft:
+                print(f"Skipping LT={lt}, LF={lf} - Neither 'reservoir' nor 'fully_trained' files exist.")
+                continue
+
+            res_model, ft_model = None, None
             N = 1000
             
-            # 1. Load and evaluate Reservoir Model
-            res_args = base_params.copy()
-            res_args.update({
-                'likelihood_temp': lt,
-                'likelihood_freq': lf,
-                'reservoir': True,
-                'load_env': res_path,
-                'hid_dim': N,
-            })
-            res_model = CognitiveGridworld(**res_args)
-            
-            # 2. Load and evaluate Fully Trained Model
-            ft_args = base_params.copy()
-            ft_args.update({
-                'likelihood_temp': lt,
-                'likelihood_freq': lf,
-                'reservoir': False,
-                'load_env': ft_path,
-                'hid_dim': N,
-            })
-            ft_model = CognitiveGridworld(**ft_args)                
-            
-            # 3. Extract Generating Functions (Likelihoods)
-            # The likelihood structure is a property of the environment, identical for both agents.
-            lik_dict = None
-            if hasattr(ft_model, 'joint_Z') and getattr(ft_model, 'ctx_num', 0) >= 2:
-                Z0 = ft_model.joint_Z[:, :, 0].flatten()
-                Z1 = ft_model.joint_Z[:, :, 1].flatten()
+            try:
+                # 1. Load and evaluate Reservoir Model (if it exists)
+                if has_res:
+                    res_args = base_params.copy()
+                    res_args.update({
+                        'likelihood_temp': lt,
+                        'likelihood_freq': lf,
+                        'reservoir': True,
+                        'load_env': rel_res_path, # Passed in the format the class expects
+                        'hid_dim': N,
+                    })
+                    res_model = CognitiveGridworld(**res_args)
+                else:
+                    print(f"  Missing reservoir file for LT={lt}, LF={lf}")
+                
+                # 2. Load and evaluate Fully Trained Model (if it exists)
+                if has_ft:
+                    ft_args = base_params.copy()
+                    ft_args.update({
+                        'likelihood_temp': lt,
+                        'likelihood_freq': lf,
+                        'reservoir': False,
+                        'load_env': rel_ft_path, # Passed in the format the class expects
+                        'hid_dim': N,
+                    })
+                    ft_model = CognitiveGridworld(**ft_args)
+                else:
+                    print(f"  Missing fully_trained file for LT={lt}, LF={lf}")
 
-                nl_flat = ft_model.naive_likelihood.reshape(-1, ft_model.ctx_num, ft_model.realization_num)
+            except Exception as e:
+                print(f"Skipping LT={lt}, LF={lf} - Error during model loading: {e}")
+                continue
+            
+            # The likelihood structure and bayesian baselines are properties of the environment, 
+            # so we can pull them from whichever model successfully loaded.
+            base_model = ft_model if ft_model is not None else res_model
+            if base_model is None:
+                continue
+
+            # 3. Extract Generating Functions (Likelihoods)
+            lik_dict = None
+            if hasattr(base_model, 'joint_Z') and getattr(base_model, 'ctx_num', 0) >= 2:
+                Z0 = base_model.joint_Z[:, :, 0].flatten()
+                Z1 = base_model.joint_Z[:, :, 1].flatten()
+
+                nl_flat = base_model.naive_likelihood.reshape(-1, base_model.ctx_num, base_model.realization_num)
                 L0 = nl_flat[:, 0, :]
                 L1 = nl_flat[:, 1, :]
-                jl_flat = ft_model.joint_likelihood.reshape(-1, ft_model.realization_num, ft_model.realization_num)
+                jl_flat = base_model.joint_likelihood.reshape(-1, base_model.realization_num, base_model.realization_num)
 
                 lik_dict = {}
                 for zi in range(grid_size):
@@ -85,18 +123,16 @@ def extract_data(likelihood_temps, likelihood_freqs, base_params, target_zs=[0.1
                         else:
                             lik_dict[(zi, zj)] = None
 
-            # Store the extracted, averaged data in the results dictionary
+            # Store the extracted, averaged data in the results dictionary safely
             results[(lt, lf)] = {
-                'res_model_acc': res_model.model_acc.mean(0),
-                'ft_model_acc': ft_model.model_acc.mean(0),
-                'joint_acc': res_model.joint_acc.mean(0),
-                'naive_acc': res_model.naive_acc.mean(0),
-                'joint_std': res_model.joint_acc.std(0),
-                'naive_std': res_model.naive_acc.std(0),
-                # 'res_train_acc': res_model.train_acc_through_training[:, -1],
-                # 'ft_train_acc': ft_model.train_acc_through_training[:, -1],
-                'res_train_acc': res_model.test_acc_through_training[:, -1],
-                'ft_train_acc': ft_model.test_acc_through_training[:, -1],                
+                'res_model_acc': res_model.model_acc.mean(0) if res_model else None,
+                'ft_model_acc': ft_model.model_acc.mean(0) if ft_model else None,
+                'joint_acc': base_model.joint_acc.mean(0),
+                'naive_acc': base_model.naive_acc.mean(0),
+                'joint_std': base_model.joint_acc.std(0),
+                'naive_std': base_model.naive_acc.std(0),
+                'res_train_acc': res_model.test_acc_through_training[:, -1] if res_model else None,
+                'ft_train_acc': ft_model.test_acc_through_training[:, -1] if ft_model else None,                
                 'likelihoods': lik_dict
             }
             
@@ -113,7 +149,14 @@ def plot_results(likelihood_temps, likelihood_freqs, data):
             ax = axes[i, j]            
             
             # Retrieve data for this configuration
-            config_data = data[(lt, lf)]
+            config_data = data.get((lt, lf))
+            
+            # Handle missing data gracefully
+            if config_data is None:
+                ax.axis('off')
+                ax.set_title(f"Temperature = {lt} | Frequency = {lf}\n(Data Missing)", fontsize=10)
+                continue
+
             res_model_acc = config_data['res_model_acc']
             ft_model_acc = config_data['ft_model_acc']
             joint_acc = config_data['joint_acc']
@@ -121,8 +164,10 @@ def plot_results(likelihood_temps, likelihood_freqs, data):
 
             # --- PLOTTING ---
             # Network performances
-            ax.plot(res_model_acc, label='Echo State', color='r', linewidth=1, ls ='None', marker = 'o', ms = 4)
-            ax.plot(ft_model_acc, label='Fully Trained', color='g', linewidth=1, linestyle='None', marker = 'o', ms = 4)
+            if res_model_acc is not None:
+                ax.plot(res_model_acc, label='Echo State', color='r', linewidth=1, ls ='None', marker = 'o', ms = 4)
+            if ft_model_acc is not None:
+                ax.plot(ft_model_acc, label='Fully Trained', color='g', linewidth=1, linestyle='None', marker = 'o', ms = 4)
             
             # Bayes baselines
             ax.plot(joint_acc, label='Exact', color='g', linewidth=1.5, ls = '--')
@@ -156,20 +201,27 @@ def plot_training_results(likelihood_temps, likelihood_freqs, data, batch_num):
             ax = axes[i, j]            
             
             # Retrieve data for this configuration
-            config_data = data[(lt, lf)]
+            config_data = data.get((lt, lf))
+            
+            # Handle missing data gracefully
+            if config_data is None:
+                ax.axis('off')
+                ax.set_title(f"Temperature = {lt} | Frequency = {lf}\n(Data Missing)", fontsize=10)
+                continue
+
             res_train_acc = config_data['res_train_acc']
             ft_train_acc = config_data['ft_train_acc']
             
             # Isolate the final inference step for the bayesian baselines
             joint_acc_final = config_data['joint_acc'][-1]
             naive_acc_final = config_data['naive_acc'][-1]
-            joint_se = config_data['joint_std'][-1] / np.sqrt(batch_num)
-            naive_se = config_data['naive_std'][-1] / np.sqrt(batch_num)
 
             # --- PLOTTING ---
             # Network performances throughout training
-            ax.plot(res_train_acc, label='Echo State', color='r', linewidth=1.5, alpha = 1)
-            ax.plot(ft_train_acc, label='Fully Trained', color='g', linewidth=1.5, alpha = 1)
+            if res_train_acc is not None:
+                ax.plot(res_train_acc, label='Echo State', color='r', linewidth=1.5, alpha = 1)
+            if ft_train_acc is not None:
+                ax.plot(ft_train_acc, label='Fully Trained', color='g', linewidth=1.5, alpha = 1)
             
             # Bayes baselines (horizontal lines across all training epochs)
             ax.axhline(y=joint_acc_final, label='Exact', color='g', linewidth=3, ls=':', alpha = 1)
@@ -209,16 +261,19 @@ def plot_likelihood_configurations(likelihood_temps, likelihood_freqs, data, bas
     
     for i, lt in enumerate(likelihood_temps):
         for j, lf in enumerate(likelihood_freqs):
-            config_data = data[(lt, lf)].get('likelihoods')
+            config_entry = data.get((lt, lf))
             
             # Setup a background axis just for the title of this 3x3 cell
             ax_title = fig.add_subplot(outer_grid[i, j])
             ax_title.axis('off')
             ax_title.set_title(f"Temperature = {lt} | Frequency = {lf}", fontsize=12, pad=15)
             
-            if config_data is None:
+            # Handle missing data gracefully
+            if config_entry is None or config_entry.get('likelihoods') is None:
                 ax_title.text(0.5, 0.5, "Data Unavailable", ha='center', va='center')
                 continue
+            
+            config_data = config_entry.get('likelihoods')
             
             # Subdivide the outer cell into a grid for the target Zs
             inner_outer_grid = outer_grid[i, j].subgridspec(grid_size, grid_size, wspace=0.15, hspace=0.1)
@@ -280,8 +335,8 @@ def plot_likelihood_configurations(likelihood_temps, likelihood_freqs, data, bas
 if __name__ == "__main__":
     # Search space
     likelihood_temps = [1, 2, 3]
-    likelihood_freqs = [.5, 1, 2]
-    batch_num = 20000 # 25000     
+    likelihood_freqs = [1, 1.5, 2]
+    batch_num = 20000      
     # Base configuration for 1-episode inference run
     base_params = {
         'mode': "SANITY", 
@@ -302,7 +357,12 @@ if __name__ == "__main__":
     }
     
     # 1. Extract the data (heavy lifting + likelihoods)
-    # extracted_data = extract_data(likelihood_temps, likelihood_freqs, base_params, target_zs=[0.17, 0.37])
+    extracted_data = extract_data(likelihood_temps, likelihood_freqs, base_params, root_path=path, target_zs=[0.17, 0.37])
+    
+    # Exit cleanly if no valid paths were found
+    if not extracted_data:
+        print("No valid files were found to extract data from. Exiting without plotting.")
+        sys.exit(0)
     
     # 2. Plot the original inference step data
     plot_results(likelihood_temps, likelihood_freqs, extracted_data)
@@ -312,3 +372,4 @@ if __name__ == "__main__":
     
     # 4. Plot the generative likelihood structures across configurations
     plot_likelihood_configurations(likelihood_temps, likelihood_freqs, extracted_data, base_params, target_zs=[0.17, 0.37])
+    

@@ -43,12 +43,12 @@ def run_single_experiment(params):
         'likelihood_freq': likelihood_freq,
         'early_stopping': True,
         'cuda': cuda, 
-        
-        'reservoir': True, 
-        'save_env': f"/params4/reservoir_LT{likelihood_temp}_LF{likelihood_freq}"
+        'show_plots': False,
+        # 'reservoir': True, 
+        # 'save_env': f"/params/reservoir_LT{likelihood_temp}_LF{likelihood_freq}"
 
-        # 'reservoir': False, 
-        # 'save_env': f"/params4/fully_trained_LT{likelihood_temp}_LF{likelihood_freq}"
+        'reservoir': False, 
+        'save_env': f"/params/fully_trained_LT{likelihood_temp}_LF{likelihood_freq}"
     })
     
     print(f"Finished: likelihood_temp={likelihood_temp}, likelihood_freq={likelihood_freq}")
@@ -56,11 +56,11 @@ def run_single_experiment(params):
 
 if __name__ == "__main__":
     # Fixed hyperparameters
-    cuda = 1
+    cuda = 0
     batch_num = 5000
     hid_dim = 1000 # 2000
-    step_num = 30 # 10
-    max_workers = 3
+    step_num = 30
+    max_workers = 2
 
     # Search space
     likelihood_temps = [3, 2, 1]
