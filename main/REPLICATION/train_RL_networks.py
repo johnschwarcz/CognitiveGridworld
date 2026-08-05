@@ -21,7 +21,7 @@ if __name__ == "__main__":
     #     'batch_num': batch_num, 'step_num': step_num, 'state_num': state_num, 'save_env': f'RL',
     #     'classifier_LR': .0005, 'ctx_num': 2, 'generator_LR':.0005, 'learn_embeddings': True})
     
-    cuda = 0
+    cuda = 1
     realization_num = 10
     batch_num = 20000 
     step_num = 30
@@ -31,5 +31,5 @@ if __name__ == "__main__":
     episodes = 50000 
     self = CognitiveGridworld(**{'mode': "RL", 'cuda': cuda, 'episodes': episodes,
         'realization_num': realization_num,  'hid_dim': hid_dim,  'obs_num': obs_num,'training': True,
-        'batch_num': batch_num, 'step_num': step_num, 'state_num': state_num, 'save_env': f'RL_2',
+        'batch_num': batch_num, 'step_num': step_num, 'state_num': state_num, 'save_env': f'RL_2_FIX',
         'classifier_LR': .0001, 'ctx_num': 2, 'generator_LR':.0001, 'classifier_ent_bonus': .01, 'learn_embeddings': True})

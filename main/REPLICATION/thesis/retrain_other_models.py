@@ -77,7 +77,7 @@ def train_RL_state_num_reps():
 # ─────────────────────────────────────────────────────────────────────────────
 
 def train_e5_variants():
-    cuda = 1
+    cuda = 0
     realization_num = 10
     hid_dim = 1000
     obs_num = 5
@@ -156,10 +156,10 @@ if __name__ == "__main__":
     # print("=" * 60)
     # train_controllers()
 
-    print("=" * 60)
-    print("Phase 2: RL_state_num_reps (9 state sizes × 1 rep)")
-    print("=" * 60)
-    train_RL_state_num_reps()
+    # print("=" * 60)
+    # print("Phase 2: RL_state_num_reps (9 state sizes × 1 rep)")
+    # print("=" * 60)
+    # train_RL_state_num_reps()
 
     print("=" * 60)
     print("Phase 3: _e5 checkpoint variants (2 models)")
