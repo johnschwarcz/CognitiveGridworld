@@ -117,20 +117,20 @@ def train_controllers():
     controller_folder = os.path.join(project_root, "main", "DATA", "controller")
     os.makedirs(controller_folder, exist_ok=True)
 
-    # base_kwargs = {
-    #     'mode': "RL", 'cuda': 1, 'load_env': 'RL_2', 'show_plots': False,
-    #     'control_ent_bonus': .05, 'episodes': 1, 'ctx_num': 2,
-    #     'realization_num': 10, 'batch_num': 20000, 'training': False,
-    #     'hid_dim': 1000, 'obs_num': 5, 'state_num': 500, 'step_num': 30,
-    #     'controller_LR': .005, 'learn_embeddings': True
-    # }
     base_kwargs = {
         'mode': "RL", 'cuda': 1, 'load_env': 'RL_2', 'show_plots': False,
         'control_ent_bonus': .05, 'episodes': 1, 'ctx_num': 2,
-        'realization_num': 10, 'batch_num': 100, 'training': False,
+        'realization_num': 10, 'batch_num': 20000, 'training': False,
         'hid_dim': 1000, 'obs_num': 5, 'state_num': 500, 'step_num': 30,
         'controller_LR': .005, 'learn_embeddings': True
     }
+    # base_kwargs = {
+    #     'mode': "RL", 'cuda': 1, 'load_env': 'RL_2', 'show_plots': False,
+    #     'control_ent_bonus': .05, 'episodes': 1, 'ctx_num': 2,
+    #     'realization_num': 10, 'batch_num': 100, 'training': False,
+    #     'hid_dim': 1000, 'obs_num': 5, 'state_num': 500, 'step_num': 30,
+    #     'controller_LR': .005, 'learn_embeddings': True
+    # }
     
     
     eps = 2000
