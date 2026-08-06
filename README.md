@@ -3,6 +3,8 @@
 **CognitiveGridworld** is a stationary POMDP for studying compositional generalization in latent space.
 The associated article can be found here https://arxiv.org/abs/2603.27134.
 
+A lightweight implementation of the task alone can be found here https://github.com/johnschwarcz/coggrid.
+
 ## Installation
 
 The project is built for Python 3.8+. To reproduce the environment do:
