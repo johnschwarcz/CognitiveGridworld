@@ -62,7 +62,8 @@ def train_RL_state_num_reps():
                 'mode': "RL", 'cuda': 1, 'episodes': 50000, 
                 'checkpoint_every': 5000, 'show_plots': False,
                 'realization_num': 10, 'hid_dim': 1000, 'obs_num': 5,
-                'training': True, 'batch_num': 20000, 'step_num': 30,
+                # 'training': True, 'batch_num': 20000, 'step_num': 30,
+                'training': True, 'batch_num': 10000, 'step_num': 30,
                 'state_num': state_num, 
                 'save_env': f'/RL_state_num_reps/{state_num}_{r}',
                 'classifier_LR': .0001, 'ctx_num': 2,
@@ -116,16 +117,26 @@ def train_controllers():
     controller_folder = os.path.join(project_root, "main", "DATA", "controller")
     os.makedirs(controller_folder, exist_ok=True)
 
+    # base_kwargs = {
+    #     'mode': "RL", 'cuda': 1, 'load_env': 'RL_2', 'show_plots': False,
+    #     'control_ent_bonus': .05, 'episodes': 1, 'ctx_num': 2,
+    #     'realization_num': 10, 'batch_num': 20000, 'training': False,
+    #     'hid_dim': 1000, 'obs_num': 5, 'state_num': 500, 'step_num': 30,
+    #     'controller_LR': .005, 'learn_embeddings': True
+    # }
     base_kwargs = {
         'mode': "RL", 'cuda': 1, 'load_env': 'RL_2', 'show_plots': False,
         'control_ent_bonus': .05, 'episodes': 1, 'ctx_num': 2,
-        'realization_num': 10, 'batch_num': 20000, 'training': False,
+        'realization_num': 10, 'batch_num': 100, 'training': False,
         'hid_dim': 1000, 'obs_num': 5, 'state_num': 500, 'step_num': 30,
         'controller_LR': .005, 'learn_embeddings': True
     }
+    
+    
     eps = 2000
     reps = 20
-
+      
+ 
     joint = CognitiveGridworld(**base_kwargs)
     joint.train_controller(eps=eps, reps=reps, offline_teacher='joint')
     with open(os.path.join(controller_folder, "joint.pkl"), 'wb') as f:
@@ -156,14 +167,14 @@ if __name__ == "__main__":
     # print("=" * 60)
     # train_controllers()
 
-    # print("=" * 60)
-    # print("Phase 2: RL_state_num_reps (9 state sizes × 1 rep)")
-    # print("=" * 60)
-    # train_RL_state_num_reps()
+    print("=" * 60)
+    print("Phase 2: RL_state_num_reps (9 state sizes × 1 rep)")
+    print("=" * 60)
+    train_RL_state_num_reps()
 
-    print("=" * 60)
-    print("Phase 3: _e5 checkpoint variants (2 models)")
-    print("=" * 60)
-    train_e5_variants()
+    # print("=" * 60)
+    # print("Phase 3: _e5 checkpoint variants (2 models)")
+    # print("=" * 60)
+    # train_e5_variants()
 
     print("Done.")

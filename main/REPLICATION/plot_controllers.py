@@ -14,7 +14,7 @@ sys.path.insert(0, path + '/main')
 sys.path.insert(0, path + '/main/bayes')
 sys.path.insert(0, path + '/main/model')
 from main.CognitiveGridworld import CognitiveGridworld
-logscale = 1
+logscale = 0
 
 plt.rcParams.update({
     'font.family': 'serif',
@@ -223,7 +223,7 @@ def plot_controller_training_panel(ax_curve, ax_legend, joint_agent, online_net,
 
     ax_curve.set_ylim([.6, 1.05])
     ax_curve.set_yticks([.6, .7, .8, .9, 1.0])
-    ax_curve.set_xticks([1, 10, 100, 1000])
+    # ax_curve.set_xticks([1, 10, 100, 1000])
 
 # =============================================================================
 # ALIGNED: Combined Observation Likelihoods & Landscape Plot
@@ -511,13 +511,13 @@ def plot_example_trajectories_1x6(offline_net, batches=(8, 5, 7, 9, 4, 1), alpha
 
 
 if __name__ == "__main__":
-    cuda = 0
+    cuda = 1
     reps = 20
     eps = 2
     env_args = {
         'mode': "RL",
         'cuda': cuda,
-        'load_env': 'RL_2',
+        'load_env': 'RL_2_FIX',
         'show_plots': False,
         'episodes': 2,
         'ctx_num': 2,

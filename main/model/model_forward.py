@@ -84,7 +84,7 @@ class Model_forward(Model_backward):
     def postprocess_belief(self, belief):
         self.classifier_belief_flat = belief.detach()
         self.classifier_goal_belief = belief[self.batch_range, :, self.goal_ind]
-        self.classifier_goal_selection = Categorical(self.classifier_goal_belief).sample()
+        self.classifier_goal_selection = Categorical(self.classifier_goal_belief).sample() # SAMPLES FROM MARGINAL BELIEF
         self.ACC = (self.classifier_goal_selection == self.goal_value[:,None]).float() 
         
     def default_pobs(self, training_controller = False):
@@ -99,8 +99,7 @@ class Model_forward(Model_backward):
                 # sample = torch.distributions.Categorical(probs = sample).sample()
                 # sample = torch.stack(torch.unravel_index(sample, self.ctx_dims),1)
                 # FIX
-                sample = torch.distributions.Categorical(probs=CBF).sample()                
-                
+                sample = torch.distributions.Categorical(probs=CBF).sample()                 # SAMPLES FROM JOINT BELIEF                 
                 sample[self.batch_range, self.goal_ind] = self.classifier_goal_selection[:, -1]
                 conf = CBF[self.BR, self.CR, sample]
                 conf[self.batch_range, self.goal_ind] = self.ACC[:,-1]
