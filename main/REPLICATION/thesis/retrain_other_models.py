@@ -13,21 +13,33 @@ Covers:
                              source: main/REPLICATION/supplementary_plotter.py
   4. Controller pkl files   — joint / offline_net / online_net controllers
                              source: main/REPLICATION/train_controllers.py
-                             NOTE: controllers load 'RL_2' (retrained here);
-                             if train_controllers.py still uses load_env='RL',
-                             update that path to 'RL_2' before running it.
 """
 
 import os
 import sys
 import inspect
 import pickle
+import numpy as np 
 
-path = os.path.dirname(os.path.abspath(inspect.getfile(inspect.currentframe())))
-project_root = os.path.abspath(os.path.join(path, '..', '..', '..'))
+# path = os.path.dirname(os.path.abspath(inspect.getfile(inspect.currentframe())))
+# project_root = os.path.abspath(os.path.join(path, '..', '..', '..'))
+# sys.path.insert(0, project_root)
+
+def find_project_root(start=None):
+    d = os.path.abspath(start or os.getcwd())
+    while True:
+        if os.path.exists(os.path.join(d, 'main', 'CognitiveGridworld.py')):
+            return d
+        parent = os.path.dirname(d)
+        if parent == d:
+            raise RuntimeError("project root not found")
+        d = parent
+
+project_root = find_project_root()
 sys.path.insert(0, project_root)
 
 from main.CognitiveGridworld import CognitiveGridworld
+
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -52,22 +64,22 @@ def train_RL_2():
 # ─────────────────────────────────────────────────────────────────────────────
 
 def train_RL_state_num_reps():
-    state_nums = [100, 125, 150, 200, 250, 300, 400, 500, 1000]
-    repetitions = 1   # compare_RL_training.py sets repetitions=1
+    state_nums = [1000, 500, 400, 300, 250, 200, 150, 125, 100, 75]
+    # state_nums = np.flip(state_nums)
+    repetitions = 5
 
     for r in range(repetitions):
         for state_num in state_nums:
             print(f"Training state_num={state_num}, rep={r}")
             CognitiveGridworld(**{
-                'mode': "RL", 'cuda': 1, 'episodes': 50000, 
-                'checkpoint_every': 5000, 'show_plots': False,
-                'realization_num': 10, 'hid_dim': 1000, 'obs_num': 5,
-                # 'training': True, 'batch_num': 20000, 'step_num': 30,
-                'training': True, 'batch_num': 10000, 'step_num': 30,
-                'state_num': state_num, 
+                'mode': "RL", 'cuda': 1, 'training': True, 
+                'checkpoint_every': 5000, 'show_plots': False, 
+                'realization_num': 10, 'hid_dim': 1000, 'obs_num': 5, 'step_num': 30, 
+                # 'episodes': 50000, 'batch_num': 10000, 'classifier_LR': .0005, 'generator_LR': .0005,
+                'episodes': 50000, 'batch_num': 10000, 'classifier_LR': .0005, 'generator_LR': .0005,
+                #'episodes': 50000, 'batch_num': 20000, 'classifier_LR': .0001, 'generator_LR': .0001,
+                'state_num': state_num, 'ctx_num': 2, 'learn_embeddings': True,
                 'save_env': f'/RL_state_num_reps/{state_num}_{r}',
-                'classifier_LR': .0001, 'ctx_num': 2,
-                'generator_LR': .0001, 'learn_embeddings': True
             })
 
 
@@ -108,53 +120,59 @@ def train_e5_variants():
 # ─────────────────────────────────────────────────────────────────────────────
 # Phase 4: Controller pkl files
 # Source: main/REPLICATION/train_controllers.py (exact parameters).
-# Original script uses load_env='RL' (DATA/RL_net.pth); this version uses
-# 'RL_2' which is retrained in Phase 1 above.  Update train_controllers.py
-# accordingly if you run that script directly instead.
 # ─────────────────────────────────────────────────────────────────────────────
 
 def train_controllers():
     controller_folder = os.path.join(project_root, "main", "DATA", "controller")
     os.makedirs(controller_folder, exist_ok=True)
 
-    base_kwargs = {
-        'mode': "RL", 'cuda': 1, 'load_env': 'RL_2', 'show_plots': False,
-        'control_ent_bonus': .05, 'episodes': 1, 'ctx_num': 2,
-        'realization_num': 10, 'batch_num': 20000, 'training': False,
-        'hid_dim': 1000, 'obs_num': 5, 'state_num': 500, 'step_num': 30,
-        'controller_LR': .005, 'learn_embeddings': True
-    }
     # base_kwargs = {
     #     'mode': "RL", 'cuda': 1, 'load_env': 'RL_2', 'show_plots': False,
     #     'control_ent_bonus': .05, 'episodes': 1, 'ctx_num': 2,
-    #     'realization_num': 10, 'batch_num': 100, 'training': False,
+    #     'realization_num': 10, 'batch_num': 20000, 'training': False,
     #     'hid_dim': 1000, 'obs_num': 5, 'state_num': 500, 'step_num': 30,
     #     'controller_LR': .005, 'learn_embeddings': True
     # }
     
-    
-    eps = 2000
+    cuda = 0
+    ent = .05 
+    batch_num = 20000 
+    controller_LR = .005
+    generator_LR = .001
+    controller_eps = 500 # 2000
     reps = 20
       
- 
+    base_kwargs = {
+        'mode': "RL", 'cuda': cuda, 'load_env': 'RL_2', 'show_plots': False,
+        'control_ent_bonus': ent, 'episodes': 1, 'ctx_num': 2,
+        'realization_num': 10, 'batch_num': batch_num, 'training': False,
+        'hid_dim': 1000, 'obs_num': 5, 'state_num': 500, 'step_num': 30,
+        'controller_LR': controller_LR, 'learn_embeddings': True
+    }
+     
     joint = CognitiveGridworld(**base_kwargs)
-    joint.train_controller(eps=eps, reps=reps, offline_teacher='joint')
+    joint.train_controller(eps=controller_eps, reps=reps, offline_teacher='joint')
     with open(os.path.join(controller_folder, "joint.pkl"), 'wb') as f:
         pickle.dump(joint.controller_training_logs, f)
     del(joint)
 
     offline_net = CognitiveGridworld(**base_kwargs)
-    offline_net.train_controller(eps=eps, reps=reps, offline_teacher='generator')
+    offline_net.train_controller(eps=controller_eps, reps=reps, offline_teacher='generator')
     with open(os.path.join(controller_folder, "offline_net.pkl"), 'wb') as f:
         pickle.dump(offline_net.controller_training_logs, f)
     del(offline_net)
 
-    online_net = CognitiveGridworld(**{**base_kwargs,
-        'episodes': 2, 'training': True, 'generator_LR': .001})
-    online_net.train_controller(eps=eps, reps=reps)
+    # online_net = CognitiveGridworld(**{**base_kwargs,
+    #     'episodes': 1, 'training': True, 'generator_LR': generator_LR})
+    online_net = CognitiveGridworld(**{'mode': "RL", 'cuda': cuda, 'show_plots': False,
+        'control_ent_bonus': ent,  'episodes': 1, 'ctx_num': 2,  'realization_num': 10,
+        'batch_num': batch_num, 'training': True, 'hid_dim': 1000,  'obs_num': 5,
+        'state_num': 500, 'step_num': 30, 'controller_LR': controller_LR,
+        'generator_LR' : generator_LR, 'learn_embeddings': True})
+
+    online_net.train_controller(eps=controller_eps, reps=reps)
     with open(os.path.join(controller_folder, "online_net.pkl"), 'wb') as f:
         pickle.dump(online_net.controller_training_logs, f)
-    
 
 if __name__ == "__main__":
     # print("=" * 60)

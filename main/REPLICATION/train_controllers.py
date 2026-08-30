@@ -28,7 +28,7 @@ if __name__ == "__main__":
     folder = "main//DATA//controller"
 
 
-    joint = CognitiveGridworld(**{'mode': "RL", 'cuda': cuda, 'load_env': 'RL', 'show_plots': False,
+    joint = CognitiveGridworld(**{'mode': "RL", 'cuda': cuda, 'load_env': 'RL_2', 'show_plots': False,
         'control_ent_bonus': ent, 'episodes': 1, 'ctx_num': 2,  'realization_num': realization_num, 'batch_num': batch_num, 'training': False,
         'hid_dim': hid_dim,  'obs_num': obs_num, 'state_num': state_num, 'step_num': step_num,
         'controller_LR': controller_LR, 'learn_embeddings': True})
@@ -37,7 +37,7 @@ if __name__ == "__main__":
     with open(os.path.join(folder, "joint.pkl"), 'wb') as f:
         pickle.dump(joint.controller_training_logs, f)
 
-    offline_net = CognitiveGridworld(**{'mode': "RL", 'cuda': cuda, 'load_env': 'RL', 'show_plots': False,
+    offline_net = CognitiveGridworld(**{'mode': "RL", 'cuda': cuda, 'load_env': 'RL_2', 'show_plots': False,
         'control_ent_bonus': ent, 'episodes': 1, 'ctx_num': 2,  'realization_num': realization_num, 'batch_num': batch_num, 'training': False,
         'hid_dim': hid_dim,  'obs_num': obs_num, 'state_num': state_num, 'step_num': step_num,
         'controller_LR': controller_LR, 'learn_embeddings': True}) 

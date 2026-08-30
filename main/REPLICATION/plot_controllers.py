@@ -512,17 +512,17 @@ def plot_example_trajectories_1x6(offline_net, batches=(8, 5, 7, 9, 4, 1), alpha
 
 if __name__ == "__main__":
     cuda = 1
-    reps = 20
-    eps = 2
+    reps = 100 # 20
+    eps = 1 # 2
     env_args = {
         'mode': "RL",
         'cuda': cuda,
-        'load_env': 'RL_2_FIX',
+        'load_env': 'RL_2',
         'show_plots': False,
         'episodes': 2,
         'ctx_num': 2,
         'realization_num': 10,
-        'batch_num': 10,
+        'batch_num': 5,
         'training': False,
         'hid_dim': 1000,
         'obs_num': 5,

@@ -94,11 +94,6 @@ class Model_forward(Model_backward):
                 sample = self.controller_actions
             else:
                 CBF = self.classifier_belief_flat[:, -1]
-                # BUGGED
-                # sample = CBF.reshape(self.batch_num, -1)
-                # sample = torch.distributions.Categorical(probs = sample).sample()
-                # sample = torch.stack(torch.unravel_index(sample, self.ctx_dims),1)
-                # FIX
                 sample = torch.distributions.Categorical(probs=CBF).sample()                 # SAMPLES FROM JOINT BELIEF                 
                 sample[self.batch_range, self.goal_ind] = self.classifier_goal_selection[:, -1]
                 conf = CBF[self.BR, self.CR, sample]

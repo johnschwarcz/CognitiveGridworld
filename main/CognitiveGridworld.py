@@ -45,7 +45,7 @@ class CognitiveGridworld(Env_model_manager):
         self.skip_training_analyses = init.get('skip_training_analyses', False)
         self.early_stopping = init.get('early_stopping', False)
 
-        self.control_ent_bonus_decay = init.get('control_ent_bonus', .05)
+        self.control_ent_bonus = init.get('control_ent_bonus', .05)
         self.classifier_ent_bonus = init.get('classifier_ent_bonus', 0.1)
         self.classifier_LR = init.get('classifier_LR', 0.0005)
         self.controller_LR = init.get('controller_LR', 0.001)

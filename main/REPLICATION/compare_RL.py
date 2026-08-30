@@ -225,7 +225,7 @@ if __name__ == "__main__":
     state_num = 500
     realization_num = 10
 
-    net = CognitiveGridworld(**{'mode': 'RL', 'cuda': cuda, 'load_env': "RL", 'state_num': state_num,
+    net = CognitiveGridworld(**{'mode': 'RL', 'cuda': cuda, 'load_env': "RL_2", 'state_num': state_num,
     'ctx_num': ctx_num, 'batch_num': batch_num, 'obs_num': obs_num,
     'step_num': step_num, 'realization_num': realization_num,
     'training': False, 'episodes': 1, 'show_plots': False})    
