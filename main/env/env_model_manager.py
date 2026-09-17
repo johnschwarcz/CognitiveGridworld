@@ -14,7 +14,8 @@ class Env_model_manager(Env_model_data_manager):
             self.save() # Saves both env and model
 
     def episode_loop(self, disable_tqdm):
-        for self.e in tqdm(range(self.episodes), disable=disable_tqdm):   
+        pbar = tqdm(range(self.episodes), disable=disable_tqdm)
+        for self.e in pbar:   
             self.log_ind = self.e % self.checkpoint_every
             self.test_set = (self.log_ind == 0) or (self.training == False)
             if (self.e == self.episodes - 1) or (self.log_ind == 0):
@@ -27,6 +28,10 @@ class Env_model_manager(Env_model_data_manager):
             self.prep_model()
             self.forward_backward()
             self.log_model()
+            if self.test_set:
+                pbar.set_postfix_str(
+                    f"acc {self.test_accs[self.test_e - 1, -1]:.3f} | joint {self.joint_acc.mean(0)[-1]:.3f}"
+                    f" naive {self.naive_acc.mean(0)[-1]:.3f}")
 
             if self.test_set and self.early_stopping:
                 net_acc = self.test_accs[self.test_e - 1, -1]

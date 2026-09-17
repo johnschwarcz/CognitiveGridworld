@@ -52,6 +52,18 @@ class CognitiveGridworld(Env_model_manager):
         self.generator_LR = init.get('generator_LR', 0.001)
         self.hid_dim = init.get('hid_dim', 1000)
         
+        # --- lazy/rich RNN mode ("lazyrich"), Clark, Bordelon, Zavatone-Veth & Pehlevan,
+        self.gamma = init.get('gamma', 1.0)                     # output coupling; ->0+ lazy/reservoir, large = rich
+        self.rnn_gain = init.get('rnn_gain', 1.5)               # g, recurrent gain of Eq. (1)
+        self.rnn_beta = init.get('rnn_beta', 1e6)               # beta, inverse temperature of the Langevin flow
+        self.rnn_tau = init.get('rnn_tau', 1.0)                 # tau, single-neuron time constant
+        self.rnn_dt = init.get('rnn_dt', 0.4)                   # Euler step; only rnn_dt/rnn_tau matters
+        self.rnn_x0 = init.get('rnn_x0', 0.0)                   # x^0, initial preactivation
+        self.rnn_input_scale = init.get('rnn_input_scale', None)    # None -> 1/sqrt(D_in), as in Sec. SI.6
+        self.rnn_grad_clip = init.get('rnn_grad_clip', 10.0)    # gradient-norm clip (Table SI.2)
+        self.rnn_langevin = init.get('rnn_langevin', True)      # inject the sqrt(2/beta) noise of Eq. (4)
+        self.rnn_nonlinearity = init.get('rnn_nonlinearity', 'tanh')   # phi(.)
+
         self.learn_embeddings = init.get('learn_embeddings', True)
         self.reservoir = init.get('reservoir', False)
         self.training = init.get('training', False)

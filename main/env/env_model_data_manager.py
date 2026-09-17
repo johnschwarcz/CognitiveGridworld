@@ -84,7 +84,8 @@ class Env_model_data_manager(Env_control_manager):
 
     def load(self):
         try:
-            load_dict = torch.load(self.DATA_path + self.load_env + "_net.pth", weights_only=False)
+            # load_dict = torch.load(self.DATA_path + self.load_env + "_net.pth", weights_only=False)
+            load_dict = torch.load(self.DATA_path + self.load_env + "_net.pth", weights_only=False, map_location="cpu")
             self.all_K = load_dict["K"]
             self.all_Q = load_dict["Q"]
             self.model.load_state_dict(load_dict["weights"])

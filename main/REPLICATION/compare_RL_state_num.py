@@ -65,29 +65,30 @@ if __name__ == "__main__":
                 del(self)
 
     if do == "test":
-        if not state_nums:
-            # Replaced sys.exit(1) with an Exception to avoid crashing the IPython kernel
-            raise FileNotFoundError(f"No saved environments found. Checked the following directories: {possible_dirs}")
+        with torch.no_grad():
+            if not state_nums:
+                # Replaced sys.exit(1) with an Exception to avoid crashing the IPython kernel
+                raise FileNotFoundError(f"No saved environments found. Checked the following directories: {possible_dirs}")
 
-        max_reps = max(len(reps) for reps in state_reps_map.values())
-        tr_list = []
-        te_list = []
+            max_reps = max(len(reps) for reps in state_reps_map.values())
+            tr_list = []
+            te_list = []
 
-        for i, state_num in enumerate(state_nums):
-            s_tr = []
-            s_te = []
-            for r in state_reps_map[state_num]:
-                print(f"Testing state num: {state_num}, repetition: {r}")
-                self = CognitiveGridworld(**{'mode': "SANITY", 'cuda': cuda, 'episodes': 1,
-                    'realization_num': realization_num,  'hid_dim': hid_dim,  'obs_num': obs_num, 'show_plots': False,
-                    'batch_num': 5, 'step_num': step_num, 'state_num': int(state_num), 'learn_embeddings': True,
-                    'ctx_num': 2, 'load_env': f'/RL_state_num_reps/{int(state_num)}_{r}', 'training': False})
+            for i, state_num in enumerate(state_nums):
+                s_tr = []
+                s_te = []
+                for r in state_reps_map[state_num]:
+                    print(f"Testing state num: {state_num}, repetition: {r}")
+                    self = CognitiveGridworld(**{'mode': "SANITY", 'cuda': cuda, 'episodes': 1,
+                        'realization_num': realization_num,  'hid_dim': hid_dim,  'obs_num': obs_num, 'show_plots': False,
+                        'batch_num': 5, 'step_num': step_num, 'state_num': int(state_num), 'learn_embeddings': True,
+                        'ctx_num': 2, 'load_env': f'/RL_state_num_reps/{int(state_num)}_{r}', 'training': False})
 
-                s_tr.append(self.train_acc_through_training)
-                s_te.append(self.test_acc_through_training)
-                del(self)
-            tr_list.append(s_tr)
-            te_list.append(s_te)
+                    s_tr.append(self.train_acc_through_training)
+                    s_te.append(self.test_acc_through_training)
+                    del(self)
+                tr_list.append(s_tr)
+                te_list.append(s_te)
 
         # Get episode/step dimensions dynamically from the first valid record
         eps_shape = tr_list[0][0].shape 

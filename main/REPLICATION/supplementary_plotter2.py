@@ -21,7 +21,7 @@ F64, I64 = np.float64, np.int64
 # ═══════════════════════════════════════════════════════════════════
 
 PLOT_CFG = {
-    "figsize_A": (22, 6),   # 1 x 4 Diagnostics
+    "figsize_A": (28, 6),   # 1 x 5 Diagnostics
     "figsize_B": (28, 4),   # 1 x 5 Event-Triggered Dynamics
     "early_epochs": 400,
     "smooth_w": 1,
@@ -72,6 +72,7 @@ def _ep_xy(y, lim=None):
     return idx + 1, y[idx]
 
 def pr_stat(evals):
+    """Spectral Participation Ratio from covariance eigenvalues."""
     e = np.asarray(evals, float)
     return (e.sum(-1)**2) / ((e*e).sum(-1) + 1e-12)
 
@@ -88,17 +89,25 @@ def step_dkl(p, q, eps=1e-99):
     return 0.5 * np.sum(p * (np.log(p) - np.log(q)) + q * (np.log(q) - np.log(p)), -1)
 
 def pca_upd(m, k_pca=None):
+    """
+    Computes global covariance across time and batch: Neuron x (Time * Batch),
+    and projects the centered representations onto the principal axes.
+    """
     upd = m.model_update_flat.astype(F64)
     B, T, N = upd.shape
     x = np.nan_to_num(upd.reshape(B * T, N).copy(), 0., 0., 0.)
     x -= x.mean(0, keepdims=True)
-    _, s, vt = np.linalg.svd(x, False)
+    _, s, vt = np.linalg.svd(x, full_matrices=False)
     k = k_pca if k_pca is not None else vt.shape[0]
     return (x @ vt[:k].T).reshape(B, T, k).astype(F64)
 
-def step_participation_ratio(x, eps=1e-99):
-    x_sq = x ** 2
-    return (np.sum(x_sq, axis=-1) ** 2) / np.maximum(np.sum(x_sq ** 2, axis=-1), eps)
+def step_participation_ratio(z, eps=1e-12):
+    """
+    Computes the instantaneous effective dimensionality of the projected state
+    onto the global covariance axes: PR(proj(RNN_t)).
+    """
+    z_sq = z ** 2
+    return (np.sum(z_sq, axis=-1) ** 2) / np.maximum(np.sum(z_sq ** 2, axis=-1), eps)
 
 def step_sparsity(x, eps=1e-99):
     N = x.shape[-1]
@@ -124,7 +133,8 @@ def prep_model_dynamics(m, prm):
     ts, te = prm.get("T_START", 0), prm.get("T_END", None)
     u = m.model_update_flat.astype(F64)
     B, T, _ = u.shape
-    
+    if te is None: te = T
+
     # Metrics
     l2 = np.linalg.norm(u, ord=2, axis=-1)
     dist = np.zeros((B, T))
@@ -134,11 +144,9 @@ def prep_model_dynamics(m, prm):
     v_prev = np.zeros((B, T))
     v_prev[:, 1:] = np.mean((obs[:, 1:] - obs[:, :-1])**2, -1)
     
-    z = pca_upd(m)
+    z = pca_upd(m, k_pca=prm.get("K_PCA", None))
     rev = step_dkl(m.naive_px / m.naive_px.sum(-1, keepdims=True), 
                    approx_lik(m.joint_belief.astype(F64))).mean(-1)
-    
-    if te is None: te = T
     
     return {
         "l2": l2[:, ts:te],
@@ -153,10 +161,10 @@ def prep_model_dynamics(m, prm):
 # Plotting Functions
 # ═══════════════════════════════════════════════════════════════════
 
-def plot_diagnostics_1x4(axes, agent, name):
+def plot_diagnostics_1x5(axes, agent, name):
     def ex(y, lim=None): return _ep_xy(_smooth(y, PLOT_CFG["smooth_w"]), lim)
     
-    # Final Accuracy
+    # 1. Final Accuracy
     x, y = ex(agent.test_acc_through_training[:, -1])
     axes[0].plot(x, y, c=AGENT_COLORS[name], label=name, zorder=3)
     baseline_color = AGENT_COLORS["Joint"] if name == "Trained" else AGENT_COLORS["Naive"]
@@ -164,28 +172,46 @@ def plot_diagnostics_1x4(axes, agent, name):
     acc = float(np.mean(agent.joint_acc[:, -1])) if name == "Trained" else float(np.mean(agent.naive_acc[:, -1]))
     axes[0].axhline(acc, c=baseline_color, ls="--", label=baseline_label, zorder=5)
 
-    # Early Acc, SII, and PR
+    # 2. Early Acc
     xi, yi = ex(agent.test_acc_through_training[:, -1], PLOT_CFG["early_epochs"])
     axes[1].plot(xi, yi, c=AGENT_COLORS[name], zorder=3)
 
+    # 3. Correlation(FR, Acc.)
     xi, yi = ex(agent.test_SII_coef_through_training, PLOT_CFG["early_epochs"])
     axes[2].plot(xi, yi, c=AGENT_COLORS[name], zorder=3)
-    axes[2].axhline(y = 0, c = 'k', alpha = .5)
+    axes[2].axhline(y=0, c='k', alpha=0.5)
 
+    # 4. PR(RNN) - PR(Read-in)
     y_raw = pr_stat(agent.test_model_update_dim_through_training) - (pr_stat(agent.test_model_input_dim_through_training) + 1e-12)
     xi, yi = ex(y_raw, PLOT_CFG["early_epochs"])
     axes[3].plot(xi, yi, c=AGENT_COLORS[name], zorder=3)
-    axes[3].axhline(y = 0, c = 'k', alpha = .5)
+    axes[3].axhline(y=0, c='k', alpha=0.5)
+
+    # 5. Accuracy vs Correlation with Factorization Regret
+    x_acc = _smooth(agent.test_acc_through_training[:, -1], PLOT_CFG["smooth_w"])
+    y_sii = _smooth(agent.test_SII_coef_through_training, PLOT_CFG["smooth_w"])
+    min_len = min(len(x_acc), len(y_sii))
+    axes[4].plot(x_acc[:min_len], y_sii[:min_len], c=AGENT_COLORS[name], zorder=3)
+    axes[4].axhline(y=0, c='k', alpha=0.5)
 
 def finalize_layout_A(axes):
-    titles = ["Final Step Accuracy", "Early Learning Acc.", "Correlation(FR, Acc.)", "PR(RNN) - PR(Read-in)"]
-    ylabels = ["Accuracy", "Accuracy", "r", r"$\Delta$ PR"]
+    titles = [
+        "Final Step Accuracy", 
+        "Early Learning Acc.", 
+        "Correlation(FR, Acc.)", 
+        "PR(RNN) - PR(Read-in)", 
+        "FR Correlation vs. Acc."
+    ]
+    ylabels = ["Accuracy", "Accuracy", "r", r"$\Delta$ PR", "r (Correlation)"]
+    xlabels = ["Testing Episode", "Testing Episode", "Testing Episode", "Testing Episode", "Accuracy"]
+    
     for i, ax in enumerate(axes):
         ax.set_title(titles[i], pad=15)
         ax.set_ylabel(ylabels[i])
-        ax.set_xlabel("Testing Episode")
+        ax.set_xlabel(xlabels[i])
         ax.spines[['top', 'right']].set_visible(False)
         ax.grid(True, ls='--', alpha=0.3)
+    
     axes[0].legend(loc='lower right', frameon=False, ncols=2)
     plt.tight_layout()
 
@@ -196,7 +222,7 @@ def plot_dynamics_1x5(axes, d_tr, d_ec):
     metrics = [
         ("l2", "Norm (L2)", r"$\|u_t\|_2$", 2),
         ("spar", "Sparsity", r"$\frac{\sqrt{N} - (\|u_t\|_1 / \|u_t\|_2)}{\sqrt{N}-1}$", 3),
-        ("pr", "PR(RNN)", r"$(\sum \lambda_i)^2 / \sum \lambda_i^2$", 4),
+        ("pr", "PR(proj(RNN))", r"$\frac{(\sum z_i^2)^2}{\sum z_i^4}$", 4),
         ("dist", "Distance", r"$\|u_t - u_{t-1}\|$", 1),
         ("v_prev", "Observation Change", r"$(o^{i}_{t} - o^{i}_{t-1})^2$", 0)
     ]
@@ -207,11 +233,11 @@ def plot_dynamics_1x5(axes, d_tr, d_ec):
             color = AGENT_COLORS[label]
             mx = get_xcorr(data[key], data["rev"], DYN_PARAMS["E_START"], DYN_PARAMS["E_END"])
             
-            # Polished Past (Dotted, smaller markers, white edges)
+            # Past lags (Dotted, smaller markers, white edges)
             ax.plot(tau[past], mx[past], c=color, alpha=0.5, lw=2.0, ls=':', 
                     marker='o', mec='white', mew=1, ms=4, zorder=3)
             
-            # Polished Future (Solid, larger markers, black edges)
+            # Future lags (Solid, larger markers, black edges)
             ax.plot(tau[future], mx[future], c=color, alpha=1.0, lw=2.5, ls='-', 
                     marker='o', mec='k', mew=1.5, ms=7, label=label if c == 0 else "", zorder=4)
         
@@ -234,29 +260,29 @@ def plot_dynamics_1x5(axes, d_tr, d_ec):
 
 if __name__ == "__main__":
     cuda, realization_num, step_num, hid_dim = 0, 10, 30, 1000
-    state_num, obs_num, batch_num = 500, 5, 20000
+    state_num, obs_num, batch_num = 500, 5, 10000
 
-    # trained = CognitiveGridworld(**{'mode': "SANITY", 'cuda': cuda, 'episodes': 1, 'checkpoint_every': 5, 
-    #                                 'realization_num': realization_num, 'hid_dim': hid_dim, 'obs_num': obs_num, 
-    #                                 'show_plots': False, 'batch_num': batch_num, 'step_num': step_num, 
-    #                                 'state_num': state_num, 'learn_embeddings': False, 'reservoir': False, 
-    #                                 'classifier_LR': .001, 'ctx_num': 2, 'training': False, 
-    #                                 'load_env': "/sanity/fully_trained_ctx_2_e5"})       
-    # echo = CognitiveGridworld(**{'mode': "SANITY", 'cuda': cuda, 'episodes': 1, 'checkpoint_every': 5, 
-    #                              'realization_num': realization_num, 'hid_dim': hid_dim, 'obs_num': obs_num, 
-    #                              'show_plots': False, 'batch_num': batch_num, 'step_num': step_num, 
-    #                              'state_num': state_num, 'learn_embeddings': False, 'reservoir': True, 
-    #                              'classifier_LR': .001, 'ctx_num': 2, 'training': False, 
-    #                              'load_env': "/sanity/reservoir_ctx_2_e5"})    
+    trained = CognitiveGridworld(**{'mode': "SANITY", 'cuda': cuda, 'episodes': 1, 'checkpoint_every': 5, 
+                                    'realization_num': realization_num, 'hid_dim': hid_dim, 'obs_num': obs_num, 
+                                    'show_plots': False, 'batch_num': batch_num, 'step_num': step_num, 
+                                    'state_num': state_num, 'learn_embeddings': False, 'reservoir': False, 
+                                    'classifier_LR': .001, 'ctx_num': 2, 'training': False, 
+                                    'load_env': "/sanity/fully_trained_ctx_2_e5"})       
+    echo = CognitiveGridworld(**{'mode': "SANITY", 'cuda': cuda, 'episodes': 1, 'checkpoint_every': 5, 
+                                 'realization_num': realization_num, 'hid_dim': hid_dim, 'obs_num': obs_num, 
+                                 'show_plots': False, 'batch_num': batch_num, 'step_num': step_num, 
+                                 'state_num': state_num, 'learn_embeddings': False, 'reservoir': True, 
+                                 'classifier_LR': .001, 'ctx_num': 2, 'training': False, 
+                                 'load_env': "/sanity/reservoir_ctx_2_e5"})    
 
     # 1. Prepare Data
     data_tr = prep_model_dynamics(trained, DYN_PARAMS)
     data_ec = prep_model_dynamics(echo, DYN_PARAMS)
 
     # 2. Figure A: Diagnostics
-    figA, axesA = plt.subplots(1, 4, figsize=PLOT_CFG["figsize_A"])
-    plot_diagnostics_1x4(axesA, trained, "Trained")
-    plot_diagnostics_1x4(axesA, echo, "Echo")
+    figA, axesA = plt.subplots(1, 5, figsize=PLOT_CFG["figsize_A"])
+    plot_diagnostics_1x5(axesA, trained, "Trained")
+    plot_diagnostics_1x5(axesA, echo, "Echo")
     finalize_layout_A(axesA)
     figA.savefig("diagnostics_panel.svg", format="svg", bbox_inches="tight")
 
@@ -266,4 +292,3 @@ if __name__ == "__main__":
     plot_dynamics_1x5(axesB, data_tr, data_ec)
     figB.savefig("dynamics_panel.svg", format="svg", bbox_inches="tight")
     plt.show()
-

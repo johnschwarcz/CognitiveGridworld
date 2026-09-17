@@ -1,0 +1,28 @@
+import numpy as np; import torch; import os; import sys; import inspect
+path = inspect.getfile(inspect.currentframe())
+path = os.path.dirname( os.path.abspath(path))
+print("root:", path)
+sys.path.insert(0, path + '/main')
+sys.path.insert(0, path + '/main/bayes')
+sys.path.insert(0, path + '/main/model')
+from main.CognitiveGridworld import CognitiveGridworld 
+
+if __name__ == "__main__":
+    cuda = 1
+    realization_num = 10
+    batch_num = 20000 
+    step_num = 30
+    hid_dim = 1000
+    state_num = 500
+    obs_num = 5
+    episodes = 250000 # 50000
+
+    self = CognitiveGridworld(**{'mode': "ablation", 'cuda': cuda, 'episodes': episodes,
+        'realization_num': realization_num,  'hid_dim': hid_dim,  'obs_num': obs_num,'training': True,
+        'batch_num': batch_num, 'step_num': step_num, 'state_num': state_num, 'save_env': f'RL_ablation',
+        'classifier_LR': .0001, 'ctx_num': 2, 'generator_LR':.0001, 'classifier_ent_bonus': .01, 'learn_embeddings': True})
+
+    self = CognitiveGridworld(**{'mode': "RL", 'cuda': cuda, 'episodes': episodes,
+        'realization_num': realization_num,  'hid_dim': hid_dim,  'obs_num': obs_num,'training': True,
+        'batch_num': batch_num, 'step_num': step_num, 'state_num': state_num, 'save_env': f'RL_exp',
+        'classifier_LR': .0001, 'ctx_num': 2, 'generator_LR':.0001, 'classifier_ent_bonus': .01, 'learn_embeddings': True})

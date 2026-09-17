@@ -20,6 +20,8 @@ import sys
 import inspect
 import pickle
 import numpy as np 
+import multiprocessing as mp
+from joblib import Parallel, delayed
 
 # path = os.path.dirname(os.path.abspath(inspect.getfile(inspect.currentframe())))
 # project_root = os.path.abspath(os.path.join(path, '..', '..', '..'))
@@ -63,24 +65,91 @@ def train_RL_2():
 # Saves to: DATA/RL_state_num_reps/{state_num}_0_net.pth  (repetition 0)
 # ─────────────────────────────────────────────────────────────────────────────
 
-def train_RL_state_num_reps():
-    state_nums = [1000, 500, 400, 300, 250, 200, 150, 125, 100, 75]
-    # state_nums = np.flip(state_nums)
-    repetitions = 5
+# def train_RL_state_num_reps():
+#     # state_nums = [1000, 500, 250, 200, 150, 100, 50]
+#     state_nums = [800, 400, 200, 100, 50]
+#     # state_nums = np.flip(state_nums)
+#     repetitions = 5
+#     start_from = 0 
 
-    for r in range(repetitions):
-        for state_num in state_nums:
-            print(f"Training state_num={state_num}, rep={r}")
-            CognitiveGridworld(**{
-                'mode': "RL", 'cuda': 1, 'training': True, 
-                'checkpoint_every': 5000, 'show_plots': False, 
-                'realization_num': 10, 'hid_dim': 1000, 'obs_num': 5, 'step_num': 30, 
-                # 'episodes': 50000, 'batch_num': 10000, 'classifier_LR': .0005, 'generator_LR': .0005,
-                'episodes': 50000, 'batch_num': 10000, 'classifier_LR': .0005, 'generator_LR': .0005,
-                #'episodes': 50000, 'batch_num': 20000, 'classifier_LR': .0001, 'generator_LR': .0001,
-                'state_num': state_num, 'ctx_num': 2, 'learn_embeddings': True,
-                'save_env': f'/RL_state_num_reps/{state_num}_{r}',
-            })
+#     for r in range(start_from, repetitions):
+#         for state_num in state_nums:
+#             print(f"Training state_num={state_num}, rep={r}")
+#             CognitiveGridworld(**{
+#                 'mode': "RL", 'cuda': 1, 'training': True, 'show_plots': False, 
+#                 'realization_num': 10, 'hid_dim': 1000, 'obs_num': 5, 'step_num': 30, 
+               
+#                 'episodes': 150000, 'batch_num': 10000, 'checkpoint_every': 5000, 
+#                 'classifier_LR': .0001, 'generator_LR': .0001, 'classifier_ent_bonus': .1,
+
+#                  # 'episodes': 50000, 'batch_num': 10000, 'classifier_LR': .0005, 'generator_LR': .0005,
+#                #'episodes': 50000, 'batch_num': 20000, 'classifier_LR': .0001, 'generator_LR': .0001,
+                
+#                 'state_num': state_num, 'ctx_num': 2, 'learn_embeddings': True,
+#                 'save_env': f'/RL_state_num_reps/{state_num}_{r}',
+#             })
+
+
+
+def _train_single_repetition_worker(task_args):
+    r, state_nums, cuda, episodes, batch_num, checkpoint_every = task_args
+    print(f"\n[Worker Rep {r}] Starting repetition {r} on GPU {cuda}...", flush=True)
+
+    for state_num in state_nums:
+        print(f"[Worker Rep {r}] Training state_num={state_num}, rep={r} on GPU {cuda}", flush=True)
+        CognitiveGridworld(**{
+            'mode': "RL",
+            'cuda': cuda,
+            'training': True,
+            'show_plots': False,
+            'realization_num': 10,
+            'hid_dim': 1000,
+            'obs_num': 5,
+            'step_num': 30,
+            'episodes': episodes,
+            'batch_num': batch_num,
+            'checkpoint_every': checkpoint_every,
+            'classifier_LR': .0001,
+            'generator_LR': .0001,
+            'classifier_ent_bonus': .1,
+            'state_num': state_num,
+            'ctx_num': 2,
+            'learn_embeddings': True,
+            'save_env': f'/RL_state_num_reps/{state_num}_{r}',
+        })
+
+    print(f"[Worker Rep {r}] Completed all state_nums for repetition {r}.\n", flush=True)
+    return r
+
+
+def train_RL_state_num_reps():
+    n_jobs = 3
+    repetitions = 5
+    start_from = 0
+    cuda = 1
+    episodes = 150000 # 50000
+    batch_num = 5000 # 20000
+    checkpoint_every = 5000
+    state_nums = [800, 400, 200, 100, 50]
+
+    reps = list(range(start_from, repetitions))
+    task_payloads = [
+        (r, state_nums, cuda, episodes, batch_num, checkpoint_every) for r in reps
+    ]
+
+    if n_jobs <= 1:
+        for payload in task_payloads:
+            _train_single_repetition_worker(payload)
+    else:
+        active_workers = min(n_jobs, len(reps))
+        print(f"Running {len(reps)} repetition(s) across {active_workers} parallel worker(s) on GPU {cuda}...")
+        
+        # joblib's loky backend natively handles IPython/VS Code Interactive environments 
+        # without crashing on spawn or dropping exceptions.
+        Parallel(n_jobs=active_workers, backend="loky")(
+            delayed(_train_single_repetition_worker)(payload) for payload in task_payloads
+        )
+
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -186,7 +255,7 @@ if __name__ == "__main__":
     # train_controllers()
 
     print("=" * 60)
-    print("Phase 2: RL_state_num_reps (9 state sizes × 1 rep)")
+    print("Phase 2: RL_state_num_reps")
     print("=" * 60)
     train_RL_state_num_reps()
 
