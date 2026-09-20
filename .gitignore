@@ -10,3 +10,4 @@ venv/
 temp/
 temp.py
 .vscode/
+main/DATA/

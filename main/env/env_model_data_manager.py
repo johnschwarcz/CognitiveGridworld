@@ -1,4 +1,4 @@
-import torch; import numpy as np; import pylab as plt; from tqdm import tqdm;
+import os; import torch; import numpy as np; import pylab as plt; from tqdm import tqdm;
 from sklearn.decomposition import PCA; from sklearn.linear_model import LogisticRegression
 from main.utils import tnp; from main.env.env_control_manager import Env_control_manager
 from main.model.model_architecture import Model_architecture as Model
@@ -57,6 +57,7 @@ class Env_model_data_manager(Env_control_manager):
 
     def save(self):
         save_path = self.DATA_path + self.save_env + "_net.pth"
+        os.makedirs(os.path.dirname(save_path), exist_ok=True)
         save_dict = {                         
                 "readin_grad_log_through_training": self.readin_grad_log[:self.test_e],
                 "readout_grad_log_through_training": self.readout_grad_log[:self.test_e],
