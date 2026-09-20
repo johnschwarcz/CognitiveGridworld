@@ -29,9 +29,7 @@ class Env_model_manager(Env_model_data_manager):
             self.forward_backward()
             self.log_model()
             if self.test_set:
-                pbar.set_postfix_str(
-                    f"acc {self.test_accs[self.test_e - 1, -1]:.3f} | joint {self.joint_acc.mean(0)[-1]:.3f}"
-                    f" naive {self.naive_acc.mean(0)[-1]:.3f}")
+                pbar.set_postfix_str(f"acc {self.test_accs[self.test_e - 1, -1]:.3f} | joint {self.joint_acc.mean(0)[-1]:.3f} | naive {self.naive_acc.mean(0)[-1]:.3f}")
 
             if self.test_set and self.early_stopping:
                 net_acc = self.test_accs[self.test_e - 1, -1]

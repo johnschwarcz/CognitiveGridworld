@@ -51,50 +51,27 @@ class Model_architecture(Model_controller):
         self.classifier_optim = optim.Adam([{'params': params,'lr': self.classifier_LR}]) 
 
     def mlp_stack(self, in_dim, out_dim, depth):
-        """`depth` Linear layers with ReLU between them -- never after the last, so the caller's
-        own activation (or lack of one) is unchanged and depth=1 is exactly the original layer.
-
-        depth=1 returns a bare nn.Linear rather than a length-1 Sequential so that state_dict
-        keys stay `classifier_readin.weight`: every checkpoint in DATA/ predates this argument
-        and must keep loading.
-
-        Capacity control (Experiment 1): each layer past the first adds hid_dim^2 + hid_dim
-        parameters, and an LSTM of the same width holds exactly 8 * (hid_dim^2 + hid_dim).
-        So readin_depth + readout_depth = 10 gives an Echo State (frozen LSTM) precisely the
-        trainable parameter count of a Fully Trained network of the same width -- for any
-        width and any C, since the read-in/read-out edge terms are shared by both.
-        """
-        if depth < 1:
-            raise ValueError(f"depth must be >= 1, got {depth}")
         if depth == 1:
             return nn.Linear(in_dim, out_dim)
         layers = []
         for d in range(depth):
-            layers.append(nn.Linear(in_dim if d == 0 else self.hid_dim,
-                                    out_dim if d == depth - 1 else self.hid_dim))
+            layers.append(nn.Linear(in_dim if d == 0 else self.hid_dim, out_dim if d == depth - 1 else self.hid_dim))
             if d < depth - 1:
                 layers.append(nn.ReLU())
         return nn.Sequential(*layers)
 
     def trainable_params(self):
-        """Trainable parameter count of the classifier, for the parity check in the Exp 1 logs."""
         return sum(p.numel() for g in self.classifier_optim.param_groups for p in g['params'] if p.requires_grad)
 
     def default_generator(self):
         
         if self.learn_embeddings:
-            # f_K, f_Q of Appendix A.4. These sit on the Classifier's forward path (they build
-            # Z_hat), so they exist whenever embeddings are learned -- generator or not.
             self.K_downscale = nn.Linear(self.hid_dim, self.KQ_dim)
             self.Q_downscale = nn.Linear(self.hid_dim, self.KQ_dim)
             embedding_params = ([self.all_K, self.all_Q] +
                                 list(self.K_downscale.parameters()) +
                                 list(self.Q_downscale.parameters()))
-
             if self.mode == "ablation":
-                # No Generator at all. The embeddings are trained by the Classifier's reward
-                # gradient instead, so they must join the CLASSIFIER's optimizer -- leaving them
-                # in a generator optimizer that never steps would silently discard every gradient.
                 self.classifier_optim.add_param_group({'params': embedding_params, 'lr': self.generator_LR})
                 return
 

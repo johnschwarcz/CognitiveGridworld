@@ -6,7 +6,8 @@ class Model_forward(Model_backward):
     def forward_pass(self):
         self.MC_to_interactions()
         self.MC_to_classification()
-        self.MC_to_pobs()
+        if self.mode != "ablation":
+            self.MC_to_pobs()
         return tnp([self.classifier_belief_flat, self.classifier_goal_belief, self.input_flat, self.update_flat], 'np')
 
     def default_interactions(self):
@@ -26,6 +27,9 @@ class Model_forward(Model_backward):
                     self.KQ_to_Z(self.k, self.q)
                     self.KQ_to_Z(self.q, self.k)      
 
+    def classifier_Z(self):
+        return self.active_Z if self.mode == "ablation" else self.active_Z.detach()
+
     def KQ_to_Z(self, ctx_1, ctx_2):
         K = self.active_K[:,ctx_1]
         Q = self.active_Q[:,ctx_2]
@@ -42,7 +46,7 @@ class Model_forward(Model_backward):
             self.RNN_classification()
 
     def FF_classification(self):
-        Z = self.active_Z.detach()
+        Z = self.classifier_Z()
         Z = Z.reshape(self.batch_num, 1, -1)
         O = self.obs_flat.mean(1, keepdims = True)
         inp = torch.cat((O, Z), dim = -1)
@@ -69,7 +73,7 @@ class Model_forward(Model_backward):
             self.input_flat = torch.zeros(1, device = self.device)
 
     def RNN_readin(self):
-        Z = self.active_Z.detach()
+        Z = self.classifier_Z()
         Z = Z.reshape(self.batch_num, 1, -1)
         Z = Z.expand(-1, self.step_num, -1)
         inp = torch.cat((self.obs_flat, Z), dim = -1)
@@ -144,7 +148,7 @@ class Model_forward(Model_backward):
     def lazyrich_readin(self):
         """Raw I_a(t): observation bits plus the (time-constant) interaction scalars Z. No
         learned projection or nonlinearity -- U is the only thing between task and preactivation."""
-        Z = self.active_Z.detach().reshape(self.batch_num, 1, -1).expand(-1, self.step_num, -1)
+        Z = self.classifier_Z().reshape(self.batch_num, 1, -1).expand(-1, self.step_num, -1)
         return torch.cat((self.obs_flat, Z), dim = -1)
 
     def postprocess_belief(self, belief):
@@ -153,7 +157,7 @@ class Model_forward(Model_backward):
         self.classifier_goal_selection = Categorical(self.classifier_goal_belief).sample() # SAMPLES FROM MARGINAL BELIEF
         self.ACC = (self.classifier_goal_selection == self.goal_value[:,None]).float() 
         
-    def default_pobs(self, training_controller = False):
+    def default_pobs(self, training_controller = False):                           # no Generator: nothing predicts observations
         if self.learn_embeddings or training_controller: 
             if training_controller:
                 conf = torch.ones(*self.batch_ctx_dims, device = self.device)

@@ -50,6 +50,8 @@ class CognitiveGridworld(Env_model_manager):
         self.classifier_LR = init.get('classifier_LR', 0.0005)
         self.controller_LR = init.get('controller_LR', 0.001)
         self.generator_LR = init.get('generator_LR', 0.001)
+        self.readout_depth = init.get('readout_depth', 1)
+        self.readin_depth = init.get('readin_depth', 1)
         self.hid_dim = init.get('hid_dim', 1000)
         
         # --- lazy/rich RNN mode ("lazyrich"), Clark, Bordelon, Zavatone-Veth & Pehlevan,

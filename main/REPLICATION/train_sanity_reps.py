@@ -8,31 +8,23 @@ sys.path.insert(0, path + '/main/model')
 from main.CognitiveGridworld import CognitiveGridworld 
 
 if __name__ == "__main__":
-    cuda = 1
+    cuda = 0
     realization_num = 10
-    batch_num = 8000
-    step_num = 30
-    hid_dim = 1000
+    batch_num = 2000 # 8000
+    step_num = 5 # 30
+    episodes = 50000
     state_num = 500
     obs_num = 5
 
-    for r in range(10):
-        self = CognitiveGridworld(**{'mode': "SANITY", 'cuda': cuda, 'episodes': 50000, 
-            'realization_num': realization_num,  'hid_dim': hid_dim,  'obs_num': obs_num, 'training': True,
+    for r in range(5):
+        self = CognitiveGridworld(**{'mode': "SANITY", 'cuda': cuda, 'episodes': episodes,
+            'realization_num': realization_num,  'hid_dim': 10000,  'obs_num': obs_num, 'training': True,
             'batch_num': batch_num, 'step_num': step_num, 'state_num': state_num, 'learn_embeddings': False,
-            'reservoir': True, 'classifier_LR': .001, 'ctx_num': 2, 'save_env': f"/sanity_reps/reservoir_ctx_2_rep{r}"})
+            'reservoir': True, 'classifier_LR': .001, 
+            'ctx_num': 2, 'save_env': f"/sanity_reps/reservoir_matched_ctx_2_rep{r}"})
 
-        self = CognitiveGridworld(**{'mode': "SANITY", 'cuda': cuda, 'episodes': 25000,
-            'realization_num': realization_num,  'hid_dim': hid_dim,  'obs_num': obs_num,'training': True,
+        self = CognitiveGridworld(**{'mode': "SANITY", 'cuda': cuda, 'episodes': episodes,
+            'realization_num': realization_num,  'hid_dim': 200,  'obs_num': obs_num, 'training': True,
             'batch_num': batch_num, 'step_num': step_num, 'state_num': state_num, 'learn_embeddings': False,
-            'reservoir': True, 'classifier_LR': .001, 'ctx_num': 1, 'save_env': f"/sanity_reps/reservoir_ctx_1_rep{r}"})
-
-        self = CognitiveGridworld(**{'mode': "SANITY", 'cuda': cuda, 'episodes': 50000,
-            'realization_num': realization_num,  'hid_dim': hid_dim,  'obs_num': obs_num, 'training': True,
-            'batch_num': batch_num, 'step_num': step_num, 'state_num': state_num, 'learn_embeddings': False,
-            'reservoir': False, 'classifier_LR': .001, 'ctx_num': 2, 'save_env': f"/sanity_reps/fully_trained_ctx_2_rep{r}"})
-            
-        self = CognitiveGridworld(**{'mode': "SANITY", 'cuda': cuda, 'episodes': 25000,
-            'realization_num': realization_num,  'hid_dim': hid_dim, 'obs_num': obs_num,'training': True,
-            'batch_num': batch_num, 'step_num': step_num, 'state_num': state_num, 'learn_embeddings': False,
-            'reservoir': False, 'classifier_LR': .001, 'ctx_num': 1, 'save_env': f"/sanity_reps/fully_trained_ctx_1_rep{r}"})
+            'reservoir': False, 'classifier_LR': .001, 'early_stopping': True,
+            'ctx_num': 2, 'save_env': f"/sanity_reps/sanity_ctx_2_rep{r}"})
