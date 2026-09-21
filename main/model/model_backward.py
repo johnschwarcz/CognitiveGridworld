@@ -69,7 +69,7 @@ class Model_backward(Model_Customization):
         chance = 1/self.realization_num
         last_ACC = self.ACC[:, -1, None]
         OPE = self.DKL_sym(self.pred_pobs, self.obs_flat.mean(1))
-        if training_controller:
+        if training_controller or self.mode == "oracle":
             OPE = OPE.mean() 
         else:
             OPE__ACC = (last_ACC * OPE).sum() / last_ACC.sum()
@@ -83,9 +83,11 @@ class Model_backward(Model_Customization):
         return (K_norm + Q_norm).mean()
 
     def oracle_loss(self):
-        BR, SR = self.batch_range_, self.step_range_
-        tgt = self.goal_value[:, None].long().repeat(1, self.step_num)
-        belief = self.soft_clip(self.classifier_goal_belief[BR, SR, tgt])
+        BR = self.batch_range[:, None, None]
+        SR = self.step_range[None, :, None]
+        CR = self.ctx_range[None, None, :]
+        tgt = self.ctx_vals[:, None, :].expand(-1, self.step_num, -1)
+        belief = self.soft_clip(self.classifier_belief[BR, SR, CR, tgt])
         ent = -belief * belief.log() * self.classifier_ent_bonus
         self.classifier_loss = (-belief.log() - ent).mean()
 

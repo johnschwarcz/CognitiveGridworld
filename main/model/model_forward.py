@@ -83,6 +83,7 @@ class Model_forward(Model_backward):
         if accumulate:
             logits = logits.cumsum(1)
         belief = self.logits_to_belief(logits)
+        self.classifier_belief = belief
         self.classifier_belief_flat = belief.detach()
         self.classifier_goal_belief = belief[self.batch_range, :, self.goal_ind]
         self.classifier_goal_selection = Categorical(self.classifier_goal_belief).sample() # SAMPLES FROM MARGINAL BELIEF
@@ -99,9 +100,9 @@ class Model_forward(Model_backward):
         
     def default_pobs(self, training_controller = False):
         if self.learn_embeddings or training_controller: 
-            if training_controller:
+            if training_controller or self.mode == "oracle":
                 conf = torch.ones(*self.batch_ctx_dims, device = self.device)
-                sample = self.controller_actions
+                sample = self.controller_actions if training_controller else self.ctx_vals
             else:
                 CBF = self.classifier_belief_flat[:, -1]
                 sample = torch.distributions.Categorical(probs=CBF).sample()                 # SAMPLES FROM JOINT BELIEF                 
