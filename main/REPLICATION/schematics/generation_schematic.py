@@ -5,6 +5,12 @@ from scipy.ndimage import gaussian_filter
 import matplotlib.gridspec as gridspec
 from matplotlib.patches import Circle
 from matplotlib.lines import Line2D
+import os, sys
+_d = os.path.dirname(os.path.abspath(__file__))
+while _d != os.path.dirname(_d) and not os.path.exists(os.path.join(_d, 'main', 'CognitiveGridworld.py')):
+    _d = os.path.dirname(_d)
+sys.path.insert(0, _d)
+from main.utils import fig_path
 
 # Parameters
 cmap = plt.cm.viridis
@@ -94,5 +100,5 @@ ax_all.set_ylabel(r"$T$", labelpad=20, fontsize=20, rotation=0)
 ax_all.tick_params(colors='white')
 
 plt.tight_layout()
-plt.savefig("generation_schematic.svg")
+plt.savefig(fig_path("generation_schematic.svg"))
 plt.show()

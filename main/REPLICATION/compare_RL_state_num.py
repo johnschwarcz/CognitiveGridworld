@@ -9,6 +9,7 @@ sys.path.insert(0, path + '/main')
 sys.path.insert(0, path + '/main/bayes')
 sys.path.insert(0, path + '/main/model')
 from main.CognitiveGridworld import CognitiveGridworld 
+from main.utils import fig_path
 
 if __name__ == "__main__":
     cuda = 1
@@ -303,7 +304,7 @@ if __name__ == "__main__":
         fig_split.subplots_adjust(left=0.04, right=0.98, bottom=0.1, top=0.90)
         
         ax_curves_conglom[1].legend(handles=legend_elements, loc='upper left', frameon=True, ncol=1, fontsize=12, title = "Training Progress")
-        plt.savefig("RL_training_comparison.svg", dpi=300)
+        plt.savefig(fig_path("RL_training_comparison.svg"), dpi=300)
         plt.show()
 
         """ VERSION B """
@@ -476,7 +477,7 @@ if __name__ == "__main__":
 
         fig.subplots_adjust(left=0.05, right=0.98, bottom=0.08, top=0.92)
 
-        plt.savefig("Combined_RL_training_landscape.svg", dpi=300)
+        plt.savefig(fig_path("Combined_RL_training_landscape.svg"), dpi=300)
         plt.show()
 
         # ==========================================
@@ -669,5 +670,5 @@ if __name__ == "__main__":
                 axis._axinfo["grid"].update({"linestyle": ":", "color": "lightgray", "alpha": 0.})
         
         fig.subplots_adjust(left=0.05, right=0.95, bottom=0.08, top=0.92)
-        plt.savefig("Version_C_RL_Landscape.svg", dpi=300)
+        plt.savefig(fig_path("Version_C_RL_Landscape.svg"), dpi=300)
         plt.show()

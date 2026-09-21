@@ -14,6 +14,7 @@ sys.path.insert(0, path + '/main')
 sys.path.insert(0, path + '/main/bayes')
 sys.path.insert(0, path + '/main/model')
 from main.CognitiveGridworld import CognitiveGridworld
+from main.utils import fig_path
 logscale = 0
 
 plt.rcParams.update({
@@ -441,7 +442,7 @@ def plot_combined_figure(
     plot_controller_training_panel(ax_curve, ax_legend, joint_agent, online_net, offline_net)
 
     plt.rcParams['svg.fonttype'] = 'none'
-    plt.savefig("combined_landscape_aligned.svg", bbox_inches="tight", dpi=600)
+    plt.savefig(fig_path("combined_landscape_aligned.svg"), bbox_inches="tight", dpi=600)
 
 
 # =============================================================================
@@ -507,7 +508,7 @@ def plot_example_trajectories_1x6(offline_net, batches=(8, 5, 7, 9, 4, 1), alpha
             ax.set_ylabel(r"$r_c$", fontsize=15)
         ax.set_xlabel(r"$r_{c'}$", fontsize=15)
 
-    plt.savefig("trajectories_1x6.svg", bbox_inches="tight", dpi=600)
+    plt.savefig(fig_path("trajectories_1x6.svg"), bbox_inches="tight", dpi=600)
 
 
 if __name__ == "__main__":

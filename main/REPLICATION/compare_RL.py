@@ -9,6 +9,7 @@ sys.path.insert(0, path + '/main')
 sys.path.insert(0, path + '/main/model')
 from main.CognitiveGridworld import CognitiveGridworld
 from utils import tnp
+from main.utils import fig_path
 
 # --- Global Plotting Style Configuration (Single Source of Truth) ---
 plt.rcParams.update({
@@ -124,7 +125,7 @@ def plot_belief(self, agent = "net"):
         ax.zaxis._axinfo['juggled'] = (0, 1, 2)
         
         fig.canvas.draw()
-        plt.savefig(os.path.join(path, f"{title}_belief_traj.png"),\
+        plt.savefig(fig_path(f"{title}_belief_traj.png"),\
             bbox_inches="tight"); plt.show()
 
 def upsample(Z, T, R, t2, r2):
@@ -211,7 +212,7 @@ def plot_RL_training(joint, naive, D, step_num):
     ax.set_zlabel('Performance')
     # ax.set_yticks(y[::300])
     ax.set_zticks([.1, .4, .7])
-    plt.savefig(f"acc_surface_{custom_cmap.name}.pdf", bbox_inches="tight", dpi=300)
+    plt.savefig(fig_path(f"acc_surface_{custom_cmap.name}.pdf"), bbox_inches="tight", dpi=300)
     plt.show()
     
 

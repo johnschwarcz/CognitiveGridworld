@@ -1,44 +1,50 @@
-from pyexpat import model
-
 import torch; import torch.nn as nn; import math; import torch.nn.functional as F; from torch.distributions import Categorical;
 from main.model.Model_Customization import Model_Customization; from main.utils import tnp;
 
 class Model_backward(Model_Customization):
  
     def backward_pass(self):
-        if self.mode in ("RL", "ablation"):
-            self.RL_loss()  
+        if self.mode == "RL":
+            self.RL_loss()
+        if self.mode == "oracle":
+            self.oracle_loss()
         if self.mode == "SANITY":        
             self.SANITY_loss()
         if self.mode == "FF":
             self.FF_loss()
         if self.mode == "lazyrich":
             self.SANITY_loss(power = 1)
-            
-        if self.learn_embeddings and (self.mode != "ablation"):
-            self.SSL_loss()
-            self.update(self.generator_loss, self.generator_optim)  
-
-        if self.mode == "lazyrich":
             self.lazyrich_update()
-        else:
-            self.update(self.classifier_loss, self.classifier_optim, self.classifier_gradients)
+            return self.backward_return()
+
+        if self.learn_embeddings:
+            self.SSL_loss()
+            if self.embedding_reg:
+                if self.embedding_grad == "classifier":
+                    self.classifier_loss = self.classifier_loss + self.reg_loss()
+                else:
+                    self.generator_loss = self.generator_loss + self.reg_loss()
+            if self.embedding_grad == "both":
+                self.update(self.classifier_loss + self.generator_loss, self.combined_optim)
+                return self.backward_return()
+
+            self.update(self.generator_loss, self.generator_optim)
+        self.update(self.classifier_loss, self.classifier_optim, self.mode == "SANITY")
+        return self.backward_return()
+
+    def backward_return(self):
         return tnp([self.classifier_loss, self.generator_loss, self.readin_grad, self.readout_grad], 'np')
     
-    def update(self, loss, optim, collect_grad = None):
+    def update(self, loss, optim, collect_grad = False):
         optim.zero_grad()
         # torch.cuda.empty_cache()
         self.scaler.scale(loss).backward()  
-        if collect_grad is not None:
-            collect_grad()
+        if collect_grad:
+            self.readin_grad = self.get_gradient_norm(self.classifier_readin)
+            self.readout_grad = self.get_gradient_norm(self.classifier_readout)
         
         self.scaler.step(optim)
         self.scaler.update()  
-
-    def classifier_gradients(self):
-        if self.mode == "SANITY" :
-            self.readin_grad = self.get_gradient_norm(self.classifier_readin)
-            self.readout_grad = self.get_gradient_norm(self.classifier_readout)
 
     ########################################################################################################
     """ default loss functions """ 
@@ -69,9 +75,19 @@ class Model_backward(Model_Customization):
             OPE__ACC = (last_ACC * OPE).sum() / last_ACC.sum()
             OPE = OPE.mean() * chance + (1 - chance) * OPE__ACC
 
+        self.generator_loss = OPE
+
+    def reg_loss(self):
         K_norm = (torch.norm(self.active_K, dim=-1)-1) ** 2
         Q_norm = (torch.norm(self.active_Q, dim=-1)-1) ** 2
-        self.generator_loss = OPE + (K_norm + Q_norm).mean()
+        return (K_norm + Q_norm).mean()
+
+    def oracle_loss(self):
+        BR, SR = self.batch_range_, self.step_range_
+        tgt = self.goal_value[:, None].long().repeat(1, self.step_num)
+        belief = self.soft_clip(self.classifier_goal_belief[BR, SR, tgt])
+        ent = -belief * belief.log() * self.classifier_ent_bonus
+        self.classifier_loss = (-belief.log() - ent).mean()
 
     def RL_loss(self):
         CGS = self.classifier_goal_selection

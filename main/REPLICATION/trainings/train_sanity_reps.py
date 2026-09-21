@@ -11,7 +11,7 @@ if __name__ == "__main__":
     cuda = 0
     realization_num = 10
     batch_num = 2000 # 8000
-    step_num = 5 # 30
+    step_num = 10 # 30
     episodes = 50000
     state_num = 500
     obs_num = 5
@@ -27,4 +27,4 @@ if __name__ == "__main__":
             'realization_num': realization_num,  'hid_dim': 200,  'obs_num': obs_num, 'training': True,
             'batch_num': batch_num, 'step_num': step_num, 'state_num': state_num, 'learn_embeddings': False,
             'reservoir': False, 'classifier_LR': .001, 'early_stopping': True,
-            'ctx_num': 2, 'save_env': f"/sanity_reps/sanity_ctx_2_rep{r}"})
+            'ctx_num': 2, 'save_env': f"/sanity_reps/fully_trained_ctx_2_rep{r}"})

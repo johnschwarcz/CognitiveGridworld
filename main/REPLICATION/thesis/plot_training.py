@@ -15,6 +15,7 @@ sys.path.insert(0, path + '/main/bayes')
 sys.path.insert(0, path + '/main/model')
 
 from main.CognitiveGridworld import CognitiveGridworld 
+from main.utils import fig_path
 
 # Setup Plotting Style
 plt.rcParams.update({
@@ -112,7 +113,7 @@ def plot_network_overlay(bayes_joint, bayes_naive, net_trained, net_echo, T, ctx
     ]
     axs[2].legend(handles=rel_handles, loc='lower right', fontsize=16)
 
-    plt.savefig("network_overlay.svg", dpi=300)
+    plt.savefig(fig_path("network_overlay.svg"), dpi=300)
     plt.show()
 
 
@@ -161,7 +162,7 @@ def plot_training_convergence(ft_test_accs, echo_test_accs, echo_k_test_accs, jo
     ax[0].set_title("Network Convergence")
     ax[1].set_title("Echo-state Scaling")
 
-    plt.savefig("thesis_fig4.svg", dpi=300)
+    plt.savefig(fig_path("thesis_fig4.svg"), dpi=300)
     plt.show()
 
 

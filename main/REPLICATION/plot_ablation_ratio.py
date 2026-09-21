@@ -2,6 +2,7 @@ import os, sys, inspect
 import numpy as np
 import torch
 import matplotlib.pyplot as plt
+from main.utils import fig_path
 
 path = os.path.dirname(os.path.abspath(inspect.getfile(inspect.currentframe())))
 root = os.path.abspath(os.path.join(path, '..', '..'))
@@ -81,6 +82,6 @@ for a in ax:
     a.grid(alpha=.3)
     a.legend(loc='lower right')
 
-plt.savefig("ablation_transfer_ratio.svg", dpi=300, bbox_inches="tight")
+plt.savefig(fig_path("ablation_transfer_ratio.svg"), dpi=300, bbox_inches="tight")
 print("saved ablation_transfer_ratio.svg")
 plt.show()

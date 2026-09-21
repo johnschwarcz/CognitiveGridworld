@@ -14,6 +14,7 @@ sys.path.insert(0, path + '/main/bayes')
 sys.path.insert(0, path + '/main/model')
 
 from main.CognitiveGridworld import CognitiveGridworld 
+from main.utils import fig_path
 
 # Setup Plotting Style
 plt.rcParams.update({
@@ -103,7 +104,7 @@ def plot_polished_1x4_v1(joint_accs, naive_accs, std_bound, T, ctxs=1):
     
     ax_sub.legend(handles=[std_legend, emp_gap_legend], ncol=1, loc='lower right', fontsize=12)
 
-    plt.savefig("thesis_fig2_bracket_bounds_zero_smooth.svg", dpi=300, bbox_inches='tight')
+    plt.savefig(fig_path("thesis_fig2_bracket_bounds_zero_smooth.svg"), dpi=300, bbox_inches='tight')
     plt.show()
 
 

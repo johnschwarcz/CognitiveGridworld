@@ -5,6 +5,12 @@ from matplotlib.transforms import Bbox
 from matplotlib.colors import PowerNorm
 from mpl_toolkits.mplot3d import Axes3D
 import seaborn as sns
+import os, sys
+_d = os.path.dirname(os.path.abspath(__file__))
+while _d != os.path.dirname(_d) and not os.path.exists(os.path.join(_d, 'main', 'CognitiveGridworld.py')):
+    _d = os.path.dirname(_d)
+sys.path.insert(0, _d)
+from main.utils import fig_path
 sns.set() 
 
 def angle_between(v1, v2):
@@ -88,7 +94,7 @@ center_x = (bbox1.x0 + bbox1.x1) / 2
 top_y = bbox1.y1 + 0.01
 fig.text(center_x, top_y, "Training", ha='center', va='bottom', fontsize=16, fontweight = 'bold')
 axs[0, 2].set_title("Testing", fontsize = 16, fontweight = 'bold')
-plt.savefig("goal_schematic.svg")
+plt.savefig(fig_path("goal_schematic.svg"))
 plt.show()
 
 
@@ -200,6 +206,6 @@ for g_i, goal_index in enumerate([0, 1, 0]):
         ax.zaxis.line.set_color((1, 1, 1, 0))
 
     fig.canvas.draw()
-    plt.savefig(f"evaluate_{g_i}.png")
+    plt.savefig(fig_path(f"evaluate_{g_i}.png"))
     plt.show()
 

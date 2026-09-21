@@ -10,6 +10,7 @@ import matplotlib.lines as mlines
 from matplotlib.lines import Line2D
 import matplotlib as mpl
 from tqdm import tqdm
+from main.utils import fig_path
 
 path = inspect.getfile(inspect.currentframe())
 path = os.path.dirname( os.path.abspath(path))
@@ -684,8 +685,8 @@ class Collection_Plotters():
     def finish_plot(self, save, cond = "", fig = None):
         if save is not None:
             if fig is not None:
-                fig.savefig(f"{cond}_{save}")
+                fig.savefig(fig_path(f"{cond}_{save}"))
             else:
-                plt.savefig(f"{cond}_{save}")
+                plt.savefig(fig_path(f"{cond}_{save}"))
         plt.show()
 

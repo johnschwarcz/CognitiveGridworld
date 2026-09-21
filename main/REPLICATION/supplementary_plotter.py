@@ -15,6 +15,7 @@ sys.path.insert(0, path + '/main')
 sys.path.insert(0, path + '/main/bayes')
 sys.path.insert(0, path + '/main/model')
 from main.CognitiveGridworld import CognitiveGridworld
+from main.utils import fig_path
 
 # ═══════════════════════════════════════════════════════════════════
 # Plotting Hyperparameters & Configuration
@@ -346,8 +347,8 @@ if __name__ == "__main__":
     finalize_diagnostics(fig_diag, ax_diag)
     finalize_pca_grid(fig_pca, ax_pca)
     
-    fig_diag.savefig("diagnostics.svg", format="svg", bbox_inches="tight", dpi=300)
-    fig_pca.savefig("pca_manifolds.svg", format="svg", bbox_inches="tight", dpi=300)
+    fig_diag.savefig(fig_path("diagnostics.svg"), format="svg", bbox_inches="tight", dpi=300)
+    fig_pca.savefig(fig_path("pca_manifolds.svg"), format="svg", bbox_inches="tight", dpi=300)
     
     plt.show()
 

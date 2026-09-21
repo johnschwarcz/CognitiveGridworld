@@ -52,6 +52,10 @@ class CognitiveGridworld(Env_model_manager):
         self.generator_LR = init.get('generator_LR', 0.001)
         self.readout_depth = init.get('readout_depth', 1)
         self.readin_depth = init.get('readin_depth', 1)
+        self.output_joint = init.get('output_joint', False)
+        self.gpu_inference = init.get('gpu_inference', False)
+        self.embedding_grad = init.get('embedding_grad', 'generator')   # 'generator' | 'classifier' | 'both'
+        self.embedding_reg = init.get('embedding_reg', True)
         self.hid_dim = init.get('hid_dim', 1000)
         
         # --- lazy/rich RNN mode ("lazyrich"), Clark, Bordelon, Zavatone-Veth & Pehlevan,

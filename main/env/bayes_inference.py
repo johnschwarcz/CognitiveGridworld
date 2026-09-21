@@ -1,4 +1,4 @@
-import numpy as np; from main.utils import print_time; 
+import numpy as np; import torch; from main.utils import print_time; 
 from main.env_plotting.plotters_EP import Plotters
 
 class Bayes_inference(Plotters):
@@ -16,6 +16,8 @@ class Bayes_inference(Plotters):
         self.log_outcomes()
             
     def forward_inference(self, L, naive = False):
+        if self.gpu_inference:
+            return self.gpu_forward_inference(L, naive)
         dist_flat = np.zeros(L.shape).sum(1, keepdims = True).repeat(self.step_num, 1)
         p_x = np.einsum('bto, bo...->bt...', self.obs_flat, np.log(L)) + \
               np.einsum('bto, bo...->bt...', 1-self.obs_flat, np.log1p(-L))
@@ -30,6 +32,29 @@ class Bayes_inference(Plotters):
             dist_flat[:, t] = p / self.avg_until(p, override = "sum", stop_shape = 2 if naive else 1)    
 
         return self.postprocess_belief(p_x, dist_flat, naive)
+
+    def gpu_forward_inference(self, L, naive = False):
+        B, T, R, C = self.batch_num, self.step_num, self.realization_num, self.ctx_num
+        Lt = torch.as_tensor(L, device = self.device)
+        ot = torch.as_tensor(self.obs_flat, device = self.device).to(Lt.dtype)
+        flat = Lt.reshape(B, self.obs_num, -1)
+        cum = (torch.einsum('bto,bok->btk', ot, torch.log(flat)) + torch.einsum('bto,bok->btk', 1 - ot, torch.log1p(-flat))).cumsum(1)
+
+        if naive:
+            cum = cum.reshape(B, T, C, R)
+        cum = cum - cum.amax(-1, keepdim = True)
+        e = torch.exp(cum)
+        dist = e / e.sum(-1, keepdim = True)
+
+        if naive:
+            belief = dist
+        else:
+            belief = torch.stack([dist.reshape(B, T, R**c, R, R**(C - 1 - c)).sum((2, 4)) for c in range(C)], dim = 2)
+
+        p_x = None 
+        belief = belief.cpu().numpy()
+        est, goal_belief, acc, TP, mse = self.get_goal_performance(belief)
+        return p_x, belief, goal_belief, est, acc, TP, mse
 
     def postprocess_belief(self, p_x, dist_flat, naive):                            # Functions in inference_helpers
         belief = dist_flat if naive else self.marginalize(dist_flat)

@@ -17,6 +17,7 @@ sys.path.insert(0, path + '/main/bayes')
 sys.path.insert(0, path + '/main/model')
 
 from main.CognitiveGridworld import CognitiveGridworld
+from main.utils import fig_path
 
 # Global Font and Sizing Styles
 plt.rcParams.update({'font.family':'serif','font.size':13,'axes.labelsize':13,'axes.titlesize':16,'legend.fontsize':15})
@@ -294,7 +295,7 @@ def analyze_and_render_plot(cache_file='raw_data_cache.pkl', n_bootstraps=1000):
     ax_dist.grid(alpha=0.2, ls=':')
 
     plt.tight_layout(w_pad=4.0)
-    plt.savefig("FR_vs_acc.svg")
+    plt.savefig(fig_path("FR_vs_acc.svg"))
     plt.show()
 
 

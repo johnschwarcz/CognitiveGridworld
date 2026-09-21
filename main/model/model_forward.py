@@ -6,8 +6,7 @@ class Model_forward(Model_backward):
     def forward_pass(self):
         self.MC_to_interactions()
         self.MC_to_classification()
-        if self.mode != "ablation":
-            self.MC_to_pobs()
+        self.MC_to_pobs()
         return tnp([self.classifier_belief_flat, self.classifier_goal_belief, self.input_flat, self.update_flat], 'np')
 
     def default_interactions(self):
@@ -28,7 +27,10 @@ class Model_forward(Model_backward):
                     self.KQ_to_Z(self.q, self.k)      
 
     def classifier_Z(self):
-        return self.active_Z if self.mode == "ablation" else self.active_Z.detach()
+        return self.active_Z if self.embedding_grad in ("classifier", "both") else self.active_Z.detach()
+
+    def generator_Z(self):
+        return self.active_Z if self.embedding_grad in ("generator", "both") else self.active_Z.detach()
 
     def KQ_to_Z(self, ctx_1, ctx_2):
         K = self.active_K[:,ctx_1]
@@ -52,18 +54,15 @@ class Model_forward(Model_backward):
         inp = torch.cat((O, Z), dim = -1)
         inp = torch.relu(self.classifier_readin(inp))
         update = self.classifier_readout(inp)
-        belief = update.expand(-1, self.step_num, -1)
-        belief = belief.reshape(self.BSCR_dims) 
-        belief = torch.softmax(belief, -1)
-        self.postprocess_belief(belief)
+        update = update.expand(-1, self.step_num, -1)
+        self.postprocess_belief(update, accumulate = False)
     
     def RNN_classification(self):
         inp = self.RNN_readin()
         stm = self.STM.expand(-1, self.batch_num, -1).contiguous()
         ltm = self.LTM.expand(-1, self.batch_num, -1).contiguous()
         update, _ = self.LSTM(inp, (stm, ltm))   
-        belief = self.RNN_readout(update)
-        self.postprocess_belief(belief)
+        self.postprocess_belief(self.classifier_readout(update))
 
         if self.testing and (self.mode == "SANITY"):
             self.update_flat = update.detach()        
@@ -80,12 +79,47 @@ class Model_forward(Model_backward):
         inp = torch.relu(self.classifier_readin(inp))
         return inp
 
-    def RNN_readout(self, update):
-        update = self.classifier_readout(update)
-        update = update.reshape(self.BSCR_dims)
-        belief = update.cumsum(1)
-        belief = torch.softmax(belief, -1) 
-        return belief
+    def postprocess_belief(self, logits, accumulate = True):
+        if accumulate:
+            logits = logits.cumsum(1)
+        belief = self.logits_to_belief(logits)
+        self.classifier_belief_flat = belief.detach()
+        self.classifier_goal_belief = belief[self.batch_range, :, self.goal_ind]
+        self.classifier_goal_selection = Categorical(self.classifier_goal_belief).sample() # SAMPLES FROM MARGINAL BELIEF
+        self.ACC = (self.classifier_goal_selection == self.goal_value[:,None]).float() 
+
+    def logits_to_belief(self, logits):
+        if self.output_joint:
+            belief = torch.softmax(logits, -1)
+            B, S, R, C = self.batch_num, self.step_num, self.realization_num, self.ctx_num
+            return torch.stack([belief.reshape(B, S, R**c, R, R**(C - 1 - c)).sum((2, 4)) for c in range(C)], dim = 2)            
+
+        logits = logits.reshape(self.BSCR_dims)
+        return torch.softmax(logits, -1)
+        
+    def default_pobs(self, training_controller = False):
+        if self.learn_embeddings or training_controller: 
+            if training_controller:
+                conf = torch.ones(*self.batch_ctx_dims, device = self.device)
+                sample = self.controller_actions
+            else:
+                CBF = self.classifier_belief_flat[:, -1]
+                sample = torch.distributions.Categorical(probs=CBF).sample()                 # SAMPLES FROM JOINT BELIEF                 
+                sample[self.batch_range, self.goal_ind] = self.classifier_goal_selection[:, -1]
+                conf = CBF[self.BR, self.CR, sample]
+                conf[self.batch_range, self.goal_ind] = self.ACC[:,-1]
+ 
+            self.get_prediction(sample, conf)
+                
+    def get_prediction(self, sample, conf):
+        sample_emb = self.sample_to_emb(sample).reshape(self.batch_num, -1)
+        s = self.sample_to_hid(sample_emb).unsqueeze(1)
+        c = self.conf_to_hid(conf).unsqueeze(1)
+        z = self.Z_to_pobs(self.generator_Z())
+        x = torch.relu(s + c + z)
+        x = self.gen_hid2hid(x)
+        x = self.hid_to_pobs(torch.relu(x))
+        self.pred_pobs = torch.sigmoid(x).squeeze()
 
     ########################################################################################################
     """ lazy/rich RNN — Clark, Bordelon, Zavatone-Veth & Pehlevan, bioRxiv 2026.03.02.708943 """
@@ -108,7 +142,7 @@ class Model_forward(Model_backward):
         Step t consumes observation t and reads out the state it produces, so y[t] sees
         observations 0..t -- the same causal alignment as the LSTM path, keeping accuracy, TP
         and MSE comparable across modes. The readout emits belief *increments*, cumsum-ed
-        before the softmax exactly as in RNN_readout.
+        before the softmax exactly as in postprocess_belief.
 
         The state stays fp32 under autocast: gamma's whole point is a small but coherent
         perturbation to J, and the recurrence is where that would be lost.
@@ -130,9 +164,7 @@ class Model_forward(Model_backward):
 
         phi_flat = torch.stack(phis, 1)                                         # (B, T, N)
         update = self.rnn_V_scale * (phi_flat @ self.rnn_V)                     # Eq. (2)
-        update = update.reshape(self.BSCR_dims)
-        belief = torch.softmax(update.cumsum(1), -1)                            # same convention as RNN_readout
-        self.postprocess_belief(belief)
+        self.postprocess_belief(update)
 
         if testing:
             # phi is what the DMFT's C(t,t') = (1/N) sum_i phi_i(t) phi_i(t') is built from, so
@@ -150,33 +182,3 @@ class Model_forward(Model_backward):
         learned projection or nonlinearity -- U is the only thing between task and preactivation."""
         Z = self.classifier_Z().reshape(self.batch_num, 1, -1).expand(-1, self.step_num, -1)
         return torch.cat((self.obs_flat, Z), dim = -1)
-
-    def postprocess_belief(self, belief):
-        self.classifier_belief_flat = belief.detach()
-        self.classifier_goal_belief = belief[self.batch_range, :, self.goal_ind]
-        self.classifier_goal_selection = Categorical(self.classifier_goal_belief).sample() # SAMPLES FROM MARGINAL BELIEF
-        self.ACC = (self.classifier_goal_selection == self.goal_value[:,None]).float() 
-        
-    def default_pobs(self, training_controller = False):                           # no Generator: nothing predicts observations
-        if self.learn_embeddings or training_controller: 
-            if training_controller:
-                conf = torch.ones(*self.batch_ctx_dims, device = self.device)
-                sample = self.controller_actions
-            else:
-                CBF = self.classifier_belief_flat[:, -1]
-                sample = torch.distributions.Categorical(probs=CBF).sample()                 # SAMPLES FROM JOINT BELIEF                 
-                sample[self.batch_range, self.goal_ind] = self.classifier_goal_selection[:, -1]
-                conf = CBF[self.BR, self.CR, sample]
-                conf[self.batch_range, self.goal_ind] = self.ACC[:,-1]
- 
-            self.get_prediction(sample, conf)
-                
-    def get_prediction(self, sample, conf):
-        sample_emb = self.sample_to_emb(sample).reshape(self.batch_num, -1)
-        s = self.sample_to_hid(sample_emb).unsqueeze(1)
-        c = self.conf_to_hid(conf).unsqueeze(1)
-        z = self.Z_to_pobs(self.active_Z)
-        x = torch.relu(s + c + z)
-        x = self.gen_hid2hid(x)
-        x = self.hid_to_pobs(torch.relu(x))
-        self.pred_pobs = torch.sigmoid(x).squeeze()

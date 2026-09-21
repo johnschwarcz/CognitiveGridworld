@@ -7,7 +7,17 @@ import matplotlib.pyplot as plt
 from joblib import Parallel, delayed, parallel_config
 
 path = os.path.dirname(os.path.abspath(inspect.getfile(inspect.currentframe())))
-project_root = os.path.abspath(os.path.join(path, '..', '..'))
+def find_project_root(start=None):
+    d = os.path.abspath(start or path)
+    while True:
+        if os.path.exists(os.path.join(d, 'main', 'CognitiveGridworld.py')):
+            return d
+        parent = os.path.dirname(d)
+        if parent == d:
+            raise RuntimeError("project root not found")
+        d = parent
+
+project_root = find_project_root()
 sys.path.insert(0, project_root)
 
 from main.CognitiveGridworld import CognitiveGridworld

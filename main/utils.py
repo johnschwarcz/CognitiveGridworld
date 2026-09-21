@@ -1,4 +1,4 @@
-import numpy as np; import torch; import time, functools
+import numpy as np; import torch; import os, time, functools
 
 def print_time(show_if_above=None):
     def deco(fn):
@@ -28,3 +28,9 @@ def tnp(x, to, device = None):
     
     return x
     
+
+def fig_path(name):
+    """Resolve a figure filename into main/REPLICATION/figure_bin, independent of cwd."""
+    d = os.path.join(os.path.dirname(os.path.abspath(__file__)), "REPLICATION", "figure_bin")
+    os.makedirs(d, exist_ok=True)
+    return os.path.join(d, name)

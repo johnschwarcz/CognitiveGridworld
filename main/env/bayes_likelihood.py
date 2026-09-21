@@ -45,7 +45,7 @@ class Bayes_likelihood(Bayes_inference):
     
     def soft_roll(self, Z):
         Z = (self.roll_realization_range - Z[..., None] * self.V_num) % self.V_num
-        Z = np.tile(Z[..., None, :], (1, 1,  self.realization_num, 1))
+        Z = Z[..., None, :]
         distance = np.minimum(Z,  self.V_num - Z)
         exp_neg_distance = np.exp(-(distance**2))
         P = exp_neg_distance / exp_neg_distance.sum(axis=-1, keepdims=True)

@@ -37,7 +37,7 @@ class Model_architecture(Model_controller):
             self.lazyrich_classifier()
             return
         inp_dims = (self.Z_num + 1) * self.obs_num
-        out_dims = self.realization_num * self.ctx_num
+        out_dims = self.R_to_the_ctx if self.output_joint else self.realization_num * self.ctx_num
         self.classifier_readin = self.mlp_stack(inp_dims, self.hid_dim, self.readin_depth)   
         self.classifier_readout = self.mlp_stack(self.hid_dim, out_dims, self.readout_depth)
         params = list(self.classifier_readin.parameters()) + list(self.classifier_readout.parameters())
@@ -71,10 +71,6 @@ class Model_architecture(Model_controller):
             embedding_params = ([self.all_K, self.all_Q] +
                                 list(self.K_downscale.parameters()) +
                                 list(self.Q_downscale.parameters()))
-            if self.mode == "ablation":
-                self.classifier_optim.add_param_group({'params': embedding_params, 'lr': self.generator_LR})
-                return
-
             self.Z_to_pobs = nn.Linear(self.Z_num , self.hid_dim)            
             self.sample_to_emb = nn.Embedding(self.realization_num, self.hid_dim)
             self.sample_to_hid = nn.Linear(self.hid_dim * self.ctx_num, self.hid_dim)
@@ -82,7 +78,11 @@ class Model_architecture(Model_controller):
             self.conf_to_hid = nn.Linear(self.ctx_num, self.hid_dim)
             self.hid_to_pobs = nn.Linear(self.hid_dim, 1)
 
-            params = [{'params': embedding_params +
+            generator_params = ([] if self.embedding_grad == "classifier" else embedding_params)
+            if self.embedding_grad == "classifier":
+                self.classifier_optim.add_param_group({'params': embedding_params, 'lr': self.generator_LR})
+
+            params = [{'params': generator_params +
                         list(self.Z_to_pobs.parameters()) +
                         list(self.sample_to_emb.parameters()) +          
                         list(self.sample_to_hid.parameters()) +  
@@ -90,6 +90,13 @@ class Model_architecture(Model_controller):
                         list(self.hid_to_pobs.parameters()) +
                         list(self.conf_to_hid.parameters()), 'lr': self.generator_LR}]                
             self.generator_optim = optim.Adam(params)
+            if self.embedding_grad == "both":
+                # one graph, one step: the shared all_K -> active_Z subtree cannot take two backwards
+                self.combined_optim = optim.Adam(
+                    [{'params': [p for g in self.classifier_optim.param_groups for p in g['params']],
+                      'lr': self.classifier_LR},
+                     {'params': [p for g in self.generator_optim.param_groups for p in g['params']],
+                      'lr': self.generator_LR}])
 
     ########################################################################################################
     """ lazy/rich RNN — Clark, Bordelon, Zavatone-Veth & Pehlevan, bioRxiv 2026.03.02.708943 """

@@ -13,6 +13,7 @@ sys.path.insert(0, path + '/main')
 sys.path.insert(0, path + '/main/bayes')
 sys.path.insert(0, path + '/main/model')
 from main.CognitiveGridworld import CognitiveGridworld
+from main.utils import fig_path
 
 F64, I64 = np.float64, np.int64
 
@@ -21,8 +22,10 @@ F64, I64 = np.float64, np.int64
 # ═══════════════════════════════════════════════════════════════════
 
 PLOT_CFG = {
-    "figsize_A": (28, 6),   # 1 x 5 Diagnostics
+    "figsize_A": (17, 6),        # 1 x 3 Diagnostics, all testing episodes
+    "figsize_A_early": (28, 6),  # 1 x 5 Diagnostics, early learning
     "figsize_B": (28, 4),   # 1 x 5 Event-Triggered Dynamics
+    "figsize_C": (23, 4.8),      # 1 x 4 Calibration
     "early_epochs": 400,
     "smooth_w": 1,
     "line_width": 2.5,
@@ -161,10 +164,11 @@ def prep_model_dynamics(m, prm):
 # Plotting Functions
 # ═══════════════════════════════════════════════════════════════════
 
-def plot_diagnostics_1x5(axes, agent, name):
+def plot_diagnostics_full(axes, agent, name):
+    """All testing episodes: accuracy, FR correlation, and the two against each other."""
     def ex(y, lim=None): return _ep_xy(_smooth(y, PLOT_CFG["smooth_w"]), lim)
-    
-    # 1. Final Accuracy
+
+    # 1. Final Step Accuracy
     x, y = ex(agent.test_acc_through_training[:, -1])
     axes[0].plot(x, y, c=AGENT_COLORS[name], label=name, zorder=3)
     baseline_color = AGENT_COLORS["Joint"] if name == "Trained" else AGENT_COLORS["Naive"]
@@ -172,48 +176,206 @@ def plot_diagnostics_1x5(axes, agent, name):
     acc = float(np.mean(agent.joint_acc[:, -1])) if name == "Trained" else float(np.mean(agent.naive_acc[:, -1]))
     axes[0].axhline(acc, c=baseline_color, ls="--", label=baseline_label, zorder=5)
 
-    # 2. Early Acc
-    xi, yi = ex(agent.test_acc_through_training[:, -1], PLOT_CFG["early_epochs"])
-    axes[1].plot(xi, yi, c=AGENT_COLORS[name], zorder=3)
+    # 2. Correlation(FR, Acc.)
+    x, y = ex(agent.test_SII_coef_through_training)
+    axes[1].plot(x, y, c=AGENT_COLORS[name], zorder=3)
+    axes[1].axhline(y=0, c='k', alpha=0.5)
 
-    # 3. Correlation(FR, Acc.)
-    xi, yi = ex(agent.test_SII_coef_through_training, PLOT_CFG["early_epochs"])
-    axes[2].plot(xi, yi, c=AGENT_COLORS[name], zorder=3)
-    axes[2].axhline(y=0, c='k', alpha=0.5)
-
-    # 4. PR(RNN) - PR(Read-in)
-    y_raw = pr_stat(agent.test_model_update_dim_through_training) - (pr_stat(agent.test_model_input_dim_through_training) + 1e-12)
-    xi, yi = ex(y_raw, PLOT_CFG["early_epochs"])
-    axes[3].plot(xi, yi, c=AGENT_COLORS[name], zorder=3)
-    axes[3].axhline(y=0, c='k', alpha=0.5)
-
-    # 5. Accuracy vs Correlation with Factorization Regret
+    # 3. FR Correlation vs. Accuracy
     x_acc = _smooth(agent.test_acc_through_training[:, -1], PLOT_CFG["smooth_w"])
     y_sii = _smooth(agent.test_SII_coef_through_training, PLOT_CFG["smooth_w"])
-    min_len = min(len(x_acc), len(y_sii))
-    axes[4].plot(x_acc[:min_len], y_sii[:min_len], c=AGENT_COLORS[name], zorder=3)
+    n = min(len(x_acc), len(y_sii))
+    axes[2].plot(x_acc[:n], y_sii[:n], c=AGENT_COLORS[name], zorder=3)
+    axes[2].axhline(y=0, c='k', alpha=0.5)
+
+
+def plot_diagnostics_early(axes, agent, name):
+    """First PLOT_CFG['early_epochs'] testing episodes, where the FR correlation emerges."""
+    lim = PLOT_CFG["early_epochs"]
+    def ex(y): return _ep_xy(_smooth(y, PLOT_CFG["smooth_w"]), lim)
+
+    # 1. Early Learning Acc.
+    x, y = ex(agent.test_acc_through_training[:, -1])
+    axes[0].plot(x, y, c=AGENT_COLORS[name], label=name, zorder=3)
+
+    # 2. Correlation(FR, Acc.)
+    x, y = ex(agent.test_SII_coef_through_training)
+    axes[1].plot(x, y, c=AGENT_COLORS[name], zorder=3)
+    axes[1].axhline(y=0, c='k', alpha=0.5)
+
+    # 3. PR(RNN)
+    pr_rnn = pr_stat(agent.test_model_update_dim_through_training)
+    x, y = ex(pr_rnn)
+    axes[2].plot(x, y, c=AGENT_COLORS[name], zorder=3)
+
+    # 4. PR(Read-in)
+    pr_in = pr_stat(agent.test_model_input_dim_through_training)
+    x, y = ex(pr_in)
+    axes[3].plot(x, y, c=AGENT_COLORS[name], zorder=3)
+
+    # 5. PR(RNN) - PR(Read-in)
+    x, y = ex(pr_rnn - (pr_in + 1e-12))
+    axes[4].plot(x, y, c=AGENT_COLORS[name], zorder=3)
     axes[4].axhline(y=0, c='k', alpha=0.5)
 
-def finalize_layout_A(axes):
-    titles = [
-        "Final Step Accuracy", 
-        "Early Learning Acc.", 
-        "Correlation(FR, Acc.)", 
-        "PR(RNN) - PR(Read-in)", 
-        "FR Correlation vs. Acc."
-    ]
-    ylabels = ["Accuracy", "Accuracy", "r", r"$\Delta$ PR", "r (Correlation)"]
-    xlabels = ["Testing Episode", "Testing Episode", "Testing Episode", "Testing Episode", "Accuracy"]
-    
+
+def _finalize_1x3(axes, titles, ylabels, xlabels):
     for i, ax in enumerate(axes):
         ax.set_title(titles[i], pad=15)
         ax.set_ylabel(ylabels[i])
         ax.set_xlabel(xlabels[i])
         ax.spines[['top', 'right']].set_visible(False)
         ax.grid(True, ls='--', alpha=0.3)
-    
     axes[0].legend(loc='lower right', frameon=False, ncols=2)
     plt.tight_layout()
+
+
+def finalize_layout_full(axes):
+    _finalize_1x3(axes,
+        ["Final Step Accuracy", "Correlation(FR, Acc.)", "FR Correlation vs. Acc."],
+        ["Accuracy", "r", "r (Correlation)"],
+        ["Testing Episode", "Testing Episode", "Accuracy"])
+
+
+def finalize_layout_early(axes):
+    _finalize_1x3(axes,
+        ["Early Learning Acc.", "Correlation(FR, Acc.)", "PR(RNN)", "PR(Read-in)",
+         "PR(RNN) - PR(Read-in)"],
+        ["Accuracy", "r", "PR", "PR", r"$\Delta$ PR"],
+        ["Testing Episode"] * 5)
+
+    # PR(RNN) and PR(Read-in) are the same quantity in the same units: share a scale
+    lo = min(axes[2].get_ylim()[0], axes[3].get_ylim()[0])
+    hi = max(axes[2].get_ylim()[1], axes[3].get_ylim()[1])
+    axes[2].set_ylim(lo, hi)
+    axes[3].set_ylim(lo, hi)
+
+
+# ═══════════════════════════════════════════════════════════════════
+# Calibration: is confidence a usable signal, or decoupled from accuracy?
+# Adapted from coggrid.plotting.plots (_draw_calibration / _draw_confidence_scissor)
+# ═══════════════════════════════════════════════════════════════════
+
+def _final_conf_acc(goal_belief, accuracy):
+    """Confidence in the answer the observer would give, and whether it was right."""
+    b = np.asarray(goal_belief, float)
+    return b[:, -1].max(-1), np.asarray(accuracy, float)[:, -1]
+
+
+def _calibration_curve(confidence, correct, n_bins, min_count=20):
+    """Empirical accuracy per confidence bin, plus each bin's share of episodes.
+
+    Bins under `min_count` are dropped: their accuracy is mostly sampling noise
+    and they land in the tails, where the eye discounts it least.
+    """
+    edges = np.linspace(0.0, 1.0, n_bins + 1)
+    idx = np.clip(np.digitize(confidence, edges) - 1, 0, n_bins - 1)
+    centres, accuracy, weight = [], [], []
+    for b in range(n_bins):
+        in_bin = idx == b
+        if in_bin.sum() < min_count:
+            continue
+        centres.append(confidence[in_bin].mean())
+        accuracy.append(correct[in_bin].mean())
+        weight.append(in_bin.mean())
+    return np.array(centres), np.array(accuracy), np.array(weight)
+
+
+def draw_calibration(ax, series, chance, n_bins=20):
+    """Accuracy against self-reported confidence. `series`: (name, conf, correct)."""
+    ax.plot([0, 1], [0, 1], color="0.7", lw=1.2, ls="--", zorder=1,
+            label="perfect calibration")
+    ax.axhline(chance, color="0.7", lw=2, ls=":", zorder=1)
+    ax.text(0.02, chance + 0.02, "chance", color="#999999", fontsize=10)
+
+    for name, conf_all, corr_all in series:
+        conf, acc, weight = _calibration_curve(conf_all, corr_all, n_bins)
+        colour = AGENT_COLORS[name]
+        ax.plot(conf, acc, "-", color=colour, lw=1.6, zorder=3, label=name)
+        # Marker area carries the episode count behind each point.
+        ax.scatter(conf, acc, s=np.minimum(12 + 18 * n_bins * weight, 110),
+                   color=colour, edgecolor="white", lw=0.6, zorder=4)
+
+    ax.set(xlim=(0, 1), ylim=(0, 1))
+    ax.set_xlabel("Confidence")
+    ax.set_ylabel("Accuracy")
+    ax.legend(frameon=False, fontsize=9, loc="upper left")
+
+
+def draw_confidence_scissor(ax, series, chance, n_bins=20, shade=1, annotate=True):
+    """Accuracy and confidence against episode FR rank. `series`: (name, conf, correct, fr).
+
+    Rank rather than raw FR on x: the distribution has a long tail, and what
+    matters is the ordering of episodes, not the units.
+    """
+    ax.axhline(chance, color="0.7", lw=2, ls=":", zorder=1)
+    ax.text(98, chance + 0.025, "chance", color="#999999", fontsize=10, ha="right")
+    x = np.linspace(100 / n_bins, 100, n_bins) - 50 / n_bins
+    marker = "-o" if n_bins <= 25 else "-"
+
+    curves = {}
+    for name, conf, corr, fr in series:
+        bins = np.array_split(np.argsort(np.asarray(fr, float)), n_bins)
+        colour = AGENT_COLORS[name]
+        acc_b = np.array([np.asarray(corr)[b].mean() for b in bins])
+        conf_b = np.array([np.asarray(conf)[b].mean() for b in bins])
+        curves[name] = (acc_b, conf_b)
+        ax.plot(x, acc_b, marker, color=colour, lw=1.9, ms=4.0, zorder=3,
+                label=f"{name} accuracy")
+        ax.plot(x, conf_b, "--", color=colour, lw=1.4, alpha=0.8, zorder=2,
+                label=f"{name} confidence")
+
+    # Shade the gap for the factorized observer: that gap is the failure mode.
+    name = series[shade][0]
+    acc_b, conf_b = curves[name]
+    colour = AGENT_COLORS[name]
+    ax.fill_between(x, acc_b, conf_b, color=colour, alpha=0.12, zorder=0)
+    if annotate:
+        mid = max(0, n_bins - 2)
+        ax.annotate("believes it is right\nthis often",
+                    xy=(x[mid], conf_b[mid]), xytext=(x[mid] - 30, 0.93),
+                    fontsize=8, color=colour, ha="center",
+                    arrowprops=dict(arrowstyle="->", color=colour, lw=0.9))
+        ax.annotate("actually is, this often",
+                    xy=(x[mid], acc_b[mid]), xytext=(x[mid] - 50, 0.30),
+                    fontsize=8, color=colour, ha="center",
+                    arrowprops=dict(arrowstyle="->", color=colour, lw=0.9))
+
+    ax.set(ylim=(0, 1), xlim=(0, 100))
+    ax.set_xlabel("Episodes ranked by FR (percentile)")
+    ax.set_ylabel("Probability")
+    ax.legend(frameon=False, fontsize=8, loc="lower left", ncol=2,
+              columnspacing=1.0, handlelength=1.6)
+
+
+def plot_calibration_1x4(axes, trained, echo, n_bins=20):
+    """[calibration Bayes, calibration networks, scissor Bayes, scissor networks].
+
+    Bayesian observers are read off `trained`'s episodes; each network is read off
+    its own agent's episodes. The scissor's x axis is a within-run percentile, so
+    the two network curves remain comparable despite different episode draws.
+    """
+    chance = 1.0 / trained.realization_num
+    j = _final_conf_acc(trained.joint_goal_belief, trained.joint_acc)
+    n = _final_conf_acc(trained.naive_goal_belief, trained.naive_acc)
+    t = _final_conf_acc(trained.model_goal_belief, trained.model_acc)
+    e = _final_conf_acc(echo.model_goal_belief, echo.model_acc)
+    fr_b, fr_t, fr_e = trained.SII[:, -1], trained.SII[:, -1], echo.SII[:, -1]
+
+    draw_calibration(axes[0], [("Joint", *j), ("Naive", *n)], chance, n_bins)
+    draw_calibration(axes[1], [("Trained", *t), ("Echo", *e)], chance, n_bins)
+    draw_confidence_scissor(axes[2], [("Joint", *j, fr_b), ("Naive", *n, fr_b)],
+                            chance, n_bins, shade=1)
+    draw_confidence_scissor(axes[3], [("Trained", *t, fr_t), ("Echo", *e, fr_e)],
+                            chance, n_bins, shade=1)
+
+    for ax, title in zip(axes, ["Calibration: Bayes", "Calibration: Networks",
+                                "Confidence vs FR: Bayes", "Confidence vs FR: Networks"]):
+        ax.set_title(title, pad=15)
+        ax.spines[['top', 'right']].set_visible(False)
+        ax.grid(True, ls='--', alpha=0.3)
+    plt.tight_layout()
+
 
 def plot_dynamics_1x5(axes, d_tr, d_ec):
     tau = np.arange(DYN_PARAMS["E_START"], DYN_PARAMS["E_END"] + 1)
@@ -279,16 +441,28 @@ if __name__ == "__main__":
     data_tr = prep_model_dynamics(trained, DYN_PARAMS)
     data_ec = prep_model_dynamics(echo, DYN_PARAMS)
 
-    # 2. Figure A: Diagnostics
-    figA, axesA = plt.subplots(1, 5, figsize=PLOT_CFG["figsize_A"])
-    plot_diagnostics_1x5(axesA, trained, "Trained")
-    plot_diagnostics_1x5(axesA, echo, "Echo")
-    finalize_layout_A(axesA)
-    figA.savefig("diagnostics_panel.svg", format="svg", bbox_inches="tight")
+    # 2. Figure A1: Diagnostics over all testing episodes
+    figA1, axesA1 = plt.subplots(1, 3, figsize=PLOT_CFG["figsize_A"])
+    plot_diagnostics_full(axesA1, trained, "Trained")
+    plot_diagnostics_full(axesA1, echo, "Echo")
+    finalize_layout_full(axesA1)
+    figA1.savefig(fig_path("diagnostics_panel_full.svg"), format="svg", bbox_inches="tight")
+
+    # 2b. Figure A2: Diagnostics over early learning only
+    figA2, axesA2 = plt.subplots(1, 5, figsize=PLOT_CFG["figsize_A_early"])
+    plot_diagnostics_early(axesA2, trained, "Trained")
+    plot_diagnostics_early(axesA2, echo, "Echo")
+    finalize_layout_early(axesA2)
+    figA2.savefig(fig_path("diagnostics_panel_early.svg"), format="svg", bbox_inches="tight")
+
+    # 2c. Figure C: Calibration
+    figC, axesC = plt.subplots(1, 4, figsize=PLOT_CFG["figsize_C"])
+    plot_calibration_1x4(axesC, trained, echo)
+    figC.savefig(fig_path("calibration_panel.svg"), format="svg", bbox_inches="tight")
 
     # 3. Figure B: Event Dynamics
     figB, axesB = plt.subplots(1, 5, figsize=PLOT_CFG["figsize_B"])
     plt.subplots_adjust(bottom=0.2, wspace=0.4)
     plot_dynamics_1x5(axesB, data_tr, data_ec)
-    figB.savefig("dynamics_panel.svg", format="svg", bbox_inches="tight")
+    figB.savefig(fig_path("dynamics_panel.svg"), format="svg", bbox_inches="tight")
     plt.show()
