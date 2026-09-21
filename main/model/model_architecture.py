@@ -47,6 +47,9 @@ class Model_architecture(Model_controller):
             params = params + [self.STM, self.LTM]
             if not self.reservoir:
                 params += list(self.LSTM.parameters()) 
+            else:
+                for p in self.LSTM.parameters():
+                    p.requires_grad_(False)
 
         self.classifier_optim = optim.Adam([{'params': params,'lr': self.classifier_LR}]) 
 
@@ -117,8 +120,7 @@ class Model_architecture(Model_controller):
 
         gamma is the knob: at gamma -> 0+ the 1/(N gamma) prefactor absorbs any misalignment
         and J is left untouched (a reservoir); large gamma demands alignment that only
-        restructuring can supply. `reservoir=True` freezes J and U at the same output scale --
-        an exact no-restructuring control.
+        restructuring can supply.
 
         B&P (JSTAT 2023) write the same parameterization with N gamma^2 in the learning rate
         rather than the energy: their gamma_0 is this gamma, and classifier_LR * N * gamma^2
@@ -146,10 +148,6 @@ class Model_architecture(Model_controller):
         self.rnn_U = nn.Parameter(torch.randn(N, self.lazyrich_D_in))
         self.rnn_V = nn.Parameter(torch.randn(N, self.lazyrich_D_out))
         self.register_buffer("rnn_J_init", self.rnn_J.detach().clone())
-
-        if self.reservoir:
-            self.rnn_J.requires_grad_(False)
-            self.rnn_U.requires_grad_(False)
         self.lazyrich_params = [p for p in (self.rnn_J, self.rnn_U, self.rnn_V) if p.requires_grad]
 
         # Langevin gradient flow, Eq. (4). The ridge gradient (1/beta) Theta is supplied by
