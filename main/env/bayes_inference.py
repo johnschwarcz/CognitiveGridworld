@@ -8,12 +8,13 @@ class Bayes_inference(Plotters):
         self.joint_px, self.joint_belief, self.joint_goal_belief,\
         self.joint_est, self.joint_acc, self.joint_TP, self.joint_mse\
             = self.forward_inference(self.joint_likelihood)
+        
+        if self.test_set or self.show_plots:
+            self.naive_px, self.naive_belief,  self.naive_goal_belief,\
+            self.naive_est, self.naive_acc, self.naive_TP, self.naive_mse\
+                = self.forward_inference(self.naive_likelihood, naive = True)
 
-        self.naive_px, self.naive_belief,  self.naive_goal_belief,\
-        self.naive_est, self.naive_acc, self.naive_TP, self.naive_mse\
-            = self.forward_inference(self.naive_likelihood, naive = True)
-
-        self.log_outcomes()
+            self.log_outcomes()
             
     def forward_inference(self, L, naive = False):
         if self.gpu_inference:
