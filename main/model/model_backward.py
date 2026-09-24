@@ -67,13 +67,14 @@ class Model_backward(Model_Customization):
 
     def SSL_loss(self, training_controller = False):
         chance = 1/self.realization_num
-        last_ACC = self.ACC[:, -1, None]
-        OPE = self.DKL_sym(self.pred_pobs, self.obs_flat.mean(1))
+        OPE = self.DKL_sym(self.pred_pobs, self.obs_flat.mean(1))       # batch x obs_num
+
         if training_controller or self.mode == "oracle":
-            OPE = OPE.mean() 
+            OPE = OPE.mean()
         else:
-            OPE__ACC = (last_ACC * OPE).sum() / last_ACC.sum()
-            OPE = OPE.mean() * chance + (1 - chance) * OPE__ACC
+            last_ACC = self.ACC[:, -1]
+            OPE__ACC = (last_ACC * OPE.mean(-1)).sum() / last_ACC.sum()
+            OPE = OPE.mean() * chance + (1 - chance) * OPE__ACC * self.obs_num 
 
         self.generator_loss = OPE
 
@@ -104,13 +105,13 @@ class Model_backward(Model_Customization):
         ent = -belief * belief.log() * self.classifier_ent_bonus 
         self.classifier_loss = (rew + pun - ent).mean()       
 
-    def DKL_sym(self, x, y, PM = True):
-        forward  = self.DKL(x, y) + PM * self.DKL(1-x, 1-y)
-        backward = self.DKL(y, x) + PM * self.DKL(1-y, 1-x)
+    def DKL_sym(self, x, y, PM = True, eps = 1e-3):
+        forward  = self.DKL(x, y, eps) + PM * self.DKL(1-x, 1-y, eps)
+        backward = self.DKL(y, x, eps) + PM * self.DKL(1-y, 1-x, eps)
         DKL = (forward + backward) / 2
         return DKL
     
-    def DKL(self, x, y):
+    def DKL(self, x, y, eps = 1e-3):
         x = self.soft_clip(x)
         y = self.soft_clip(y)
         return x * torch.log(x/y)

@@ -15,6 +15,11 @@ class Env_model_data_manager(Env_control_manager):
         self.test_net_joint_DKL, self.test_net_naive_DKL, self.test_accs, self.train_accs, self.test_TPs, self.train_TPs, self.test_mses, self.train_mses \
                                                                                             = [np.zeros((test_episodes, self.step_num)) for _ in range(8)]
 
+    def run_external_logger(self):
+        if self.external_logger is None: return
+        for k, v in self.external_logger(self).items():
+            self.custom_log.setdefault(k, []).append(v)
+
     def log_model(self):
         if self.test_set:
             self.test_accs[self.test_e, :] = self.model_acc.mean(0)

@@ -34,3 +34,34 @@ def fig_path(name):
     d = os.path.join(os.path.dirname(os.path.abspath(__file__)), "REPLICATION", "figure_bin")
     os.makedirs(d, exist_ok=True)
     return os.path.join(d, name)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Shared figure style
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Type is FIXED, not scaled. Keep panels near FIG_PANEL and every figure matches;
+# scaling type to figure or panel width was tried and mis-sizes wide single panels.
+FIG_PANEL = (2.9, 2.0)         # target axes size, inches -- the unit figures are built from
+FIG_FONTS = dict(title=15, label=9.5, tick=8.5, legend=10, annot=10)
+
+
+def apply_fig_style():
+    """One look for every figure. Sizes assume panels of roughly FIG_PANEL.
+
+    Returns the sizes so callers can use them for per-artist `fontsize=`.
+    """
+    import matplotlib.pyplot as plt
+    fs = dict(FIG_FONTS)
+    plt.rcParams.update({
+        'font.family': 'serif', 'font.serif': 'cmr10',
+        'font.sans-serif': 'cmss10', 'font.monospace': 'cmtt10',
+        'axes.formatter.use_mathtext': True,
+        'font.size': fs["label"], 'axes.labelsize': fs["label"],
+        'axes.titlesize': fs["title"], 'axes.titleweight': 'normal',
+        'legend.fontsize': fs["legend"],
+        'xtick.labelsize': fs["tick"], 'ytick.labelsize': fs["tick"],
+        'axes.linewidth': .8, 'lines.linewidth': 1.4,
+        'xtick.direction': 'out', 'ytick.direction': 'out', 'figure.dpi': 300,
+    })
+    return fs

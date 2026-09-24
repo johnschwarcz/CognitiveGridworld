@@ -10,34 +10,42 @@ class Env_model_manager(Env_model_data_manager):
             self.load() # Loads both env and model
         self.prep_data_manager()
         self.episode_loop(disable_tqdm)
+        self.custom_log = {k: np.stack(v) for k, v in self.custom_log.items()}
         if self.save_env is not None:
             self.save() # Saves both env and model
 
     def episode_loop(self, disable_tqdm):
         pbar = tqdm(range(self.episodes), disable=disable_tqdm)
         for self.e in pbar:   
-            self.log_ind = self.e % self.checkpoint_every
-            self.test_set = (self.log_ind == 0) or (self.training == False)
-            if (self.e == self.episodes - 1) or (self.log_ind == 0):
-                if self.show_plots * (self.e > 1) * (self.test_e % self.plot_every == 0):
-                   self.plot_model_perf()
-                self.preprocess_env()
-            self.run_generators()
-            if (self.skip_inference is False) or self.test_set:
-                self.run_inference() 
-            self.prep_model()
-            self.forward_backward()
-            self.log_model()
+            self.preprocess_episode()
+            self.run_episode()
             if self.test_set:
-                pbar.set_postfix_str(f"acc {self.test_accs[self.test_e - 1, -1]:.3f} | joint {self.joint_acc.mean(0)[-1]:.3f} | naive {self.naive_acc.mean(0)[-1]:.3f}")
+                curr_joint = self.joint_acc.mean(0)[-1]
+                curr_naive = self.naive_acc.mean(0)[-1]
+                curr_test = self.test_accs[self.test_e - 1, -1]
+                pbar.set_postfix_str(f"acc {curr_test:.3f} | joint {curr_joint:.3f} | naive {curr_naive:.3f}")
+                if self.early_stopping:
+                    if curr_test > curr_joint:
+                        print("Stopping early: ", curr_test, " > ", curr_joint)
+                        return 
 
-            if self.test_set and self.early_stopping:
-                net_acc = self.test_accs[self.test_e - 1, -1]
-                thresh = self.joint_acc.mean(0)[-1]
-                if net_acc > thresh:
-                    print("Stopping early: ", net_acc, " > ", thresh)
-                    return 
+    def preprocess_episode(self):
+        self.log_ind = self.e % self.checkpoint_every
+        self.test_set = (self.log_ind == 0) or (self.training == False)
+        if (self.e == self.episodes - 1) or (self.log_ind == 0):
+            if self.show_plots * (self.e > 1) * (self.test_e % self.plot_every == 0):
+                self.plot_model_perf()
+            self.preprocess_env()      
 
+    def run_episode(self):  
+        self.run_generators()
+        if (self.skip_inference is False) or self.test_set:
+            self.run_inference() 
+        self.prep_model()
+        self.forward_backward()
+        self.log_model()
+        self.run_external_logger()
+        
     def prep_model(self):               
         args_for_model = {
             'joint_goal_belief': self.joint_goal_belief,

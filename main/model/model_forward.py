@@ -118,8 +118,8 @@ class Model_forward(Model_backward):
         c = self.conf_to_hid(conf).unsqueeze(1)
         z = self.Z_to_pobs(self.generator_Z())
         x = torch.relu(s + c + z)
-        x = self.gen_hid2hid(x)
-        x = self.hid_to_pobs(torch.relu(x))
+        x = torch.relu(self.gen_hid2hid(x))
+        x = self.hid_to_pobs(x)
         self.pred_pobs = torch.sigmoid(x).squeeze()
 
     ########################################################################################################

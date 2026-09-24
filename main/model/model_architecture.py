@@ -71,6 +71,14 @@ class Model_architecture(Model_controller):
         if self.learn_embeddings:
             self.K_downscale = nn.Linear(self.hid_dim, self.KQ_dim)
             self.Q_downscale = nn.Linear(self.hid_dim, self.KQ_dim)
+            
+            # EXPERIMENT
+            for L in (self.K_downscale, self.Q_downscale):
+                nn.init.orthogonal_(L.weight, gain=(self.hid_dim / self.KQ_dim)**0.5)
+                nn.init.zeros_(L.bias)
+
+
+
             embedding_params = ([self.all_K, self.all_Q] +
                                 list(self.K_downscale.parameters()) +
                                 list(self.Q_downscale.parameters()))
@@ -134,7 +142,7 @@ class Model_architecture(Model_controller):
 
         if self.gamma <= 0:
             raise ValueError("gamma must be > 0 (the paper's limit is gamma -> 0+); "
-                             "for the exact reservoir use reservoir=True.")
+                             "use a small gamma for the lazy regime.")
         self.rnn_alpha = self.rnn_dt / self.rnn_tau                   # only the ratio matters (Sec. SI.6)
         if not 0 < self.rnn_alpha <= 1:
             raise ValueError(f"rnn_dt/rnn_tau = {self.rnn_alpha} must lie in (0, 1] for a stable Euler step.")
@@ -166,8 +174,7 @@ class Model_architecture(Model_controller):
         print(f"lazyrich: N={N} g={self.rnn_gain} gamma={self.gamma} beta={self.rnn_beta:g} "
               f"dt/tau={self.rnn_alpha} | init readout scale 1/(sqrt(N) gamma) = "
               f"{1/(np.sqrt(N)*self.gamma):.3f} | eta_0={self.classifier_LR} -> "
-              f"eta_0 N gamma^2 = {self.classifier_LR * N * self.gamma**2:.1f}"
-              + ("  [reservoir: J, U frozen]" if self.reservoir else ""))
+              f"eta_0 N gamma^2 = {self.classifier_LR * N * self.gamma**2:.1f}")
 
     def lazyrich_restructuring(self):
         """||J - J_init||_F / ||J_init||_F. Read against lazyrich_noise_floor(): Langevin noise

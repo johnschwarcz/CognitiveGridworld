@@ -75,6 +75,8 @@ class CognitiveGridworld(Env_model_manager):
         self.training = init.get('training', False)
         self.load_env = init.get('load_env', None)
         self.save_env = init.get('save_env', None)
+        self.external_logger = init.get('external_logger', None)
+        self.custom_log = {}
 
         self.trigger_simulation()
 
