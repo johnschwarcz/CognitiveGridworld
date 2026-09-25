@@ -1,0 +1,73 @@
+\subsection{Oracle training and the source of the embedding gradient}
+\label{sec:oracle-ablation}
+
+\paragraph{The oracle setting.}
+The agent comprises two components that share one set of latent embeddings.
+A \emph{classifier}---an LSTM over the observation sequence---maintains a belief
+over the realization of each context. A \emph{generator} predicts the per-channel
+observation probabilities from the contexts it is told to condition on. Both read
+the same pairwise interaction terms: per-state embeddings $K$ and $Q$ are projected
+to dimension $d_{KQ}$ and contracted into $Z_{\text{num}} = C(C-1)$ scalars, one per
+ordered context pair, $Z_i = \langle K_k, Q_q \rangle$. These interactions are the
+only route by which either component accesses the latent structure, and the only
+quantity that varies across observation channels.
+
+In the general setting the generator is bootstrapped from the classifier: it samples
+contexts from the classifier's belief and takes that belief's own probability as its
+confidence. Training therefore couples the two, and a failure of either is hard to
+attribute. \emph{Oracle} mode removes the coupling: the generator conditions on the
+true context values with confidence fixed at $1$, and the classifier is trained by
+supervised cross-entropy against those values (plus an entropy bonus) rather than by
+reward. Bayesian inference is computed only on held-out test episodes. The result is
+a setting in which the generator's ability to learn the interaction structure can be
+measured independently of how well the classifier happens to be doing.
+
+\paragraph{Where the embeddings get their gradient.}
+Because $K$ and $Q$ are shared, an ablation is available that changes nothing about
+the architecture and only redirects which objective shapes them. The interaction
+tensor is passed to each component either live or detached, giving three conditions:
+\textbf{generator} (the classifier receives a detached tensor, so the embeddings are
+shaped by the generator's prediction loss alone), \textbf{classifier} (the generator
+receives a detached tensor), and \textbf{both} (neither detached, with a single
+optimizer step on the summed loss). A unit-norm penalty on the active embeddings is
+applied in every condition, attached to whichever objective owns them, so the
+conditions differ only in the source of the remaining gradient.
+
+\paragraph{Protocol.}
+$C=2$ contexts, $5$ observation channels, $10$ realizations, $500$ states, hidden
+width $1000$, and $30$ inference steps; batch $10^4$ over $10^4$ episodes ($10^8$
+samples) per run, at learning rate $10^{-3}$ for both components. Each replication
+seeds the world and the initialization jointly, so all three conditions of a
+replication run on identical environments and identical starting weights, and any
+difference between them is attributable to the condition. We report accuracy at the
+final inference step on held-out episodes against two bounds measured on the same
+environments: the \emph{joint} bound, achieved by an observer holding the exact joint
+belief, and the \emph{naive} bound, achieved by one whose belief factorizes across
+contexts.
+
+\paragraph{Result.}
+Shaping the embeddings with the generator's loss recovers $78\%$ of the joint--naive
+gap. Adding the classifier's gradient costs a small but consistent amount, with
+replications that do not overlap. Removing the generator's gradient is qualitatively
+different: the generator's objective does not move over the whole run
+($0.356 \rightarrow 0.357$, against $0.313 \rightarrow 0.024$ when it receives
+gradient), and final accuracy becomes highly variable across replications, with the
+mean falling below the naive bound. The interaction structure is learned only when
+the objective that consumes it also shapes it.
+
+\begin{table}[t]
+\centering
+\caption{Held-out accuracy at the final inference step, by the source of the
+embedding gradient. Bounds: joint $0.767$, naive $0.447$. Errors are standard errors
+over replications.}
+\label{tab:embedding-gradient}
+\begin{tabular}{lcccc}
+\toprule
+Gradient from & $n$ & Accuracy & Gap recovered & Generator loss \\
+\midrule
+Generator  & 6 & $0.6977 \pm 0.0015$ & $78\%$  & $0.024$ \\
+Both       & 5 & $0.6793 \pm 0.0012$ & $73\%$  & $0.027$ \\
+Classifier & 6 & $0.4355 \pm 0.0543$ & $-4\%$  & $0.344$ \\
+\bottomrule
+\end{tabular}
+\end{table}

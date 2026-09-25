@@ -76,6 +76,7 @@ class CognitiveGridworld(Env_model_manager):
         self.load_env = init.get('load_env', None)
         self.save_env = init.get('save_env', None)
         self.external_logger = init.get('external_logger', None)
+        self.gen_fix = init.get('gen_fix', self.mode == "oracle")
         self.custom_log = {}
 
         self.trigger_simulation()

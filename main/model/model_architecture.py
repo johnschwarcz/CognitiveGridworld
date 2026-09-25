@@ -72,12 +72,10 @@ class Model_architecture(Model_controller):
             self.K_downscale = nn.Linear(self.hid_dim, self.KQ_dim)
             self.Q_downscale = nn.Linear(self.hid_dim, self.KQ_dim)
             
-            # EXPERIMENT
-            for L in (self.K_downscale, self.Q_downscale):
-                nn.init.orthogonal_(L.weight, gain=(self.hid_dim / self.KQ_dim)**0.5)
-                nn.init.zeros_(L.bias)
-
-
+            if self.gen_fix:
+                for L in (self.K_downscale, self.Q_downscale):
+                    nn.init.orthogonal_(L.weight, gain=(self.hid_dim / self.KQ_dim)**0.5)
+                    nn.init.zeros_(L.bias)
 
             embedding_params = ([self.all_K, self.all_Q] +
                                 list(self.K_downscale.parameters()) +
@@ -89,6 +87,15 @@ class Model_architecture(Model_controller):
             self.conf_to_hid = nn.Linear(self.ctx_num, self.hid_dim)
             self.hid_to_pobs = nn.Linear(self.hid_dim, 1)
 
+            if self.gen_fix:
+                self.gen_stream_norm = nn.ModuleList(
+                    [nn.LayerNorm(self.hid_dim) for _ in range(3)])
+                with torch.no_grad():
+                    Wo = self.hid_to_pobs.weight[0].double()
+                    B = torch.stack([Wo, self.gen_hid2hid.weight.double().T @ Wo], dim = 1)
+                    W = self.Z_to_pobs.weight
+                    W.copy_((B * (W.norm() / B.norm())).to(W.dtype))
+
             generator_params = ([] if self.embedding_grad == "classifier" else embedding_params)
             if self.embedding_grad == "classifier":
                 self.classifier_optim.add_param_group({'params': embedding_params, 'lr': self.generator_LR})
@@ -99,7 +106,9 @@ class Model_architecture(Model_controller):
                         list(self.sample_to_hid.parameters()) +  
                         list(self.gen_hid2hid.parameters()) +        
                         list(self.hid_to_pobs.parameters()) +
-                        list(self.conf_to_hid.parameters()), 'lr': self.generator_LR}]                
+                        list(self.conf_to_hid.parameters()) +
+                        (list(self.gen_stream_norm.parameters()) if self.gen_fix else []),
+                        'lr': self.generator_LR}]                
             self.generator_optim = optim.Adam(params)
             if self.embedding_grad == "both":
                 # one graph, one step: the shared all_K -> active_Z subtree cannot take two backwards

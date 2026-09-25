@@ -7,8 +7,11 @@ import inspect
 import warnings
 import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
+from matplotlib.patches import Rectangle
+from matplotlib.transforms import Bbox
 from matplotlib.ticker import FuncFormatter
 from sklearn.decomposition import PCA
+from sklearn.linear_model import LogisticRegression
 
 _ROOT = os.path.dirname(os.path.abspath(inspect.getfile(inspect.currentframe())))
 while _ROOT != os.path.dirname(_ROOT) and not os.path.exists(os.path.join(_ROOT, 'main', 'CognitiveGridworld.py')):
@@ -33,7 +36,8 @@ PLOT_CFG = {
     "figsize_B": (11.6, 3.6),    # 1 x 4 Event-Triggered Dynamics
     "figsize_C": (17.5, 5.2),    # 1 x 3 Calibration
     "figsize_C2": (6.4, 3.4),    # 1 x 2 Calibration + gap
-    "figsize_D": (12.2, 3.2),    # 1 x 4 Calibration by context count + FR mediation
+    "figsize_D": (12.2, 3.3),    # 1 x 4 Calibration by context count + FR mediation
+    "figsize_E": (10.4, 3.3),    # 1 x 3 Calibration by tier, C inside the panels
     "early_epochs": 800,
     "smooth_w": 1,
     "line_width": 2.5,
@@ -63,6 +67,8 @@ KIND_STYLE = {"Exact": dict(ls='-', marker='o', mec='k'),
               "Trained": dict(ls='--', marker='^', mec='r')}
 DIAG_LS = '-'               # perfect calibration
 DIAG_C = 'k'
+DIAG_LW = .6                # the unity line is a reference, not a series: it should sit
+                            # under the data rather than compete with it
 
 # Confidence piles up against 1 -- half the episodes sit above 0.9 -- so a linear axis
 # squeezes the whole turn-over into its last few percent. -log10(1 - p) spreads the tail
@@ -134,10 +140,104 @@ CAL_ROW_TITLES = ["Confidence-Accuracy calibration", "Dependence on Factorizatio
 # is that the same regret means the same thing at every context count, which a per-C rank
 # would hide.
 CAL_FR_EDGES = np.array([0, .5, 1, 2, 4, 8, 16, 40])
-CAL_SHORT = {"Joint": "Joint", "Fully Trained": "Fully Tr.",
-             "Naive": "Naive", "Echo State": "Echo St."}
+CAL_SHORT = {"Joint": "Joint", "Fully Trained": "Trained",
+             "Naive": "Naive", "Echo State": "Echo"}
 CAL_MARKER = {"Exact": "o", "Trained": "^"}
 CAL_XTICKS = [0.2, 0.4, 0.6, 0.8, 1.0]
+# "C = k" goes inside each scatter panel: the region above the diagonal is empty by
+# construction (accuracy never exceeds confidence there), and an axes title would spend a
+# whole row of figure height on one symbol.
+CAL_C_LABEL_XY = (.045, .965)
+CAL_WPAD = .15
+# tight_layout's wspace is ONE number applied to every boundary, so the margin the heatmap
+# needs for its row labels was also inserted between the scatter panels -- which is why
+# they sat 0.53 in apart while the gap before the heatmap was only 0.36 in. The scatter row
+# is re-laid by hand afterwards: a small gap between panels, and the width that frees up
+# split between the panels themselves and one deliberate gap before the heatmap.
+CAL_SCATTER_GAP = .012   # figure fraction, between neighbouring scatter panels
+CAL_GROUP_GAP = .025     # figure fraction, added before the heatmap column
+# Heatmap row index: agent names on the major ticks, the C value on the minor ticks just
+# inside them, so tight_layout reserves room for both (a bare ax.text would not be seen).
+CAL_NAME_PAD = 19.0
+CAL_TITLE_PAD = .062     # clears the "C" header sitting above the heatmap axes
+CAL_RECT_TOP = .88
+# s=32 with a 1.0 edge was too small at print scale: the red edge bled into the fill and
+# the trained agents' tier colour read as orange and maroon instead of green and purple.
+# Per shape, because a triangle holds about half the ink of a circle at the same `s`, so
+# one size leaves the triangles' fill too thin to survive their own outline.
+CAL_POINT_S = {"o": 37, "^": 53}
+CAL_POINT_LW = .75
+# Second version: the tier becomes the panel, which frees colour to carry C -- reinforced
+# by size so the three still separate where they land on top of each other.
+CAL_TIER_PANELS = {"Experts": ("Joint", "Fully Trained"),
+                   "Baselines": ("Naive", "Echo State")}
+# Translucent fills, no edge: C is the fill colour, and where points land on each other
+# -- most of Experts -- they show through one another instead of hiding. Every point is
+# the same size, so size says nothing and shape is left to say what computed the belief.
+CAL_TIER_S = 30
+CAL_TIER_ALPHA = .8
+# "curve" replaces each agent's points with one line, so a panel carries 6 marks instead
+# of 60. It cannot be a closed contour: per-episode accuracy is 0/1, so the cloud in this
+# plane is two horizontal lines and a 90% region of it is degenerate. What IS continuous
+# is confidence, so the line spans the central CAL_TIER_COVER of that distribution -- the
+# 90% is a real share of the episodes, read along the axis that has a spread to share.
+CAL_TIER_STYLE = "ols"     # "ols" | "misfit" | "logistic" | "kernel" | "curve" | "points" | "contour"
+CAL_TIER_COVER = .90
+CAL_TIER_BINS = 24
+CAL_TIER_LS = {"Exact": ":", "Trained": "--"}
+CAL_TIER_LW = 1.7
+# Axis scaling for the tier panels. Confidence piles up against 1, so a linear axis
+# spends most of its width where nothing happens -- the same argument the 1 x 2 figure's
+# CAL_XSCALE makes. "tail" is -log10(1 - p): plain probability ticks, stretched at the
+# top. "tail-x" stretches confidence only, which keeps accuracy readable as a rate.
+CAL_TIER_SCALE = "linear"   # "linear" | "tail-x" | "tail" | "logit" | "loglog"
+# Cox calibration: logit P(correct) = a + b logit(conf), maximum likelihood on every
+# episode. Perfect calibration is a = 0, b = 1, so the two numbers ARE the result -- but
+# a monotone two-parameter model cannot bend, and the baselines' curves do. Drawn thin
+# and under the kernel when overlaid, so thick reads as data and thin as model.
+CAL_TIER_FIT = False        # overlay the fit on whatever style is drawn
+CAL_FIT_MODEL = "ols"       # "ols" (accuracy = a*conf + b) | "logistic" (Cox, on logits)
+CAL_FIT_BAND = False        # shade the fitted line's confidence band. Off: at this n the
+                            # 95% band is ~1% of the y range, so it only thickened the
+                            # lines -- the numbers belong in the caption, not the page.
+CAL_FIT_Z = 1.96            # 95%
+CAL_FIT_LW = .9
+CAL_ENV_ALPHA = .25         # the "misfit" style: shading between the fit and the DATA.
+# The empirical side is equal-mass bins -- each point a raw fraction correct over ~n/BINS
+# episodes, with a binomial SE -- and NOT the kernel curve. Measured against the kernel
+# the envelope is wrong in both directions: boundary bias inflates it where the agent
+# really is a straight line (Joint C=3 read 0.034 against 0.010 from the data) and the
+# bandwidth smooths away the real departure (Naive C=3 read 0.052 against 0.092).
+CAL_MISFIT_BINS = 20
+CAL_FIT_ALPHA = .55
+CAL_TIER_LINE_ALPHA = .85   # the six curves cross and overlap; a little transparency
+                            # lets the one underneath stay readable through the one on top
+# "contour": the episodes themselves, with no binning at all -- a smoothed 2D histogram
+# of (confidence, correct), contoured at the level enclosing CAL_TIER_COVER of them.
+# y is 0/1 per episode, so the smoothing in that direction is what makes a contour exist;
+# CAL_CONTOUR_SMOOTH is in histogram cells, and the y figure is the one that decides how
+# much of the shape is estimator rather than data.
+CAL_CONTOUR_BINS = (140, 72)
+CAL_CONTOUR_SMOOTH = (2.5, 5.0)
+# "kernel": P(correct | confidence) by Nadaraya-Watson over every episode -- no bin edges
+# anywhere, so the only choice is a continuous bandwidth instead of an arbitrary cut.
+CAL_KR_BW = .02          # Gaussian bandwidth, in units of confidence. Doubling it from
+                         # .01 settles the low-confidence ripple that log-log magnifies;
+                         # .03 starts bowing the Experts curves off the diagonal, which
+                         # is boundary bias, not data -- see the loglog_bw sweep.
+CAL_KR_CELLS = 2000      # resolution of the sufficient statistics, not a binning of data
+CAL_KR_BAND = True       # +/- 1 SE on the effective sample size behind each point
+# Where to stop each curve.
+#   "cover"  every curve rests on the same share of its own episodes, so the panels
+#            compare like with like. The cut is taken entirely off the LOW end: confidence
+#            piles up against 1, so a symmetric trim would spend half its budget on the
+#            dense, well-estimated top -- which is where the baselines' turn-over is.
+#   "se"     trim inward until +/- 1 SE is under CAL_KR_SE_MAX. Adapts per agent, but the
+#            share of episodes behind each curve then varies (94-99.9% here).
+#   "none"   the full observed range.
+CAL_KR_TRIM = "se"
+CAL_KR_COVER = .90
+CAL_KR_SE_MAX = .02
 
 CAL_AGENTS = {"Joint": ("Expert", "Exact", "joint", "trained"),
               "Fully Trained": ("Expert", "Trained", "net", "trained"),
@@ -807,9 +907,9 @@ def draw_calibration_points(ax, harvests, n_bins=10):
         colour, marker, edge = _cal_key(name)
         _, _, conf, acc, _ = _series(harvests[CAL_AGENTS[name][3]], name)
         x, y = _calibration_curve(conf, acc, n_bins, True)
-        ax.scatter(x, y, s=32, facecolor=colour, edgecolor=edge, linewidth=1.0,
-                   marker=marker, zorder=3 + i)
-    ax.plot([0, 1], [0, 1], color=DIAG_C, lw=1.2, zorder=-7)
+        ax.scatter(x, y, s=CAL_POINT_S[marker], facecolor=colour, edgecolor=edge,
+                   linewidth=CAL_POINT_LW, marker=marker, zorder=3 + i)
+    ax.plot([0, 1], [0, 1], color=DIAG_C, lw=DIAG_LW, zorder=-7)
     ax.set(xlim=(.1, 1.04), ylim=(.1, 1.04), xlabel="Confidence",  xticks=CAL_XTICKS, yticks=CAL_XTICKS)
     _tidy(ax)
 
@@ -822,25 +922,111 @@ def draw_fr_mediation(fig, ax, data, ctxs=(2, 3)):
     control that stays pale at every regret, so the panel cannot be read as "high regret
     is simply hard".
     """
-    rows, labels = [], []
+    rows, cs = [], []
     for name in CAL_AGENTS:
         for c in ctxs:
             rows.append(_fr_absolute_bins(data[c], name))
-            labels.append(f"{CAL_SHORT[name] if c == ctxs[0] else '':>9s}  $C{{=}}{c}$")
+            cs.append(c)
     im = ax.imshow(np.array(rows), aspect="auto", cmap="magma", vmin=0, vmax=1,
                    extent=[0, len(CAL_FR_EDGES) - 1, len(rows) - .5, -.5])
     for y in np.arange(len(ctxs) - .5, len(rows) - 1, len(ctxs)):
         ax.axhline(y, color="w", lw=2.0)
-    ax.set_yticks(range(len(rows)))
-    ax.set_yticklabels(labels, fontsize=FS["annot"] - 1, family="monospace")
-    ax.set_xticks(np.arange(len(CAL_FR_EDGES)))
-    ax.set_xticklabels([f"{v:g}" for v in CAL_FR_EDGES], fontsize=FS["tick"])
+
+    # the agent names name each PAIR, so they sit on a major tick at the pair's centre
+    # and the C values on minor ticks inside them -- "C" then heads that column once,
+    # instead of every row repeating it
+    ax.set_yticks([i * len(ctxs) + (len(ctxs) - 1) / 2 for i in range(len(CAL_AGENTS))])
+    ax.set_yticklabels([CAL_SHORT[n] for n in CAL_AGENTS], fontsize=FS["annot"] - 1,
+                       rotation=90, ha="right", va="center")
+    ax.set_yticks(range(len(rows)), minor=True)
+    ax.set_yticklabels([f"{c}" for c in cs], fontsize=FS["annot"] - 1, minor=True)
+    ax.tick_params(axis="y", which="major", length=0, pad=CAL_NAME_PAD)
+    ax.tick_params(axis="y", which="minor", length=0, pad=6)
+    c_txt = ax.annotate("$C$", xy=(0, 1), xycoords="axes fraction", xytext=(-8.5, 4),
+                        textcoords="offset points", ha="center", va="bottom",
+                        fontsize=FS["annot"] - 1, annotation_clip=False)
+
+    # a cell is an average over its bin, so the tick belongs at the cell's centre and
+    # carries the bin's midpoint rather than sitting on a boundary it does not describe
+    mids = (CAL_FR_EDGES[:-1] + CAL_FR_EDGES[1:]) / 2
+    ax.set_xticks(np.arange(len(mids)) + .5)
+    ax.set_xticklabels([f"{v:g}" for v in mids], fontsize=FS["tick"])
     ax.set_xlabel("Factorization Regret (nats)")
     ax.spines[:].set_visible(False)
-    ax.tick_params(length=0)
+    ax.tick_params(axis="x", length=0)
     cb = fig.colorbar(im, ax=ax, fraction=.036, pad=.02)
     cb.set_label("Accuracy / Confidence", fontsize=FS["label"])
     cb.ax.tick_params(labelsize=FS["tick"] - 1)
+    return cb, c_txt
+
+
+def _cal_ctxs():
+    """The context counts whose calibration harvest is actually on disk."""
+    return [c for c in CAL_CTX_SRC
+            if CAL_CTX_SRC[c] is None
+            or os.path.exists(os.path.join(_ROOT, "main", "DATA", CAL_CTX_SRC[c]))]
+
+
+def _box_c_column(fig, ax, c_txt, pad=4.0, gap=2.0):
+    """Rule a box round the C column and its title, so the two read as one index.
+
+    Only the LEFT edge is measured from the glyphs -- the column's width is set by them,
+    not by the axes. The other three are pinned to the heatmap: the right edge stops
+    `gap` short of it instead of cutting in, and the bottom sits on the heatmap's own
+    bottom instead of ending halfway through the last row, where the last label happens
+    to fall.
+    """
+    r = fig.canvas.get_renderer()
+    inv = fig.transFigure.inverted()
+    labs = [t.get_window_extent(r) for t in ax.get_yticklabels(minor=True)]
+    lab = Bbox.union(labs + [c_txt.get_window_extent(r)]).transformed(inv)
+    w_in, h_in = fig.get_size_inches()
+    px, py, gx = pad / (w_in * 72), pad / (h_in * 72), gap / (w_in * 72)
+    p = ax.get_position()
+    # right edge is pinned off the heatmap; mirror that same gap on the left so the
+    # column sits centred in its box instead of shoved against one side
+    x1 = p.x0 - gx
+    x0 = lab.x0 - (x1 - lab.x1)
+    y0, y1 = p.y0, lab.y1 + py
+    fig.add_artist(Rectangle((x0, y0), x1 - x0, y1 - y0, transform=fig.transFigure,
+                             fill=False, edgecolor="0.55", lw=.7, zorder=6))
+
+
+def _pack_row(axs, gap, right_trim=0.):
+    """Re-lay a row of axes across its own span with one small gap between them.
+
+    Keeps the row's left edge, pulls its right edge in by `right_trim` to open a gap
+    before whatever follows, and hands the reclaimed width back to the panels.
+    """
+    boxes = [a.get_position() for a in axs]
+    x0, x1 = boxes[0].x0, boxes[-1].x1 - right_trim
+    w = (x1 - x0 - gap * (len(axs) - 1)) / len(axs)
+    for i, a in enumerate(axs):
+        a.set_position([x0 + i * (w + gap), boxes[i].y0, w, boxes[i].height])
+
+
+def _stretch_to(fig, axs, floor):
+    """Pull axes down until their decorations reach `floor`, keeping their tops.
+
+    The heatmap column carries no legend beneath it, so it takes that height back -- but
+    measured to the bottom of its tick labels and xlabel, or the figure ends up ragged.
+    """
+    r = fig.canvas.get_renderer()
+    inv = fig.transFigure.inverted()
+    for a in axs:
+        p = a.get_position()
+        deco = p.y0 - a.get_tightbbox(r).transformed(inv).y0
+        a.set_position([p.x0, floor + deco, p.width, p.y1 - floor - deco])
+
+
+def _cal_row_titles(fig, axes, n_scatter, mid):
+    """The two group titles, placed above whatever the panels actually occupy."""
+    top = max(a.get_position().y1 for a in axes) + CAL_TITLE_PAD
+    fig.text(mid, top, CAL_ROW_TITLES[0], ha="center", va="bottom",
+             fontsize=FS["title"])
+    h = axes[n_scatter].get_position()
+    fig.text((h.x0 + h.x1) / 2, top, CAL_ROW_TITLES[1], ha="center", va="bottom",
+             fontsize=FS["title"])
 
 
 def plot_calibration_row4(fig, axes, harvests, n_bins=10):
@@ -850,40 +1036,331 @@ def plot_calibration_row4(fig, axes, harvests, n_bins=10):
     agents coincide on the diagonal. It cannot appear in the mediation panel at all,
     because FR is identically zero there -- a point, not a distribution.
     """
-    ctxs = [c for c in CAL_CTX_SRC
-            if CAL_CTX_SRC[c] is None
-            or os.path.exists(os.path.join(_ROOT, "main", "DATA", CAL_CTX_SRC[c]))]
+    ctxs = _cal_ctxs()
     data = {c: _load_ctx_calibration(c, harvests)[0] for c in ctxs}
     for col, ctx in enumerate(ctxs):
         draw_calibration_points(axes[col], data[ctx], n_bins)
-        axes[col].set_title(f"$C = {ctx}$", pad=8)
+        axes[col].text(*CAL_C_LABEL_XY, f"$C = {ctx}$", transform=axes[col].transAxes,
+                       ha="left", va="top", fontsize=FS["title"] * .82)
         if col:
             axes[col].set_ylabel("")
             axes[col].tick_params(labelleft=False)
     axes[0].set_ylabel("Accuracy")
-    draw_fr_mediation(fig, axes[len(ctxs)], data)
+    cb, c_txt = draw_fr_mediation(fig, axes[len(ctxs)], data)
 
     handles = []
     for name in CAL_AGENTS:
         colour, marker, edge = _cal_key(name)
         handles.append(Line2D([], [], ls="none", marker=marker, markerfacecolor=colour,
-                              markeredgecolor=edge, markeredgewidth=.9, markersize=6.4,
-                              label=name))
-    fig.tight_layout(w_pad=1.1, rect=(0, .06, 1, .88))
+                              markeredgecolor=edge, markeredgewidth=CAL_POINT_LW,
+                              markersize=np.sqrt(CAL_POINT_S[marker]), label=name))
+    fig.tight_layout(w_pad=CAL_WPAD, rect=(0, .06, 1, CAL_RECT_TOP))
+    _pack_row(axes[:len(ctxs)], CAL_SCATTER_GAP, CAL_GROUP_GAP)
     fig.canvas.draw()
     box = [axes[i].get_position() for i in range(len(ctxs))]
     mid = (min(b.x0 for b in box) + max(b.x1 for b in box)) / 2
-    fig.legend(handles=handles, loc="upper center", ncols=4, frameon=False,
-               fontsize=FS["legend"], bbox_to_anchor=(mid, min(b.y0 for b in box) - .11))
-    # above the per-panel "C = k" titles, not level with them: measure what they occupy
-    inv = fig.transFigure.inverted()
+    leg = fig.legend(handles=handles, loc="upper center", ncols=4, frameon=False,
+                     fontsize=FS["legend"],
+                     bbox_to_anchor=(mid, min(b.y0 for b in box) - .11))
+    fig.canvas.draw()
+    lb = leg.get_window_extent().transformed(fig.transFigure.inverted())
+    _stretch_to(fig, (axes[len(ctxs)], cb.ax), lb.y0)
+    fig.canvas.draw()
+    _box_c_column(fig, axes[len(ctxs)], c_txt)
+    _cal_row_titles(fig, axes, len(ctxs), mid)
+    return ctxs
+
+
+def _cal_tier_axes(ax, scale, lim):
+    """Put the tier panel on `scale`, with a diagonal drawn to match.
+
+    Under any probability transform the diagonal stops being a straight segment between
+    two endpoints -- 0 and 1 are off at infinity -- so it is drawn as a dense curve.
+    """
+    xlo, xhi, ylo, yhi = lim
+    if scale == "linear":
+        ax.plot([0, 1], [0, 1], color=DIAG_C, lw=DIAG_LW, zorder=-7)
+        ax.set(xlim=(.1, 1.04), ylim=(.1, 1.04), xticks=CAL_XTICKS, yticks=CAL_XTICKS)
+        return
+    if scale == "loglog":
+        ax.plot([1e-3, 1], [1e-3, 1], color=DIAG_C, lw=DIAG_LW, zorder=-7)
+        ax.set(xscale="log", yscale="log", xlim=(.1, 1.05), ylim=(.1, 1.05))
+        for axis in (ax.xaxis, ax.yaxis):
+            axis.set_major_formatter(FuncFormatter(lambda v, _: f"{v:g}"))
+            axis.set_minor_formatter(FuncFormatter(lambda v, _: ""))
+        return
+    grid = 1.0 - np.logspace(0, np.log10(TAIL_EPS), 600)
+    ax.plot(grid, grid, color=DIAG_C, lw=DIAG_LW, zorder=-7)
+    xm = "logit" if scale == "logit" else "tail"
+    ym = {"tail": "tail", "tail-x": "linear", "logit": "logit"}[scale]
+    _prob_axis(ax, "x", xm, xlo, xhi, TAIL_TICKS, margin=.18)
+    _prob_axis(ax, "y", ym, ylo, yhi, TAIL_YTICKS, margin=.18)
+
+
+def draw_calibration_by_tier(ax, tier, data, ctxs, n_bins=10, style=None, scale=None):
+    """One panel per tier, all context counts inside it.
+
+    Tier is the panel, so colour is free to carry C. The markers are open, which is what
+    lets all three context counts share a panel: where they coincide -- most of Experts --
+    an unfilled marker shows the ones underneath it rather than hiding them. Shape still
+    says what computed the belief, and every point is the same size.
+    """
+    style = style or CAL_TIER_STYLE
+    scale = scale or CAL_TIER_SCALE
+    cols = _cal_c_colours(ctxs)
+    lim = [1., 0., 1., 0.]          # xlo, xhi, ylo, yhi over everything drawn
+    for i, c in enumerate(ctxs):
+        for name in CAL_TIER_PANELS[tier]:
+            _, marker, _ = _cal_key(name)
+            kind = CAL_AGENTS[name][1]
+            _, _, conf, acc, _ = _series(data[c][CAL_AGENTS[name][3]], name)
+            if style == "misfit":
+                # the gap between the straight line and the data itself: empirical
+                # accuracy in equal-mass confidence bins, no kernel in the loop
+                bx, by = _calibration_curve(conf, acc, CAL_MISFIT_BINS, True)
+                fx, fp, a0, b0, _ = _ols_calibration(conf, acc)
+                lim = [min(lim[0], fx.min()), max(lim[1], fx.max()),
+                       min(lim[2], min(by.min(), fp.min())),
+                       max(lim[3], max(by.max(), fp.max()))]
+                ax.fill_between(bx, by, a0 * bx + b0, color=cols[c],
+                                alpha=CAL_ENV_ALPHA, lw=0, zorder=2)
+                ax.plot(fx, fp, color=cols[c], ls=CAL_TIER_LS[kind], lw=CAL_FIT_LW,
+                        alpha=CAL_FIT_ALPHA, zorder=3)
+                ax.plot(bx, by, color=cols[c], ls="none", marker=marker, ms=3.2,
+                        alpha=CAL_TIER_LINE_ALPHA, zorder=4 + i)
+            if style in ("ols", "logistic") or CAL_TIER_FIT:
+                model = "ols" if style == "ols" else (
+                    "logistic" if style == "logistic" else CAL_FIT_MODEL)
+                if model == "ols":
+                    fx, fp, _, _, fse = _ols_calibration(conf, acc)
+                else:
+                    fx, fp, _, _ = _cox_calibration(conf, acc)
+                    fse = None
+                solo = style in ("ols", "logistic")
+                if solo and CAL_FIT_BAND and fse is not None:
+                    ax.fill_between(fx, fp - CAL_FIT_Z * fse, fp + CAL_FIT_Z * fse,
+                                    color=cols[c], alpha=.30, lw=0, zorder=2)
+                lim = [min(lim[0], fx.min()), max(lim[1], fx.max()),
+                       min(lim[2], fp.min()), max(lim[3], fp.max())]
+                ax.plot(fx, fp, color=cols[c], ls=CAL_TIER_LS[kind],
+                        lw=CAL_TIER_LW if solo else CAL_FIT_LW,
+                        alpha=CAL_TIER_LINE_ALPHA if solo else CAL_FIT_ALPHA,
+                        zorder=(3 + i) if solo else 2)
+            if style == "kernel":
+                gx, gp, gse = _kernel_calibration(conf, acc)
+                lim = [min(lim[0], gx.min()), max(lim[1], gx.max()),
+                       min(lim[2], np.nanmin(gp)), max(lim[3], np.nanmax(gp))]
+                if CAL_KR_BAND:
+                    ax.fill_between(gx, gp - gse, gp + gse, color=cols[c], alpha=.30,
+                                    lw=0, zorder=2)
+                ax.plot(gx, gp, color=cols[c], ls=CAL_TIER_LS[kind], lw=CAL_TIER_LW,
+                        alpha=CAL_TIER_LINE_ALPHA, solid_capstyle="round",
+                        dash_capstyle="round", zorder=3 + i)
+            elif style == "contour":
+                _density_contour(ax, conf, acc, cols[c], CAL_TIER_LS[kind],
+                                 CAL_TIER_COVER, CAL_TIER_LW)   # opaque: single lines
+            elif style == "curve":
+                x, y = _cover_curve(conf, acc, CAL_TIER_BINS, CAL_TIER_COVER)
+                ax.plot(x, y, color=cols[c], ls=CAL_TIER_LS[kind], lw=CAL_TIER_LW,
+                        alpha=CAL_TIER_LINE_ALPHA, solid_capstyle="round",
+                        dash_capstyle="round", zorder=3 + i)
+            elif style == "points":
+                x, y = _calibration_curve(conf, acc, n_bins, True)
+                ax.scatter(x, y, s=CAL_TIER_S, facecolor=cols[c], edgecolor="none",
+                           alpha=CAL_TIER_ALPHA, marker=marker, zorder=3 + i)
+            # no trailing else: a fit-only style must not also draw the point fallback
+    _cal_tier_axes(ax, scale, lim)
+    ax.set_xlabel("Confidence")
+    _tidy(ax)
+
+
+def _density_contour(ax, conf, acc, colour, ls, cover, lw):
+    """Contour enclosing `cover` of the episodes, straight from the raw pairs.
+
+    No binning of confidence: a 2D histogram fine enough to be a density, Gaussian
+    smoothed, then the single level whose enclosed mass is `cover`.
+    """
+    from scipy.ndimage import gaussian_filter
+    H, xe, ye = np.histogram2d(conf, acc, bins=CAL_CONTOUR_BINS,
+                               range=[[0., 1.], [0., 1.]])
+    H = gaussian_filter(H, CAL_CONTOUR_SMOOTH, mode="nearest")
+    flat = np.sort(H.ravel())[::-1]
+    cum = np.cumsum(flat) / flat.sum()
+    lvl = flat[min(np.searchsorted(cum, cover), flat.size - 1)]
+    xc, yc = (xe[:-1] + xe[1:]) / 2, (ye[:-1] + ye[1:]) / 2
+    ax.contour(xc, yc, H.T, levels=[lvl], colors=[colour], linestyles=[ls],
+               linewidths=lw, zorder=3)
+
+
+def _kernel_calibration(conf, acc, bw=None, cells=None, trim=None):
+    """P(correct | confidence) by kernel regression -- no binning of the data.
+
+    Every episode enters through the two sums a Nadaraya-Watson estimate needs. Those
+    sums are accumulated on a fine grid and convolved with the kernel, which is
+    algebraically the same estimator as weighting each episode individually but avoids an
+    n x grid distance matrix for a quarter-million episodes.
+
+    Returns (x, p, se) over the observed confidence range, with the ends trimmed per
+    CAL_KR_TRIM. `se` uses the effective sample size (sum w)^2 / sum w^2, so it widens
+    where the kernel has little to average over, and is drawn whichever trim is in use.
+    """
+    bw = CAL_KR_BW if bw is None else bw
+    cells = CAL_KR_CELLS if cells is None else cells
+    trim = CAL_KR_TRIM if trim is None else trim
+
+    edges = np.linspace(0., 1., cells + 1)
+    i = np.clip(np.searchsorted(edges, conf, side="right") - 1, 0, cells - 1)
+    n = np.bincount(i, minlength=cells).astype(F64)
+    hit = np.bincount(i, weights=acc.astype(F64), minlength=cells)
+
+    sigma = bw * cells
+    half = int(np.ceil(4 * sigma))
+    k = np.exp(-.5 * (np.arange(-half, half + 1) / sigma) ** 2)   # unnormalised
+    num = np.convolve(hit, k, mode="same")
+    den = np.convolve(n, k, mode="same")
+    den2 = np.convolve(n, k * k, mode="same")
+
+    x = (edges[:-1] + edges[1:]) / 2
+    ok = den > 0
+    p = np.divide(num, den, out=np.full_like(den, np.nan), where=ok)
+    n_eff = np.divide(den * den, den2, out=np.full_like(den, np.nan), where=den2 > 0)
+    se = np.sqrt(np.clip(p * (1 - p), 0, None) / n_eff)
+
+    # den > 0 reaches a kernel radius past the data, so clip to what was observed
+    m = ok & (x >= conf.min()) & (x <= conf.max())
+    if trim == "cover":
+        m &= x >= np.quantile(conf, 1. - CAL_KR_COVER)
+    elif trim == "se":
+        # trim inward from each end, rather than masking pointwise, so the curve stays
+        # one unbroken run even if se crosses back over the threshold somewhere inside
+        good = m & np.isfinite(se) & (se <= CAL_KR_SE_MAX)
+        if good.any():
+            i0 = int(np.argmax(good))
+            i1 = len(good) - 1 - int(np.argmax(good[::-1]))
+            m = np.zeros_like(m)
+            m[i0:i1 + 1] = True
+    return x[m], p[m], se[m]
+
+
+def _ols_calibration(conf, acc, grid=400):
+    """(x, y, a, b, se) for accuracy = a * confidence + b, least squares on every episode.
+
+    A linear probability model: the outcome is 0/1, so this is the least-squares straight
+    line through P(correct | confidence). Two numbers, no bandwidth, nothing to trim --
+    and on LINEAR axes it draws as the straight line it is. Under any probability
+    transform, log-log included, the same line renders as a curve.
+
+    `se` is the pointwise standard error of the FITTED LINE, with heteroskedasticity-
+    robust (HC0) covariance -- which is the only honest choice here, since a 0/1 outcome
+    has variance p(1-p) that changes along x rather than the constant OLS assumes.
+    """
+    X = np.c_[conf, np.ones_like(conf)]
+    beta, *_ = np.linalg.lstsq(X, acc, rcond=None)
+    resid = acc - X @ beta
+    xtx_inv = np.linalg.inv(X.T @ X)
+    V = xtx_inv @ (X.T @ (X * resid[:, None] ** 2)) @ xtx_inv    # HC0
+    gx = np.linspace(conf.min(), conf.max(), grid)
+    G = np.c_[gx, np.ones_like(gx)]
+    se = np.sqrt(np.einsum("ij,jk,ik->i", G, V, G))
+    return gx, G @ beta, float(beta[0]), float(beta[1]), se
+
+
+def _cox_calibration(conf, acc, grid=400):
+    """(x, p, a, b) for logit P(correct) = a + b logit(conf), fit on every episode.
+
+    The textbook calibration model for a binary outcome: no bandwidth, no bins, no
+    boundary bias, and a and b are directly interpretable against (0, 1). It buys that
+    by imposing a shape, which is exactly what it cannot be trusted to report.
+    """
+    x = _prob_clip(conf)
+    X = np.log(x / (1 - x)).reshape(-1, 1)
+    m = LogisticRegression(penalty=None, max_iter=300).fit(X, acc)
+    b, a0 = float(m.coef_[0, 0]), float(m.intercept_[0])
+    gx = np.linspace(conf.min(), conf.max(), grid)
+    g = _prob_clip(gx)
+    return gx, 1. / (1. + np.exp(-(a0 + b * np.log(g / (1 - g))))), a0, b
+
+
+def _cover_curve(conf, acc, n_bins, cover):
+    """The calibration curve over the central `cover` of the confidence distribution.
+
+    Trimming by quantile rather than by a fixed confidence range keeps the share of
+    episodes behind each curve the same across agents, which a fixed range would not:
+    the four agents' confidence distributions sit in quite different places.
+    """
+    lo, hi = np.quantile(conf, [(1 - cover) / 2, 1 - (1 - cover) / 2])
+    m = (conf >= lo) & (conf <= hi)
+    return _calibration_curve(conf[m], acc[m], n_bins, True)
+
+
+def _cal_c_colours(ctxs):
+    """The paper's C ramp, so a context count is the same colour in every figure."""
+    return dict(zip(ctxs, plt.cm.viridis(np.linspace(0.15, 0.85, len(ctxs)))))
+
+
+def plot_calibration_tier(fig, axes, harvests, n_bins=10, style=None, scale=None):
+    """[Experts, Baselines, FR mediation] -- the tier-split alternative to row4.
+
+    Both agents of a tier share a panel, so the comparison that matters (does the
+    measured one track the computed one?) happens within a panel rather than across two.
+    """
+    style = style or CAL_TIER_STYLE
+    ctxs = _cal_ctxs()
+    data = {c: _load_ctx_calibration(c, harvests)[0] for c in ctxs}
+    cols = _cal_c_colours(ctxs)
+
+    for col, tier in enumerate(CAL_TIER_PANELS):
+        ax = axes[col]
+        draw_calibration_by_tier(ax, tier, data, ctxs, n_bins, style, scale)
+        ax.text(*CAL_C_LABEL_XY, tier, transform=ax.transAxes, ha="left", va="top",
+                fontsize=FS["title"] * .82)
+        # the agents of this panel, named here rather than in one shared key
+        if style in ("curve", "contour", "kernel", "logistic", "ols", "misfit"):
+            handles = [Line2D([], [], color="0.35", lw=CAL_TIER_LW,
+                              alpha=CAL_TIER_LINE_ALPHA,
+                              ls=CAL_TIER_LS[CAL_AGENTS[n][1]], label=n)
+                       for n in CAL_TIER_PANELS[tier]]
+        else:
+            handles = [Line2D([], [], ls="none", marker=_cal_key(n)[1],
+                              markerfacecolor=(.35, .35, .35, CAL_TIER_ALPHA),
+                              markeredgecolor="none",
+                              markersize=np.sqrt(CAL_TIER_S) + 1.4, label=n)
+                       for n in CAL_TIER_PANELS[tier]]
+        # add_artist, or the C key below would replace this one on the same axes
+        ax.add_artist(ax.legend(handles=handles, loc="upper left", frameon=False,
+                                fontsize=FS["legend"] - 1, handletextpad=.4,
+                                labelspacing=.3, borderpad=.2,
+                                bbox_to_anchor=(.02, .88)))
+        if col:
+            ax.set_ylabel("")
+            ax.tick_params(labelleft=False)
+    axes[0].set_ylabel("Accuracy")
+    # C key only once, in the corner the points leave empty in both panels
+    c_handles = ([Line2D([], [], color=cols[c], lw=CAL_TIER_LW,
+                         alpha=CAL_TIER_LINE_ALPHA, label=f"$C = {c}$")
+                  for c in ctxs] if style in ("curve", "contour", "kernel", "logistic", "ols", "misfit") else
+                 [Line2D([], [], ls="none", marker="o",
+                         markerfacecolor=(*cols[c][:3], CAL_TIER_ALPHA),
+                         markeredgecolor="none",
+                         markersize=np.sqrt(CAL_TIER_S) + 1.4, label=f"$C = {c}$")
+                  for c in ctxs])
+    axes[0].legend(handles=c_handles,
+                   loc="lower right", frameon=False, fontsize=FS["legend"] - 1,
+                   handletextpad=.4, labelspacing=.45, borderpad=.2)
+    cb, c_txt = draw_fr_mediation(fig, axes[2], data)
+
+    fig.tight_layout(w_pad=CAL_WPAD, rect=(0, 0, 1, CAL_RECT_TOP))
+    _pack_row(axes[:2], CAL_SCATTER_GAP, CAL_GROUP_GAP)
+    fig.canvas.draw()
+    box = [axes[i].get_position() for i in range(2)]
+    mid = (min(b.x0 for b in box) + max(b.x1 for b in box)) / 2
     r = fig.canvas.get_renderer()
-    top = max(a.title.get_window_extent(r).transformed(inv).y1 for a in axes)
-    fig.text(mid, top + .035, CAL_ROW_TITLES[0], ha="center", va="bottom",
-             fontsize=FS["title"])
-    h = axes[len(ctxs)].get_position()
-    fig.text((h.x0 + h.x1) / 2, top + .035, CAL_ROW_TITLES[1], ha="center", va="bottom",
-             fontsize=FS["title"])
+    inv = fig.transFigure.inverted()
+    _stretch_to(fig, (axes[2], cb.ax),
+                min(axes[i].get_tightbbox(r).transformed(inv).y0 for i in range(2)))
+    fig.canvas.draw()
+    _box_c_column(fig, axes[2], c_txt)
+    _cal_row_titles(fig, axes, 2, mid)
     return ctxs
 
 
@@ -994,11 +1471,15 @@ if __name__ == "__main__":
     plot_diagnostics_early(axesA2, echo, "Echo")
     finalize_layout_early(axesA2)
 
-    # 2c. Figure D: calibration at each context count, and the regret behind the trend.
-    # Supersedes the old 1 x 2 and 2 x 3 calibration figures.
-    figD, axesD = plt.subplots(1, 4, figsize=PLOT_CFG["figsize_D"],
-                              gridspec_kw=dict(width_ratios=[.66, 1, 1, 1.42]))
-    ctxs = plot_calibration_row4(figD, axesD, (trained, echo))
+    # 2c. Figure E: the one calibration figure -- tiers as panels, C as colour, and the
+    # regret that explains the trend. CAL_TIER_STYLE picks what is drawn; the kernel,
+    # curve, points, contour, logistic and misfit styles stay available there but are not
+    # emitted. plot_calibration_row4 draws the by-context-count alternative (a panel per
+    # C, with the boxed C column on its heatmap) and is likewise kept but not called --
+    # see PLOT_CFG["figsize_D"] and width_ratios [1, 1, 1, 1.5] for how it was built.
+    figE, axesE = plt.subplots(1, 3, figsize=PLOT_CFG["figsize_E"],
+                               gridspec_kw=dict(width_ratios=[1, 1, 1.5]))
+    ctxs = plot_calibration_tier(figE, axesE, (trained, echo))
 
     # 3. Figure B: Event Dynamics
 
@@ -1008,7 +1489,8 @@ if __name__ == "__main__":
 
     figA1.savefig(fig_path("diagnostics_panel_full.svg"), format="svg", bbox_inches="tight")
     figA2.savefig(fig_path("diagnostics_panel_early.svg"), format="svg", bbox_inches="tight")
-    figD.savefig(fig_path("calibration_by_ctx.svg"), format="svg", bbox_inches="tight")
-    print(f"calibration_by_ctx: columns {ctxs}")
+    figE.savefig(fig_path("calibration_by_tier.svg"), format="svg",
+                 bbox_inches="tight")
+    print(f"calibration: columns {ctxs}")
     figB.savefig(fig_path("dynamics_panel.svg"), format="svg", bbox_inches="tight")
     plt.show()
