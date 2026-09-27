@@ -51,37 +51,49 @@ class Model_forward(Model_backward):
         Z = self.classifier_Z()
         Z = Z.reshape(self.batch_num, 1, -1)
         O = self.obs_flat.mean(1, keepdims = True)
-        inp = torch.cat((O, Z), dim = -1)
-        inp = torch.relu(self.classifier_readin(inp))
-        update = self.classifier_readout(inp)
-        update = update.expand(-1, self.step_num, -1)
-        self.postprocess_belief(update, accumulate = False)
+        hid = torch.relu(self.classifier_to_hid(O, Z))
+        logits = self.classifier_readout(hid)
+        logits = logits.expand(-1, self.step_num, -1)
+        self.postprocess_belief(logits, accumulate = False)
     
     def RNN_classification(self):
-        inp = self.RNN_readin()
+        RNN_input = torch.relu(self.RNN_readin())
         stm = self.STM.expand(-1, self.batch_num, -1).contiguous()
         ltm = self.LTM.expand(-1, self.batch_num, -1).contiguous()
-        update, _ = self.LSTM(inp, (stm, ltm))   
-        self.postprocess_belief(self.classifier_readout(update))
+        update, _ = self.LSTM(RNN_input, (stm, ltm))   
+        skip = self.classifier_readout(RNN_input) if self.oracle_zflow else None
+        logits = self.classifier_readout(update)
+        self.postprocess_belief(logits, skip = skip)
 
         if self.testing and (self.mode == "SANITY"):
             self.update_flat = update.detach()        
-            self.input_flat = inp.detach()    
+            self.input_flat = RNN_input.detach()    
         else:
             self.update_flat = torch.zeros(1, device = self.device)    
             self.input_flat = torch.zeros(1, device = self.device)
 
     def RNN_readin(self):
+        O = self.obs_flat
         Z = self.classifier_Z()
         Z = Z.reshape(self.batch_num, 1, -1)
         Z = Z.expand(-1, self.step_num, -1)
-        inp = torch.cat((self.obs_flat, Z), dim = -1)
-        inp = torch.relu(self.classifier_readin(inp))
-        return inp
+        return self.classifier_to_hid(O, Z)
 
-    def postprocess_belief(self, logits, accumulate = True):
+    def classifier_to_hid(self, O, Z):
+        if not self.oracle_zflow:
+            return self.classifier_readin(torch.cat((O, Z), dim = -1))
+        W = self.first_linear(self.classifier_readin)
+        o = F.linear(O, W.weight[:, :self.obs_num], W.bias)
+        z = F.linear(Z, W.weight[:, self.obs_num:])
+        o, z = self.get_layer_norm(self.clf_stream_norm, (o, z))
+        pre = o + z
+        return pre if self.readin_depth == 1 else self.classifier_readin[1:](pre)
+
+    def postprocess_belief(self, logits, accumulate = True, skip = None):
         if accumulate:
             logits = logits.cumsum(1)
+        if skip is not None:
+            logits = logits + skip
         belief = self.logits_to_belief(logits)
         self.classifier_belief = belief
         self.classifier_belief_flat = belief.detach()
@@ -100,7 +112,7 @@ class Model_forward(Model_backward):
         
     def default_pobs(self, training_controller = False):
         if self.learn_embeddings or training_controller: 
-            if training_controller or self.mode == "oracle":
+            if training_controller or self.oracle:
                 conf = torch.ones(*self.batch_ctx_dims, device = self.device)
                 sample = self.controller_actions if training_controller else self.ctx_vals
             else:
@@ -117,19 +129,16 @@ class Model_forward(Model_backward):
         s = self.sample_to_hid(sample_emb).unsqueeze(1)
         c = self.conf_to_hid(conf).unsqueeze(1)
         z = self.Z_to_pobs(self.generator_Z())
-
-        if self.gen_fix:
-            s, c, z = (n(v) for n, v in zip(self.gen_stream_norm, (s, c, z)))
+        if self.oracle:
+            s, c, z = self.get_layer_norm(self.gen_stream_norm, (s, c, z))
 
         pre = s + c + z
         x = self.gen_hid2hid(torch.relu(pre))
-        
-        if self.gen_fix:
-            x = self.hid_to_pobs(torch.relu(pre + x))
-        else:
-            x = self.hid_to_pobs(torch.relu(x))
-            
+        x = self.hid_to_pobs(torch.relu(pre + x if self.oracle else x))
         self.pred_pobs = torch.sigmoid(x).squeeze()
+
+    def get_layer_norm(self, norm, inps):
+        return (n(v) for n, v in zip(norm, inps))
 
     ########################################################################################################
     """ lazy/rich RNN — Clark, Bordelon, Zavatone-Veth & Pehlevan, bioRxiv 2026.03.02.708943 """

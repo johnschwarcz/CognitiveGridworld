@@ -1,14 +1,20 @@
-"""Four-condition oracle pilot: which gradient path can learn the embeddings?
+"""Three-condition oracle ablation: which gradient path can learn the embeddings?
 
-    python main/REPLICATION/trainings/train_oracle_pilot.py <condition> <cuda> [rep] \
-        [--glr LR] [--clr LR] [--batch N] [--episodes N] [--out DIR]
+    python main/REPLICATION/trainings/train_oracle_ablation.py <condition> <cuda> [rep] \
+        [--glr LR] [--clr LR] [--batch N] [--episodes N] [--mode M]
+        [--zflow 0|1] [--out DIR]
 
 `rep` indexes the replication and defaults to 0, matching train_sanity_reps' naming.
---glr/--clr override the learning rates, --batch the episode batch, --out the folder
-(default /oracle_ablation, which is where the original 1e-3 runs live).
+--glr/--clr override the learning rates, --batch the episode batch, --mode the training
+mode, --out the folder (default /oracle_ablation, which is where the original 1e-3 runs
+live). The Z-flow fixes on the generator and classifier paths follow mode == "oracle".
 
-Conditions differ only in which loss reaches the compositional embeddings, and whether
-L_reg is applied to them.
+Conditions differ only in which loss reaches the compositional embeddings; L_reg is
+always applied to them. Both arms are balanced by default (--zflow 1): the classifier's
+Z path gets the same treatment as the generator's -- per-stream LayerNorm(hid_dim) after
+the readin projection, a readout-aligned Z block, and a skip added after the cumsum -- so
+neither network is advantaged by how it consumes Z. --zflow 0 reproduces the older,
+unbalanced runs where only the generator was treated.
 """
 import os, sys, time
 import numpy as np
@@ -21,9 +27,9 @@ from main.env.env_model_data_manager import Env_model_data_manager
 from main.CognitiveGridworld import CognitiveGridworld
 
 CONDITIONS = {
-    "default":   dict(embedding_grad="generator",  embedding_reg=True),
-    "clf_reg":   dict(embedding_grad="classifier", embedding_reg=True),
-    "both":      dict(embedding_grad="both",       embedding_reg=True),
+    "default":   dict(embedding_grad="generator"),
+    "clf_reg":   dict(embedding_grad="classifier"),
+    "both":      dict(embedding_grad="both"),
 }
 COMMON = dict(mode="oracle", show_plots=False, ctx_num=2, obs_num=5, realization_num=10,
               state_num=500, hid_dim=1000, batch_num=10000, step_num=30,
@@ -56,9 +62,9 @@ if __name__ == "__main__":
     cfg["batch_num"] = _opt("--batch", COMMON["batch_num"], int)
     cfg["episodes"] = _opt("--episodes", COMMON["episodes"], int)
     cfg["mode"] = _opt("--mode", COMMON["mode"], str)
-    cfg["gen_fix"] = _opt("--genfix", 1, int) == 1
+    cfg["oracle_zflow"] = _opt("--zflow", 1, int) == 1
     out = _opt("--out", "oracle_ablation", str)
-    print(f"=== {name}_rep{r} | mode {cfg['mode']} gen_fix {cfg['gen_fix']} | "
+    print(f"=== {name}_rep{r} | mode {cfg['mode']} zflow {cfg['oracle_zflow']} | "
           f"{CONDITIONS[name]} | cuda {cuda} | "
           f"glr {cfg['generator_LR']:g} clr {cfg['classifier_LR']:g} | -> /{out} | "
           f"batch {cfg['batch_num']} x {cfg['episodes']} eps = "

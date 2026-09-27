@@ -41,6 +41,8 @@ class Model_architecture(Model_controller):
         self.classifier_readin = self.mlp_stack(inp_dims, self.hid_dim, self.readin_depth)   
         self.classifier_readout = self.mlp_stack(self.hid_dim, out_dims, self.readout_depth)
         params = list(self.classifier_readin.parameters()) + list(self.classifier_readout.parameters())
+        if self.oracle_zflow:
+            params = params + list(self.classifier_oracle_init())
         if self.mode != "FF":
             self.LSTM = nn.LSTM(self.hid_dim, self.hid_dim, batch_first = True)  
             self.STM, self.LTM = [nn.Parameter(torch.randn(1, 1, self.hid_dim)) for _ in range(2)]
@@ -52,6 +54,21 @@ class Model_architecture(Model_controller):
                     p.requires_grad_(False)
 
         self.classifier_optim = optim.Adam([{'params': params,'lr': self.classifier_LR}]) 
+
+    def classifier_oracle_init(self):
+        readin, readout = (self.first_linear(s) for s in (self.classifier_readin, self.classifier_readout))
+        W = readin.weight[:, self.obs_num:]
+        B = torch.linalg.svd(readout.weight.double(), full_matrices = True)[2][:W.shape[1]].T
+        self.clf_stream_norm = self.oracle_readin(W, B, [self.hid_dim] * 2)
+        return self.clf_stream_norm.parameters()
+
+    def first_linear(self, stack):
+        return stack if isinstance(stack, nn.Linear) else stack[0]
+
+    def oracle_readin(self, W, B, norm_dims):
+        with torch.no_grad():
+            W.copy_((B * (W.norm() / B.norm())).to(W.dtype))
+        return nn.ModuleList([nn.LayerNorm(d) for d in norm_dims])
 
     def mlp_stack(self, in_dim, out_dim, depth):
         if depth == 1:
@@ -72,7 +89,7 @@ class Model_architecture(Model_controller):
             self.K_downscale = nn.Linear(self.hid_dim, self.KQ_dim)
             self.Q_downscale = nn.Linear(self.hid_dim, self.KQ_dim)
             
-            if self.gen_fix:
+            if self.oracle:
                 for L in (self.K_downscale, self.Q_downscale):
                     nn.init.orthogonal_(L.weight, gain=(self.hid_dim / self.KQ_dim)**0.5)
                     nn.init.zeros_(L.bias)
@@ -87,14 +104,10 @@ class Model_architecture(Model_controller):
             self.conf_to_hid = nn.Linear(self.ctx_num, self.hid_dim)
             self.hid_to_pobs = nn.Linear(self.hid_dim, 1)
 
-            if self.gen_fix:
-                self.gen_stream_norm = nn.ModuleList(
-                    [nn.LayerNorm(self.hid_dim) for _ in range(3)])
-                with torch.no_grad():
-                    Wo = self.hid_to_pobs.weight[0].double()
-                    B = torch.stack([Wo, self.gen_hid2hid.weight.double().T @ Wo], dim = 1)
-                    W = self.Z_to_pobs.weight
-                    W.copy_((B * (W.norm() / B.norm())).to(W.dtype))
+            if self.oracle:
+                Wo = self.hid_to_pobs.weight[0].double()
+                B = torch.stack([Wo, self.gen_hid2hid.weight.double().T @ Wo], dim = 1)
+                self.gen_stream_norm = self.oracle_readin(self.Z_to_pobs.weight, B, [self.hid_dim] * 3)
 
             generator_params = ([] if self.embedding_grad == "classifier" else embedding_params)
             if self.embedding_grad == "classifier":
@@ -107,7 +120,7 @@ class Model_architecture(Model_controller):
                         list(self.gen_hid2hid.parameters()) +        
                         list(self.hid_to_pobs.parameters()) +
                         list(self.conf_to_hid.parameters()) +
-                        (list(self.gen_stream_norm.parameters()) if self.gen_fix else []),
+                        (list(self.gen_stream_norm.parameters()) if self.oracle else []),
                         'lr': self.generator_LR}]                
             self.generator_optim = optim.Adam(params)
             if self.embedding_grad == "both":

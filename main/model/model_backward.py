@@ -19,11 +19,10 @@ class Model_backward(Model_Customization):
 
         if self.learn_embeddings:
             self.SSL_loss()
-            if self.embedding_reg:
-                if self.embedding_grad == "classifier":
-                    self.classifier_loss = self.classifier_loss + self.reg_loss()
-                else:
-                    self.generator_loss = self.generator_loss + self.reg_loss()
+            if self.embedding_grad == "classifier":
+                self.classifier_loss = self.classifier_loss + self.reg_loss()
+            else:
+                self.generator_loss = self.generator_loss + self.reg_loss()
             if self.embedding_grad == "both":
                 self.update(self.classifier_loss + self.generator_loss, self.combined_optim)
                 return self.backward_return()
@@ -69,7 +68,7 @@ class Model_backward(Model_Customization):
         chance = 1/self.realization_num
         OPE = self.DKL_sym(self.pred_pobs, self.obs_flat.mean(1))       # batch x obs_num
 
-        if training_controller or self.mode == "oracle":
+        if training_controller or self.oracle:
             OPE = OPE.mean()
         else:
             last_ACC = self.ACC[:, -1]

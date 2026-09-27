@@ -55,7 +55,6 @@ class CognitiveGridworld(Env_model_manager):
         self.output_joint = init.get('output_joint', False)
         self.gpu_inference = init.get('gpu_inference', False)
         self.embedding_grad = init.get('embedding_grad', 'generator')   # 'generator' | 'classifier' | 'both'
-        self.embedding_reg = init.get('embedding_reg', True)
         self.hid_dim = init.get('hid_dim', 1000)
         
         # --- lazy/rich RNN mode ("lazyrich"), Clark, Bordelon, Zavatone-Veth & Pehlevan,
@@ -76,7 +75,8 @@ class CognitiveGridworld(Env_model_manager):
         self.load_env = init.get('load_env', None)
         self.save_env = init.get('save_env', None)
         self.external_logger = init.get('external_logger', None)
-        self.gen_fix = init.get('gen_fix', self.mode == "oracle")
+        self.oracle = self.mode == "oracle"
+        self.oracle_zflow = init.get('oracle_zflow', False)
         self.custom_log = {}
 
         self.trigger_simulation()

@@ -2,6 +2,7 @@ import os, sys, glob, re, inspect
 import numpy as np
 import torch
 import matplotlib.pyplot as plt
+import matplotlib.ticker as mticker
 
 def _repo_root():
     """Walk up until main/DATA appears. inspect.getfile fails in an interactive window,
@@ -24,9 +25,20 @@ root = _repo_root()
 sys.path.insert(0, root)
 from main.utils import fig_path, apply_fig_style
 
-DATA = os.path.join(root, "main", "DATA", "oracle_pilot")
+DATA = os.path.join(root, "main", "DATA")
 BOUNDS_CACHE = os.path.join(root, "bayes_bounds_ctx2_T30.npy")
-SHOW = [("default", "#1a6fae", "Generator"), ("clf_reg", "#d7191c", "Classifier")]
+# (condition, colour, label, run dir). Both arms are balanced: the classifier receives the
+# same Z-flow treatment as the generator (oracle_zflow), so the only difference between
+# them is which loss reaches the compositional embeddings.
+SHOW = [("default", "#2c7bb6", "Generator",  "oracle_pilot"),
+        ("clf_reg", "#d7191c", "Classifier", "oracle_clffix_v3")]
+FIGSIZE = (10, 3.6)
+
+
+def _despine(ax):
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+    ax.tick_params(length=4, width=.9)
 
 
 def get_bounds(batch_num=8000, step_num=30, ctx_num=2):
@@ -42,41 +54,48 @@ def get_bounds(batch_num=8000, step_num=30, ctx_num=2):
     return tuple(out)
 
 
-def load(cond):
+def load(cond, run_dir):
     A = []
-    for f in sorted(glob.glob(os.path.join(DATA, f"{cond}_rep*_net.pth")),
+    for f in sorted(glob.glob(os.path.join(DATA, run_dir, f"{cond}_rep*_net.pth")),
                     key=lambda p: int(re.search(r"rep(\d+)", p).group(1))):
         d = torch.load(f, weights_only=False, map_location="cpu")
         A.append(np.asarray(d["test_acc_through_training"], float)[:, -1])
     if not A:
         raise FileNotFoundError(
-            f"no {cond}_rep*_net.pth under {DATA}")
+            f"no {cond}_rep*_net.pth under {os.path.join(DATA, run_dir)}")
     n = min(len(a) for a in A)
     return np.stack([a[:n] for a in A])
 
 
 fs = apply_fig_style()
 joint, naive = get_bounds()
-fig, ax = plt.subplots(figsize=(4, 3.4))
+fig, ax = plt.subplots(figsize=FIGSIZE)
 
-ax.axhspan(naive, joint, color="0.5", alpha=.07, lw=0, zorder=1)
-for y, t in ((joint, "Joint"), (naive, "Naive")):
-    ax.axhline(y, color="0.25", ls=(0, (5, 2)), lw=1.1, zorder=2)
-    ax.text(.6, y + .008, t, fontsize=fs["annot"], color="0.35")
+for cond, c, lab, run_dir in SHOW:
+    A = load(cond, run_dir)
+    x = np.arange(1, A.shape[1] + 1)
+    gap = joint - A
+    m, se = gap.mean(0), gap.std(0, ddof=1) / np.sqrt(A.shape[0])
+    ax.fill_between(x, m - se, m + se, color=c, alpha=.22, lw=0)
+    ax.plot(x, m, color=c, lw=2, label=f"{lab} ($n{{=}}{A.shape[0]}$)")
+    print(f"{lab:<12} n={A.shape[0]}  final excess {m[-1]:.4f} +/- {se[-1]:.4f}")
 
-for cond, c, lab in SHOW:
-    A = load(cond)
-    x = np.arange(A.shape[1])
-    m, se = A.mean(0), A.std(0, ddof=1) / np.sqrt(A.shape[0])
-    ax.fill_between(x, m - se, m + se, color=c, alpha=.30, lw=0, zorder=3)
-    ax.plot(x, m, color=c, lw=1, zorder=4, label=lab, ls = ':')
-    print(f"{lab:<12} n={A.shape[0]}  final {m[-1]:.4f} +/- {se[-1]:.4f}")
+ax.axhline(joint - naive, c='k', lw=2, ls='--', zorder=10)
+ax.text(.02, joint - naive, "Naive bound", color='k', fontsize=15, va='center',
+        ha='left', transform=ax.get_yaxis_transform(), zorder=11,
+        bbox=dict(fc='white', ec='none', alpha=.85, pad=1.5))
 
-ax.set(xlabel="Testing episode", ylabel="Testing Accuracy", xlim=(0, 40), ylim=(.10, .81))
-ax.set_title("RCC Generator Ablation", pad=10, fontsize=fs["title"])
-ax.grid(alpha=.22, lw=.6)
-leg = ax.legend(loc="lower right", frameon=False, fontsize=fs["legend"],
-                title=r"$\hat{\mathcal{E}}$ recieves"+"\ngradients from", title_fontsize=fs["legend"] - .5,
+ax.set(xlabel="Testing Episode", ylabel="Optimal $-$ Network Accuracy",
+       xscale="log", yscale="log", xlim=(1, 41))
+ax.set_title("RCC Generator Ablation", fontsize=fs["title"])
+for axis in (ax.xaxis, ax.yaxis):
+    axis.set_major_locator(mticker.LogLocator(subs=(1., 2., 3., 5.)))
+    axis.set_major_formatter(mticker.FuncFormatter(lambda v, _: f"{v:g}"))
+    axis.set_minor_formatter(mticker.NullFormatter())
+ax.grid(alpha=.25, lw=.6, which="both")
+_despine(ax)
+leg = ax.legend(loc="lower left", frameon=False, fontsize=15,
+                title=r"$\hat{\mathcal{E}}$ receives"+"\ngradients from", title_fontsize=15,
                 labelspacing=.45, handlelength=1.8)
 leg._legend_box.align = "left"
 
