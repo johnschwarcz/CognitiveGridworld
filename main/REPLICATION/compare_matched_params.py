@@ -32,7 +32,7 @@ sys.path.insert(0, path)
 from main.utils import fig_path, apply_fig_style
 
 DATA = os.path.join(path, "main", "DATA")
-BOUNDS_NPZ = os.path.join(DATA, "matched_params_bounds.npz")
+BOUNDS_NPZ = os.path.join(DATA, "cache", "matched_params_bounds.npz")
 BOUND_TOTAL = 300000   # episodes per environment behind the cached bounds
 BOUND_KEY = "30step"   # which cached environment the bounds are read from
 STEP = 30              # inference step read out
@@ -44,10 +44,10 @@ ECHO_LIGHT = "#fcb8b4"   # echoes are shaded along this ramp by parameter count
 
 NETWORKS = (
     dict(label=r"Trained ($N{=}200$) $\to$ marginal belief updates",
-         stem="sanity_reps_30step/fully_trained_ctx_2_200N_rep",
+         stem="sanity_default_reps/fully_trained_ctx_2_200N_rep",
          reps=range(5), color=C_TRAIN, ls="-"),
     dict(label=r"Echo ($N{=}10k$) $\to$ marginal belief updates",
-         stem="sanity_reps_30step/reservoir_ctx_2)19j_30step_rep",
+         stem="sanity_default_reps/reservoir_ctx_2_10000N_rep",
          reps=range(1), color=None, ls="-"),
     dict(label=r"Echo ($N{=}1k$) $\to$ marginal belief updates",
          stem="sanity/reservoir_ctx_2",
@@ -61,7 +61,7 @@ NETWORKS = (
 # sanity_* entries are the check that separate environment draws agree (they do, to
 # within ~2 SE), which licenses one bound pair for networks from different draws.
 BOUND_ENVS = {
-    "30step":              ("/sanity_reps_30step/fully_trained_ctx_2_200N_rep0", 200, 30, {}),
+    "30step":              ("/sanity_default_reps/fully_trained_ctx_2_200N_rep0", 200, 30, {}),
     "30step_sanity_ft":    ("/sanity/fully_trained_ctx_2",   1000, 30, {}),
     "30step_sanity_res":   ("/sanity/reservoir_ctx_2",       1000, 30, dict(reservoir=True)),
     "30step_sanity_joint": ("/sanity/joint_reservoir_ctx_2", 1000, 30,

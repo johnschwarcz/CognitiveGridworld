@@ -11,6 +11,8 @@ class Model_architecture(Model_controller):
         self.MC_init_generator()
         self.scaler = torch.amp.GradScaler('cuda', enabled=self.device_type != "cpu")
         super().to(self.device)
+        if self.mode == "lazyrich":
+            self.rnn_J_init = self.rnn_J_init.cpu()     # only the CPU-side diagnostics read it
         print("running on:", self.device)
 
     def init_env_vars(self, kwargs):
@@ -38,11 +40,15 @@ class Model_architecture(Model_controller):
             return
         inp_dims = (self.Z_num + 1) * self.obs_num
         out_dims = self.R_to_the_ctx if self.output_joint else self.realization_num * self.ctx_num
-        self.classifier_readin = self.mlp_stack(inp_dims, self.hid_dim, self.readin_depth)   
+        if self.mode == "FF" and getattr(self, "ff_time_inject", False):
+            from main.model.time_ff import TimeInjectedFF
+            self.classifier_readin = TimeInjectedFF(inp_dims, self.hid_dim, self.step_num, self.ff_frozen_gain,
+                                                    self.ff_regenerate, self.device, shared = getattr(self, "ff_shared_readin", False),
+                                                    first_only = getattr(self, "ff_inject_first_only", False))
+        else:
+            self.classifier_readin = self.mlp_stack(inp_dims, self.hid_dim, self.readin_depth)   
         self.classifier_readout = self.mlp_stack(self.hid_dim, out_dims, self.readout_depth)
         params = list(self.classifier_readin.parameters()) + list(self.classifier_readout.parameters())
-        if self.oracle_zflow:
-            params = params + list(self.classifier_oracle_init())
         if self.mode != "FF":
             self.LSTM = nn.LSTM(self.hid_dim, self.hid_dim, batch_first = True)  
             self.STM, self.LTM = [nn.Parameter(torch.randn(1, 1, self.hid_dim)) for _ in range(2)]
@@ -52,18 +58,10 @@ class Model_architecture(Model_controller):
             else:
                 for p in self.LSTM.parameters():
                     p.requires_grad_(False)
+                if getattr(self, "reservoir_fp16", False) or getattr(self, "reservoir_dedup", False):
+                    self.LSTM.half()        # frozen, so no fp32 master is needed; autocast makes this same copy per call
 
-        self.classifier_optim = optim.Adam([{'params': params,'lr': self.classifier_LR}]) 
-
-    def classifier_oracle_init(self):
-        readin, readout = (self.first_linear(s) for s in (self.classifier_readin, self.classifier_readout))
-        W = readin.weight[:, self.obs_num:]
-        B = torch.linalg.svd(readout.weight.double(), full_matrices = True)[2][:W.shape[1]].T
-        self.clf_stream_norm = self.oracle_readin(W, B, [self.hid_dim] * 2)
-        return self.clf_stream_norm.parameters()
-
-    def first_linear(self, stack):
-        return stack if isinstance(stack, nn.Linear) else stack[0]
+        self.classifier_optim = optim.Adam([{'params': params,'lr': self.classifier_LR}])
 
     def oracle_readin(self, W, B, norm_dims):
         with torch.no_grad():
@@ -175,10 +173,15 @@ class Model_architecture(Model_controller):
             self.rnn_input_scale = 1.0 / np.sqrt(self.lazyrich_D_in)  # keeps the input drive O(1), as in Sec. SI.6
 
         self.rnn_J = nn.Parameter(torch.randn(N, N))                  # Theta = {J, U, V}
+        if self.reservoir:                                            # J frozen at init: out of the optimizer, its ridge and the noise
+            self.rnn_J.requires_grad_(False)
         self.rnn_U = nn.Parameter(torch.randn(N, self.lazyrich_D_in))
         self.rnn_V = nn.Parameter(torch.randn(N, self.lazyrich_D_out))
+        if self.rnn_skip:                                             # readout of the memoryless bypass, scaled like V
+            self.rnn_V_skip = nn.Parameter(torch.randn(N, self.lazyrich_D_out))
         self.register_buffer("rnn_J_init", self.rnn_J.detach().clone())
-        self.lazyrich_params = [p for p in (self.rnn_J, self.rnn_U, self.rnn_V) if p.requires_grad]
+        self.lazyrich_params = [p for p in (self.rnn_J, self.rnn_U, self.rnn_V, getattr(self, "rnn_V_skip", None))
+                                if p is not None and p.requires_grad]
 
         # Langevin gradient flow, Eq. (4). The ridge gradient (1/beta) Theta is supplied by
         # weight_decay; the matching sqrt(2 lr / beta) kick is injected in lazyrich_update().
@@ -188,7 +191,7 @@ class Model_architecture(Model_controller):
         self.lazyrich_clipped = 0
         # Equilibration diagnostic (Clark et al. Sec. SI.6): snapshot J halfway through so the
         # second half of training can be checked for a spectrum that has stopped moving.
-        self.register_buffer("rnn_J_half", torch.zeros_like(self.rnn_J), persistent = False)
+        self.rnn_J_half = None                                        # CPU copy, taken in lazyrich_update()
         self.lazyrich_snapshot_at = max(1, int(self.episodes) // 2)
 
         # classifier_LR is Bordelon & Pehlevan's base learning rate eta_0: the multiplier this
@@ -196,7 +199,8 @@ class Model_architecture(Model_controller):
         print(f"lazyrich: N={N} g={self.rnn_gain} gamma={self.gamma} beta={self.rnn_beta:g} "
               f"dt/tau={self.rnn_alpha} | init readout scale 1/(sqrt(N) gamma) = "
               f"{1/(np.sqrt(N)*self.gamma):.3f} | eta_0={self.classifier_LR} -> "
-              f"eta_0 N gamma^2 = {self.classifier_LR * N * self.gamma**2:.1f}")
+              f"eta_0 N gamma^2 = {self.classifier_LR * N * self.gamma**2:.1f}"
+              f"{' | skip' if self.rnn_skip else ''}{' | J frozen (reservoir)' if self.reservoir else ''}")
 
     def lazyrich_restructuring(self):
         """||J - J_init||_F / ||J_init||_F. Read against lazyrich_noise_floor(): Langevin noise
@@ -205,7 +209,8 @@ class Model_architecture(Model_controller):
         representational-drift point). lazyrich_spectrum() is sharper -- outlier eigenvalues
         are self-averaging, so isotropic noise does not move them."""
         with torch.no_grad():
-            return (self.rnn_J - self.rnn_J_init).norm().div(self.rnn_J_init.norm()).item()
+            J0 = self.rnn_J_init
+            return (self.rnn_J.detach().to(J0.device) - J0).norm().div(J0.norm()).item()
 
     def lazyrich_clip_rate(self):
         """Fraction of updates where rnn_grad_clip bound. Must be ~0: ||grad E|| scales as gamma,
@@ -225,11 +230,11 @@ class Model_architecture(Model_controller):
         drift, relative change in max|lambda|) over the second half; the second is the
         meaningful one, being self-averaging."""
         with torch.no_grad():
-            if not self.rnn_J_half.any():
+            if self.rnn_J_half is None:
                 return float("nan"), float("nan")
-            dJ = (self.rnn_J - self.rnn_J_half).norm().div(self.rnn_J_half.norm()).item()
+            dJ = (self.rnn_J.detach().cpu() - self.rnn_J_half).norm().div(self.rnn_J_half.norm()).item()
             half = np.abs(torch.linalg.eigvals(
-                self.rnn_J_scale * self.rnn_J_half.detach().float().cpu()).numpy()).max()
+                self.rnn_J_scale * self.rnn_J_half.float()).numpy()).max()
             now = np.abs(self.lazyrich_spectrum()).max()
             return dJ, abs(now - half) / max(half, 1e-12)
 

@@ -52,6 +52,15 @@ class CognitiveGridworld(Env_model_manager):
         self.generator_LR = init.get('generator_LR', 0.001)
         self.readout_depth = init.get('readout_depth', 1)
         self.readin_depth = init.get('readin_depth', 1)
+        self.readin_residual = init.get('readin_residual', False)   # FF only: h <- h + relu(W h + b) / sqrt(L) around each of the L N x N readin layers
+        # FF only (2026-10-15): time-injected layers (main/model/time_ff.py): layer k gets the mean of the first T+1-k
+        # observations through its own readin; frozen N x N layers at nn.Linear's default draws x ff_frozen_gain, rebuilt
+        # from seeds on every use with ff_regenerate (too many weights to store at N >= 10000)
+        self.ff_time_inject = init.get('ff_time_inject', False)
+        self.ff_frozen_gain = init.get('ff_frozen_gain', 1.0)
+        self.ff_regenerate = init.get('ff_regenerate', False)
+        self.ff_shared_readin = init.get('ff_shared_readin', False)       # one readin for all the time-injected layers
+        self.ff_inject_first_only = init.get('ff_inject_first_only', False)   # control: input at layer 1 only (standard depth-T FF)
         self.output_joint = init.get('output_joint', False)
         self.gpu_inference = init.get('gpu_inference', False)
         self.embedding_grad = init.get('embedding_grad', 'generator')   # 'generator' | 'classifier' | 'both'
@@ -68,15 +77,23 @@ class CognitiveGridworld(Env_model_manager):
         self.rnn_grad_clip = init.get('rnn_grad_clip', 10.0)    # gradient-norm clip (Table SI.2)
         self.rnn_langevin = init.get('rnn_langevin', True)      # inject the sqrt(2/beta) noise of Eq. (4)
         self.rnn_nonlinearity = init.get('rnn_nonlinearity', 'tanh')   # phi(.)
+        self.rnn_skip = init.get('rnn_skip', False)             # memoryless bypass: phi(U I(t)) gets its own readout next to the RNN's
 
         self.learn_embeddings = init.get('learn_embeddings', True)
         self.reservoir = init.get('reservoir', False)
+        # Wide reservoirs (2026-10-13). reservoir_fp16: keep the frozen LSTM weights in fp16 only (bit-identical under
+        # autocast, which makes that same fp16 copy on every call; half the memory). reservoir_dedup: hand-written frozen
+        # LSTM whose input projection runs once per distinct readin input (main/model/frozen_lstm.py; exact; implies
+        # fp16 weights). micro_batch: SANITY episodes in slices of this many episodes, gradients accumulated to the
+        # whole batch's before one optimizer step (exact at loss power 1).
+        self.reservoir_fp16 = init.get('reservoir_fp16', False)
+        self.reservoir_dedup = init.get('reservoir_dedup', False)
+        self.micro_batch = init.get('micro_batch', None)
         self.training = init.get('training', False)
         self.load_env = init.get('load_env', None)
         self.save_env = init.get('save_env', None)
         self.external_logger = init.get('external_logger', None)
         self.oracle = self.mode == "oracle"
-        self.oracle_zflow = init.get('oracle_zflow', False)
         self.custom_log = {}
 
         self.trigger_simulation()

@@ -22,7 +22,7 @@ from main.utils import fig_path, apply_fig_style
 
 # Set False to re-collect; True re-plots from the cached harvest in seconds.
 LOAD_HARVEST = True
-HARVEST_CACHE = os.path.join(_ROOT, 'main', 'DATA', 'supplementary_harvest.npz')
+HARVEST_CACHE = os.path.join(_ROOT, 'main', 'DATA', 'cache', 'supplementary_harvest.npz')
 
 F64, I64 = np.float64, np.int64
 
@@ -878,7 +878,7 @@ def _load_ctx_calibration(ctx, harvests=None):
         return ({"trained": {k: np.ravel(tr[k]).astype(F64) for k in CAL_CTX_KEYS},
                  "echo": {k: np.ravel(ec[k]).astype(F64) for k in CAL_CTX_KEYS}},
                 float(tr["chance"]))
-    d = np.load(os.path.join(_ROOT, "main", "DATA", src))
+    d = np.load(os.path.join(_ROOT, "main", "DATA", "cache", src))
     H = {side: {k: np.ravel(d[f"{tag}_{k}"]).astype(F64) for k in CAL_CTX_KEYS}
          for tag, side in (("tr", "trained"), ("ec", "echo"))}
     return H, float(d["chance"])
@@ -964,7 +964,7 @@ def _cal_ctxs():
     """The context counts whose calibration harvest is actually on disk."""
     return [c for c in CAL_CTX_SRC
             if CAL_CTX_SRC[c] is None
-            or os.path.exists(os.path.join(_ROOT, "main", "DATA", CAL_CTX_SRC[c]))]
+            or os.path.exists(os.path.join(_ROOT, "main", "DATA", "cache", CAL_CTX_SRC[c]))]
 
 
 def _box_c_column(fig, ax, c_txt, pad=4.0, gap=2.0):

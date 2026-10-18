@@ -153,7 +153,7 @@ class Model_backward(Model_Customization):
         self.lazyrich_steps += 1
         if self.lazyrich_steps == self.lazyrich_snapshot_at:
             with torch.no_grad():
-                self.rnn_J_half.copy_(self.rnn_J)      # for lazyrich_equilibration()
+                self.rnn_J_half = self.rnn_J.detach().cpu()     # for lazyrich_equilibration()
 
         if self.rnn_langevin and self.lazyrich_noise_std > 0:
             with torch.no_grad():

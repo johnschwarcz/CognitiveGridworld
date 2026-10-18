@@ -26,13 +26,16 @@ sys.path.insert(0, root)
 from main.utils import fig_path, apply_fig_style
 
 DATA = os.path.join(root, "main", "DATA")
-BOUNDS_CACHE = os.path.join(root, "bayes_bounds_ctx2_T30.npy")
-# (condition, colour, label, run dir). Both arms are balanced: the classifier receives the
-# same Z-flow treatment as the generator (oracle_zflow), so the only difference between
-# them is which loss reaches the compositional embeddings.
+BOUNDS_CACHE = os.path.join(DATA, "cache", "bayes_bounds_ctx2_T30.npy")
+# (condition, colour, label, run dir). Both arms use the identical model -- Z-flow generator,
+# standard classifier (mode == "oracle") -- so the only difference between them is which
+# loss reaches the compositional embeddings.
 SHOW = [("default", "#2c7bb6", "Generator",  "oracle_pilot"),
-        ("clf_reg", "#d7191c", "Classifier", "oracle_clffix_v3")]
+        ("clf_reg", "#d7191c", "Classifier", "oracle_pilot")]
 FIGSIZE = (10, 3.6)
+# --old DIR adds DIR/default_rep*_net.pth dashed (comparison Generator-arm runs, e.g. ones trained
+# with a different classifier) and saves to a separate file, leaving the main figure alone.
+OLD = sys.argv[sys.argv.index("--old") + 1] if "--old" in sys.argv else None
 
 
 def _despine(ax):
@@ -71,13 +74,16 @@ fs = apply_fig_style()
 joint, naive = get_bounds()
 fig, ax = plt.subplots(figsize=FIGSIZE)
 
-for cond, c, lab, run_dir in SHOW:
+show = [(cond, c, lab, run_dir, "-") for cond, c, lab, run_dir in SHOW]
+if OLD:
+    show.insert(1, ("default", "#2c7bb6", "Generator, comparison runs", OLD, "--"))
+for cond, c, lab, run_dir, ls in show:
     A = load(cond, run_dir)
     x = np.arange(1, A.shape[1] + 1)
     gap = joint - A
     m, se = gap.mean(0), gap.std(0, ddof=1) / np.sqrt(A.shape[0])
     ax.fill_between(x, m - se, m + se, color=c, alpha=.22, lw=0)
-    ax.plot(x, m, color=c, lw=2, label=f"{lab} ($n{{=}}{A.shape[0]}$)")
+    ax.plot(x, m, color=c, lw=2, ls=ls, label=f"{lab} ($n{{=}}{A.shape[0]}$)")
     print(f"{lab:<12} n={A.shape[0]}  final excess {m[-1]:.4f} +/- {se[-1]:.4f}")
 
 ax.axhline(joint - naive, c='k', lw=2, ls='--', zorder=10)
@@ -100,6 +106,7 @@ leg = ax.legend(loc="lower left", frameon=False, fontsize=15,
 leg._legend_box.align = "left"
 
 fig.tight_layout()
-plt.savefig(fig_path("embedding_gradient_source.svg"), dpi=300, bbox_inches="tight")
-print("saved embedding_gradient_source.svg")
+out = "embedding_gradient_source_before_after.svg" if OLD else "embedding_gradient_source.svg"
+plt.savefig(fig_path(out), dpi=300, bbox_inches="tight")
+print(f"saved {out}")
 plt.show()

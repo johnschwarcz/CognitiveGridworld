@@ -52,8 +52,8 @@ sys.path.insert(0, path)
 from main.utils import fig_path, apply_fig_style
 
 DATA = os.path.join(path, "main", "DATA")
-CACHE_NPZ = os.path.join(DATA, "sanity_default_reps.npz")
-CKPT_DIR = "/sanity _default_reps/"   # the stray space is in the directory name itself
+CACHE_NPZ = os.path.join(DATA, "cache", "sanity_default_reps.npz")
+CKPT_DIR = "/sanity_default_reps/"
 REPS = range(5)
 CTXS = [1, 2]
 COLLECT_TOTAL = 32000   # episodes per rep behind the cached bounds

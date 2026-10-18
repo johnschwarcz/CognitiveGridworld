@@ -1,20 +1,19 @@
-"""Three-condition oracle ablation: which gradient path can learn the embeddings?
+"""Two-condition oracle ablation: which gradient path can learn the embeddings?
 
     python main/REPLICATION/trainings/train_oracle_ablation.py <condition> <cuda> [rep] \
         [--glr LR] [--clr LR] [--batch N] [--episodes N] [--mode M]
-        [--zflow 0|1] [--out DIR]
+        [--out DIR]
 
 `rep` indexes the replication and defaults to 0, matching train_sanity_reps' naming.
 --glr/--clr override the learning rates, --batch the episode batch, --mode the training
-mode, --out the folder (default /oracle_ablation, which is where the original 1e-3 runs
-live). The Z-flow fixes on the generator and classifier paths follow mode == "oracle".
+mode, --out the folder (default /oracle_ablation; the finished runs plot_ablation.py reads
+are in /oracle_pilot). The generator's Z-flow fix follows mode == "oracle".
 
 Conditions differ only in which loss reaches the compositional embeddings; L_reg is
-always applied to them. Both arms are balanced by default (--zflow 1): the classifier's
-Z path gets the same treatment as the generator's -- per-stream LayerNorm(hid_dim) after
-the readin projection, a readout-aligned Z block, and a skip added after the cumsum -- so
-neither network is advantaged by how it consumes Z. --zflow 0 reproduces the older,
-unbalanced runs where only the generator was treated.
+always applied to them. Both arms use the identical model: the generator has the Z-flow
+treatment (per-stream LayerNorm after its readin projections and a readout-aligned Z block),
+the classifier is the standard one. Giving the classifier the same treatment (plus a skip
+added after the cumsum) made it worse in both arms, so oracle mode no longer does.
 """
 import os, sys, time
 import numpy as np
@@ -29,7 +28,6 @@ from main.CognitiveGridworld import CognitiveGridworld
 CONDITIONS = {
     "default":   dict(embedding_grad="generator"),
     "clf_reg":   dict(embedding_grad="classifier"),
-    "both":      dict(embedding_grad="both"),
 }
 COMMON = dict(mode="oracle", show_plots=False, ctx_num=2, obs_num=5, realization_num=10,
               state_num=500, hid_dim=1000, batch_num=10000, step_num=30,
@@ -62,9 +60,8 @@ if __name__ == "__main__":
     cfg["batch_num"] = _opt("--batch", COMMON["batch_num"], int)
     cfg["episodes"] = _opt("--episodes", COMMON["episodes"], int)
     cfg["mode"] = _opt("--mode", COMMON["mode"], str)
-    cfg["oracle_zflow"] = _opt("--zflow", 1, int) == 1
     out = _opt("--out", "oracle_ablation", str)
-    print(f"=== {name}_rep{r} | mode {cfg['mode']} zflow {cfg['oracle_zflow']} | "
+    print(f"=== {name}_rep{r} | mode {cfg['mode']} | "
           f"{CONDITIONS[name]} | cuda {cuda} | "
           f"glr {cfg['generator_LR']:g} clr {cfg['classifier_LR']:g} | -> /{out} | "
           f"batch {cfg['batch_num']} x {cfg['episodes']} eps = "

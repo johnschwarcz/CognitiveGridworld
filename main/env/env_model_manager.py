@@ -63,12 +63,17 @@ class Env_model_manager(Env_model_data_manager):
         self.model.goal_ind = self.model.goal_ind.long()
 
     def forward_backward(self):
+        micro = self.mode == "SANITY" and bool(self.micro_batch) and self.micro_batch < self.batch_num
         with torch.amp.autocast('cuda', enabled = self.device_type != "cpu"):
             if self.test_set:
                 with torch.no_grad():
-                    self.model_belief, self.model_goal_belief, self.model_input_flat, self.model_update_flat = self.model.forward_pass()        
+                    forward = self.model.forward_pass_micro(train = False) if micro else self.model.forward_pass()
+                    self.model_belief, self.model_goal_belief, self.model_input_flat, self.model_update_flat = forward
+            elif micro:                                  # slices, gradients accumulated, one step (model_forward.py)
+                (self.model_belief, self.model_goal_belief, self.model_input_flat, self.model_update_flat,
+                 self.classifier_loss, self.generator_loss, self.readin_grad, self.readout_grad) = self.model.forward_pass_micro(train = True)
             else:
-                self.model_belief, self.model_goal_belief, self.model_input_flat, self.model_update_flat = self.model.forward_pass()            
+                self.model_belief, self.model_goal_belief, self.model_input_flat, self.model_update_flat = self.model.forward_pass()
                 self.classifier_loss, self.generator_loss, self.readin_grad, self.readout_grad = self.model.backward_pass()
                 
         self.model_est, _, self.model_acc, self.model_TP, self.model_mse = self.get_goal_performance(self.model_belief)   

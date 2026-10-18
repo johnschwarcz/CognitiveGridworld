@@ -1,6 +1,25 @@
 import torch; from torch.distributions import Categorical; from main.utils import tnp
 import torch.nn.functional as F
+from contextlib import contextmanager
 from .model_backward import Model_backward
+from .frozen_lstm import frozen_lstm_dedup
+
+class _SharedCastMatmul(torch.autograd.Function):
+    """phi @ J.T in fp16 with one copy Jh of J shared by every time step. Plain autocast re-casts
+    J.T at each step and keeps every copy for the backward pass: T x N^2 of GPU memory, ~22 GB at
+    N = 20000. The gradient still reaches J step by step in fp32, as through autocast's own casts,
+    so results are bit-identical to phi @ J.T under autocast."""
+    @staticmethod
+    def forward(ctx, phi, J, Jh):
+        ph = phi.to(Jh.dtype)
+        ctx.save_for_backward(ph, Jh)
+        return ph @ Jh.T
+
+    @staticmethod
+    def backward(ctx, g):
+        ph, Jh = ctx.saved_tensors
+        grad_J = (g.T @ ph).float() if ctx.needs_input_grad[1] else None   # None when J is frozen (reservoir)
+        return (g @ Jh).float(), grad_J, None      # grad_J laid out like J, so accumulating it stays contiguous
 
 class Model_forward(Model_backward):
     def forward_pass(self):
@@ -49,28 +68,120 @@ class Model_forward(Model_backward):
 
     def FF_classification(self):
         Z = self.classifier_Z()
+        if getattr(self, "ff_time_inject", False):              # main/model/time_ff.py: one layer per time step
+            steps = torch.arange(1, self.step_num + 1, device = self.device, dtype = self.obs_flat.dtype)
+            prefix_means = self.obs_flat.cumsum(1) / steps[None, :, None]
+            hid = self.classifier_readin(prefix_means, Z.reshape(self.batch_num, -1))
+            logits = self.classifier_readout(hid.unsqueeze(1)).expand(-1, self.step_num, -1)
+            self.postprocess_belief(logits, accumulate = False)
+            return
         Z = Z.reshape(self.batch_num, 1, -1)
         O = self.obs_flat.mean(1, keepdims = True)
-        hid = torch.relu(self.classifier_to_hid(O, Z))
+        if self.readin_residual:
+            hid = self.residual_readin(torch.cat((O, Z), dim = -1))
+        else:
+            hid = torch.relu(self.classifier_to_hid(O, Z))
         logits = self.classifier_readout(hid)
         logits = logits.expand(-1, self.step_num, -1)
         self.postprocess_belief(logits, accumulate = False)
     
     def RNN_classification(self):
-        RNN_input = torch.relu(self.RNN_readin())
-        stm = self.STM.expand(-1, self.batch_num, -1).contiguous()
-        ltm = self.LTM.expand(-1, self.batch_num, -1).contiguous()
-        update, _ = self.LSTM(RNN_input, (stm, ltm))   
-        skip = self.classifier_readout(RNN_input) if self.oracle_zflow else None
+        if getattr(self, "reservoir_dedup", False):
+            update, RNN_input = self.dedup_LSTM()
+        else:
+            RNN_input = torch.relu(self.RNN_readin())
+            stm = self.STM.expand(-1, self.batch_num, -1).contiguous()
+            ltm = self.LTM.expand(-1, self.batch_num, -1).contiguous()
+            update, _ = self.LSTM(RNN_input, (stm, ltm))
         logits = self.classifier_readout(update)
-        self.postprocess_belief(logits, skip = skip)
+        self.postprocess_belief(logits)
 
-        if self.testing and (self.mode == "SANITY"):
+        if self.testing and (self.mode == "SANITY") and self.keep_test_activations():
             self.update_flat = update.detach()        
-            self.input_flat = RNN_input.detach()    
+            self.input_flat = (RNN_input() if callable(RNN_input) else RNN_input).detach()
         else:
             self.update_flat = torch.zeros(1, device = self.device)    
             self.input_flat = torch.zeros(1, device = self.device)
+
+    def keep_test_activations(self):
+        """The (B,T,N) test-episode copies of the LSTM input and output feed only the training analyses; on the wide-reservoir
+        paths (micro_batch, reservoir_dedup) they are skipped when those analyses are (9.6 GB each at N=20000, B=8000)."""
+        wide = getattr(self, "micro_batch", None) or getattr(self, "reservoir_dedup", False)
+        return not (wide and getattr(self, "skip_training_analyses", False))
+
+    def dedup_LSTM(self):
+        """The frozen LSTM of reservoir_dedup (main/model/frozen_lstm.py). The readin input at step t is (obs bits at t, the
+        episode's Z), so (episode, obs pattern) identifies it; the trainable readin and the input projection run once per
+        distinct pair. returns: the (B,T,N) LSTM output and a callable giving the (B,T,N) readin output if needed."""
+        O = self.obs_flat                                                       # (B, T, obs_num), exactly 0/1
+        n_codes = 2 ** self.obs_num
+        bits = 2 ** torch.arange(self.obs_num, device = self.device)
+        key = torch.arange(self.batch_num, device = self.device)[:, None] * n_codes + (O.round().long() * bits).sum(-1)
+        uk, inv = torch.unique(key, return_inverse = True)                     # inv (B, T): which distinct input
+        O_u = ((uk[:, None] % n_codes) // bits % 2).to(O.dtype)                 # the obs bits of each distinct input
+        Z_u = self.classifier_Z().reshape(self.batch_num, -1)[uk // n_codes]
+        A_u = torch.relu(self.classifier_to_hid(O_u, Z_u))                      # (U, N)
+        L = self.LSTM
+        acc = torch.promote_types(L.weight_hh_l0.dtype, torch.float32)
+        bias = (L.bias_ih_l0.to(acc) + L.bias_hh_l0.to(acc)).to(L.weight_hh_l0.dtype)
+        update = frozen_lstm_dedup(A_u, inv.t().contiguous(), self.STM.reshape(1, -1), self.LTM.reshape(1, -1),
+                                   L.weight_ih_l0, L.weight_hh_l0, bias)
+        return update, (lambda: A_u[inv])
+
+    @contextmanager
+    def batch_slice(self, sl):
+        """Point every per-episode tensor, and the batch size, at episodes sl; yields sl's share of the batch."""
+        keys = ("obs_flat", "joint_goal_belief", "goal_ind", "goal_value", "ctx_inds", "ctx_vals", "active_Z")
+        saved = {k: getattr(self, k) for k in keys + ("batch_range", "batch_num", "BSCR_dims")}
+        n = sl.stop - sl.start
+        for k in keys:
+            setattr(self, k, saved[k][sl])
+        self.batch_num, self.batch_range = n, saved["batch_range"][:n]
+        self.BSCR_dims = (n, *tuple(saved["BSCR_dims"])[1:])
+        try:
+            yield n / saved["batch_num"]
+        finally:
+            self.__dict__.update(saved)
+
+    def forward_pass_micro(self, train):
+        """A SANITY episode in slices of micro_batch episodes, so memory follows the slice, not the batch. Training: each
+        slice's SANITY_loss, weighted by its share of the batch, is backpropagated, so the gradients accumulate to the
+        whole batch's; then one optimizer step. Exact at loss power 1, where the loss is a plain mean. At other powers
+        DKL_loss's detached minimum is the slice's: near-exact (<= 0.5% of the gradient weight at initialization with
+        slices of 100, ~1e-17 once trained; measured 2026-10-13). The logged loss sums the slices' shares.
+        returns: forward_pass()'s outputs, then (training) backward_pass()'s"""
+        assert self.mode == "SANITY" and not self.learn_embeddings, "micro_batch supports mode SANITY without learned embeddings"
+        self.MC_to_interactions()
+        if train:
+            self.classifier_optim.zero_grad()
+        B, parts, loss = self.batch_num, [], 0.
+        keep = bool(self.testing) and self.keep_test_activations()
+        for start in range(0, B, self.micro_batch):
+            with self.batch_slice(slice(start, min(start + self.micro_batch, B))) as share:
+                self.MC_to_classification()
+                part = [self.classifier_belief_flat, self.classifier_goal_belief.detach(), self.classifier_goal_selection, self.ACC]
+                if keep:
+                    part += [self.input_flat, self.update_flat]
+                if train:
+                    self.SANITY_loss()
+                    self.scaler.scale(self.classifier_loss * share).backward()
+                    loss = loss + self.classifier_loss.detach() * share
+                parts.append(part)
+        whole = [torch.cat(x) for x in zip(*parts)]
+        self.classifier_belief_flat, self.classifier_goal_belief, self.classifier_goal_selection, self.ACC = whole[:4]
+        self.classifier_belief = self.classifier_belief_flat
+        if keep:
+            self.input_flat, self.update_flat = whole[4:]
+        self.MC_to_pobs()
+        out = tnp([self.classifier_belief_flat, self.classifier_goal_belief, self.input_flat, self.update_flat], 'np')
+        if not train:
+            return out
+        self.classifier_loss = loss
+        self.readin_grad = self.get_gradient_norm(self.classifier_readin)
+        self.readout_grad = self.get_gradient_norm(self.classifier_readout)
+        self.scaler.step(self.classifier_optim)
+        self.scaler.update()
+        return [*out, *self.backward_return()]
 
     def RNN_readin(self):
         O = self.obs_flat
@@ -79,21 +190,25 @@ class Model_forward(Model_backward):
         Z = Z.expand(-1, self.step_num, -1)
         return self.classifier_to_hid(O, Z)
 
-    def classifier_to_hid(self, O, Z):
-        if not self.oracle_zflow:
-            return self.classifier_readin(torch.cat((O, Z), dim = -1))
-        W = self.first_linear(self.classifier_readin)
-        o = F.linear(O, W.weight[:, :self.obs_num], W.bias)
-        z = F.linear(Z, W.weight[:, self.obs_num:])
-        o, z = self.get_layer_norm(self.clf_stream_norm, (o, z))
-        pre = o + z
-        return pre if self.readin_depth == 1 else self.classifier_readin[1:](pre)
+    def residual_readin(self, x):
+        """readin_residual: h = relu(W_0 x + b_0), then h <- h + relu(W_l h + b_l) / sqrt(L) for each of the L N x N layers
+        of the readin stack, so every layer (trained or frozen) is a residual block and the input reaches the readout
+        unattenuated. The 1/sqrt(L) branch scale keeps the residual sum O(1): unscaled, 29 default-init blocks grow it to
+        rms ~116, the readout saturates (max prob 1.0) and training locks at chance (tested 2026-10-12)."""
+        readin = self.classifier_readin
+        linears = [l for l in (readin if isinstance(readin, torch.nn.Sequential) else [readin]) if isinstance(l, torch.nn.Linear)]
+        h = torch.relu(linears[0](x))
+        scale = max(len(linears) - 1, 1) ** -.5
+        for layer in linears[1:]:
+            h = h + scale * torch.relu(layer(h))
+        return h
 
-    def postprocess_belief(self, logits, accumulate = True, skip = None):
+    def classifier_to_hid(self, O, Z):
+        return self.classifier_readin(torch.cat((O, Z), dim = -1))
+
+    def postprocess_belief(self, logits, accumulate = True):
         if accumulate:
             logits = logits.cumsum(1)
-        if skip is not None:
-            logits = logits + skip
         belief = self.logits_to_belief(logits)
         self.classifier_belief = belief
         self.classifier_belief_flat = belief.detach()
@@ -166,23 +281,25 @@ class Model_forward(Model_backward):
         The state stays fp32 under autocast: gamma's whole point is a small but coherent
         perturbation to J, and the recurrence is where that would be lost.
         """
+        # Drop the last test episode's (B,T,N) diagnostics before this forward allocates its own;
+        # forward_pass has already handed numpy copies to the env.
+        self.update_flat = self.input_flat = self.lazyrich_preact = None
         I = self.lazyrich_readin()                                              # (B, T, D_in)
         drive = self.rnn_input_scale * torch.einsum('bti,ni->btn', I, self.rnn_U)
 
         testing = bool(self.testing)
-        x = torch.full((self.batch_num, self.hid_dim), float(self.rnn_x0), device = self.device)
-        phi = self.lazyrich_phi(x)                                              # phi(x^0), not read out
         phis, preacts = [], []
-        for t in range(self.step_num):
-            x = (1 - self.rnn_alpha) * x + self.rnn_alpha * (
-                self.rnn_J_scale * (phi @ self.rnn_J.T) + drive[:, t])
-            phi = self.lazyrich_phi(x)
+        for x, phi in self.lazyrich_states(drive, self.rnn_J):
             phis.append(phi)
             if testing:
                 preacts.append(x)                                               # only kept for the diagnostics below
 
         phi_flat = torch.stack(phis, 1)                                         # (B, T, N)
         update = self.rnn_V_scale * (phi_flat @ self.rnn_V)                     # Eq. (2)
+        if self.rnn_skip:
+            # Bypass past the recurrence: the same input drive U I(t), no J and no memory, with
+            # its own readout on the same 1/(N gamma) scale. It alone can represent naive Bayes.
+            update = update + self.rnn_V_scale * (self.lazyrich_phi(drive) @ self.rnn_V_skip)
         self.postprocess_belief(update)
 
         if testing:
@@ -195,6 +312,20 @@ class Model_forward(Model_backward):
         else:
             self.update_flat = torch.zeros(1, device = self.device)
             self.input_flat = torch.zeros(1, device = self.device)
+
+    def lazyrich_states(self, drive, J):
+        """Euler steps of Eq. (SI.2) from x^0 under recurrent weights J: yields (x(t), phi(x(t))).
+        Under autocast J is cast to fp16 once per forward and shared by every step (_SharedCastMatmul)."""
+        amp = torch.is_autocast_enabled(self.device.type)
+        Jh = J.detach().to(torch.get_autocast_dtype(self.device.type)) if amp else None
+        x = torch.full((self.batch_num, self.hid_dim), float(self.rnn_x0), device = self.device)
+        phi = self.lazyrich_phi(x)                                              # phi(x^0), not read out
+        for t in range(self.step_num):
+            rec = _SharedCastMatmul.apply(phi, J, Jh) if amp else phi @ J.T
+            x = (1 - self.rnn_alpha) * x + self.rnn_alpha * (
+                self.rnn_J_scale * rec + drive[:, t])
+            phi = self.lazyrich_phi(x)
+            yield x, phi
 
     def lazyrich_readin(self):
         """Raw I_a(t): observation bits plus the (time-constant) interaction scalars Z. No
