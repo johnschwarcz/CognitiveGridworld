@@ -220,7 +220,7 @@ import sys
 import warnings
 import numpy as np
 
-ROOT = "/home/johns/Desktop/CognitiveGridworld"
+ROOT = os.environ.get("CGW_ROOT", "/home/johns/Desktop/CognitiveGridworld")
 sys.path[:0] = [ROOT, os.path.join(ROOT, "main", "REPLICATION"), os.path.join(ROOT, "main", "REPLICATION", "claude_plots")]
 os.environ.setdefault("MPLBACKEND", "Agg")
 os.environ.setdefault("CUDA_VISIBLE_DEVICES", "")         # CPU only: every series is read from caches

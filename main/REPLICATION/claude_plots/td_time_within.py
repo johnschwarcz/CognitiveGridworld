@@ -31,7 +31,7 @@ import glob
 import numpy as np
 import torch
 
-ROOT = "/home/johns/Desktop/CognitiveGridworld"
+ROOT = os.environ.get("CGW_ROOT", "/home/johns/Desktop/CognitiveGridworld")
 sys.path[:0] = [ROOT, os.path.join(ROOT, "main", "REPLICATION"), os.path.join(ROOT, "main", "REPLICATION", "claude_plots")]
 os.environ.setdefault("MPLBACKEND", "Agg")
 import td_analysis as td                                                          # noqa: E402

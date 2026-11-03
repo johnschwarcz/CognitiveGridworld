@@ -36,7 +36,7 @@ import torch
 NET = sys.argv[1] if len(sys.argv) > 1 else "trained"
 SMOKE = os.environ.get("SMOKE") == "1"
 torch.set_num_threads(int(os.environ.get("NTHREADS", "6")))
-ROOT = "/home/johns/Desktop/CognitiveGridworld"
+ROOT = os.environ.get("CGW_ROOT", "/home/johns/Desktop/CognitiveGridworld")
 sys.path[:0] = [ROOT, os.path.join(ROOT, "main", "REPLICATION"), os.path.join(ROOT, "main", "REPLICATION", "claude_plots")]
 os.chdir(ROOT)
 import fig1 as cf                                                          # noqa: E402

@@ -280,7 +280,7 @@ import numpy as np
 import torch
 from scipy.special import logsumexp
 
-ROOT = "/home/johns/Desktop/CognitiveGridworld"
+ROOT = os.environ.get("CGW_ROOT", "/home/johns/Desktop/CognitiveGridworld")
 sys.path[:0] = [ROOT, os.path.join(ROOT, "main", "REPLICATION"), os.path.join(ROOT, "main", "REPLICATION", "claude_plots")]
 os.environ.setdefault("MPLBACKEND", "Agg")
 import td_tt_gap as gap                                                                       # noqa: E402
@@ -306,7 +306,7 @@ PAIRS = ("k2_cc", "k4_cc", "k3_cc", "k3_vs_k1")                                 
 RUNS = ("trained", "echo")
 WIDTH_RUNS = ("trained_p1", "trained_N200", "trained_N100", "trained_N50")         # replication (same seed and world)
 SWEEP_S = (1, 3, 5, 10, 15, 20, 25)                                                 # td_tt_chaos.FLIP_S (stored sweep)
-PY = "/home/johns/anaconda3/envs/eureka/bin/python"
+PY = os.environ.get("CGW_PY", "/home/johns/anaconda3/envs/eureka/bin/python")
 MEAS = ("dh", "skl")
 
 

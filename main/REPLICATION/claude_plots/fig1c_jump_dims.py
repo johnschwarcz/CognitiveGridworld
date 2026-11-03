@@ -31,7 +31,7 @@ import sys
 import time
 import numpy as np
 
-ROOT = "/home/johns/Desktop/CognitiveGridworld"
+ROOT = os.environ.get("CGW_ROOT", "/home/johns/Desktop/CognitiveGridworld")
 sys.path[:0] = [ROOT, os.path.join(ROOT, "main", "REPLICATION"), os.path.join(ROOT, "main", "REPLICATION", "claude_plots")]
 SCAN = os.path.join(ROOT, "main", "DATA", "experimental", "fig1c_compression")
 OUT = os.path.join(SCAN, "figdata", "round7_jumps")

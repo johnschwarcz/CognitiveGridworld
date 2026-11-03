@@ -1,0 +1,14 @@
+{
+ "name": "ipcs_49995",
+ "command": "main/REPLICATION/claude_plots/td_tt_interaction_pcs.py one 49995",
+ "seconds": 3.1,
+ "cuda": "0",
+ "reads": [
+  "experimental/training_dynamics/analysis/probes.npz",
+  "experimental/training_dynamics/analysis/trained/ck_49995.npz",
+  "experimental/training_dynamics/trained_s20261029/ckpt_ep49995_net.pth"
+ ],
+ "writes": [
+  "experimental/training_dynamics/through_training/interaction_pcs/trained_49995.npz"
+ ]
+}

@@ -21,7 +21,7 @@ import sys
 import pickle
 import numpy as np
 
-ROOT = "/home/johns/Desktop/CognitiveGridworld"
+ROOT = os.environ.get("CGW_ROOT", "/home/johns/Desktop/CognitiveGridworld")
 sys.path[:0] = [ROOT, os.path.join(ROOT, "main", "REPLICATION"), os.path.join(ROOT, "main", "REPLICATION", "claude_plots")]
 import matplotlib.pyplot as plt                                                   # noqa: E402
 from matplotlib.lines import Line2D                                               # noqa: E402

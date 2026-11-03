@@ -92,7 +92,7 @@ import numpy as np
 import torch
 
 os.environ.setdefault("MPLBACKEND", "Agg")
-ROOT = "/home/johns/Desktop/CognitiveGridworld"
+ROOT = os.environ.get("CGW_ROOT", "/home/johns/Desktop/CognitiveGridworld")
 sys.path[:0] = [ROOT, os.path.join(ROOT, "main", "REPLICATION")]
 import gradflow_analysis as ga                                                    # noqa: E402  (turns TF32 off)
 import supplementary_plotter2 as sp                                               # noqa: E402

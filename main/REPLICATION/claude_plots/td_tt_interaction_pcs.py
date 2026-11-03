@@ -42,7 +42,7 @@ import glob
 import time
 import numpy as np
 
-ROOT = "/home/johns/Desktop/CognitiveGridworld"
+ROOT = os.environ.get("CGW_ROOT", "/home/johns/Desktop/CognitiveGridworld")
 sys.path[:0] = [ROOT, os.path.join(ROOT, "main", "REPLICATION"), os.path.join(ROOT, "main", "REPLICATION", "claude_plots")]
 os.environ.setdefault("MPLBACKEND", "Agg")
 import td_tt_gap as gap                                                                       # noqa: E402
@@ -115,14 +115,17 @@ def harvest_one(run, raw, dev):
             out["intp_x"][sp] += ((ea[2] @ Vp) * (eb[2] @ Vp)).mean(0).cpu().numpy() / T
         ef = effects((CS[s, 0, 0] + CS[s, 0, 1]) / 100)[2]
         tr_full[s - 1] = float((ef ** 2).sum(1).mean())
-    with np.load(os.path.join(ti.AN, run, f"ck_{raw:05d}.npz")) as z:
-        fr, fa = list(z["fac_rows"]), list(z["factors"])
-        ref = z["fac"][:, fr.index("u"), fa.index("joint"), 0]
-        reft = z["fac"][:, fr.index("u"), fa.index("total"), 0]
+    ckf = os.path.join(ti.AN, run, f"ck_{raw:05d}.npz")                           # optional check (analysis cache)
+    chk_joint = chk_total = np.nan
+    if os.path.exists(ckf):
+        with np.load(ckf) as z:
+            fr, fa = list(z["fac_rows"]), list(z["factors"])
+            ref = z["fac"][:, fr.index("u"), fa.index("joint"), 0]
+            reft = z["fac"][:, fr.index("u"), fa.index("total"), 0]
+        chk_joint = float(np.abs(tr_full - ref).max() / ref.max())
+        chk_total = float(np.abs(C.diagonal(dim1=1, dim2=2).sum(1).cpu().numpy() - reft).max() / reft.max())
     o = dict(out, raw=raw, x=float(gap.train_x(raw)), lam=lam.cpu().numpy(), lamp=lamp.cpu().numpy(),
-             lam_s=lam_s.cpu().numpy().astype(np.float32),
-             chk_joint=float(np.abs(tr_full - ref).max() / ref.max()),
-             chk_total=float(np.abs(C.diagonal(dim1=1, dim2=2).sum(1).cpu().numpy() - reft).max() / reft.max()),
+             lam_s=lam_s.cpu().numpy().astype(np.float32), chk_joint=chk_joint, chk_total=chk_total,
              seconds=time.time() - t0)
     os.makedirs(OUT, exist_ok=True)
     tmp = _file(run, raw)[:-4] + ".tmp.npz"
@@ -264,6 +267,9 @@ def numbers():
 
 if __name__ == "__main__":
     what = sys.argv[1:] or ["figure", "numbers"]
+    if "one" in what:
+        import td_tt_intervene as ti
+        harvest_one("trained", int(what[what.index("one") + 1]), ti._device())
     if "harvest" in what:
         i = what.index("harvest")
         harvest(int(what[i + 1]), int(what[i + 2]))

@@ -67,7 +67,7 @@ import json
 import glob
 import numpy as np
 
-ROOT = "/home/johns/Desktop/CognitiveGridworld"
+ROOT = os.environ.get("CGW_ROOT", "/home/johns/Desktop/CognitiveGridworld")
 sys.path[:0] = [ROOT, os.path.join(ROOT, "main", "REPLICATION")]
 import torch                                                                      # noqa: E402
 import matplotlib.pyplot as plt                                                   # noqa: E402

@@ -43,7 +43,7 @@ import json
 import time
 import numpy as np
 
-ROOT = "/home/johns/Desktop/CognitiveGridworld"
+ROOT = os.environ.get("CGW_ROOT", "/home/johns/Desktop/CognitiveGridworld")
 sys.path[:0] = [ROOT, os.path.join(ROOT, "main", "REPLICATION"), os.path.join(ROOT, "main", "REPLICATION", "claude_plots")]
 os.environ.setdefault("MPLBACKEND", "Agg")
 import td_tt_gap as gap                                                                       # noqa: E402
@@ -160,6 +160,7 @@ def run_fixed(E, dev=None, run="trained"):
               f"{v[tl.ROWS.index('acc_goal_T')]:.4f} held2 {v[tl.ROWS.index('held_two_fwd')]:.4f} ({time.time() - t1:.1f} s)",
               flush=True)
     fn = fixed_file(E, run)
+    os.makedirs(os.path.dirname(fn), exist_ok=True)
     tmp = fn + ".tmp.npz"
     np.savez(tmp, run=run, E=E, x=float(ti.train_x(E)), names=np.array(names), cls=np.array(cls), rows=np.array(tl.ROWS),
              value=np.array(val), boot=np.array(boot), info=json.dumps(info), k50=D["k50"], k90=D["k90"],
@@ -193,6 +194,7 @@ def run_fr(E, dev=None, run="trained"):
     for nm in ("intact", "fix5", "fix5_vm_s0", "fix5_vm_s1"):
         spec = {} if nm == "intact" else {"V": D["sub"][nm], "mode": "clamp"}
         out[nm] = tl.lforward(w, spec, ref_nc, dev=dev)["right"][ar, -1, goal]
+    os.makedirs(os.path.dirname(fr_file(E, run)), exist_ok=True)
     np.savez(fr_file(E, run), E=E, x=float(ti.train_x(E)), **out)
     if dev.type == "cuda":
         torch.cuda.empty_cache()

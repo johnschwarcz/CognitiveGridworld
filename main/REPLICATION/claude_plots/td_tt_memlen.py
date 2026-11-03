@@ -348,7 +348,7 @@ import torch
 import torch.nn.functional as Fn
 from scipy.special import logsumexp
 
-ROOT = "/home/johns/Desktop/CognitiveGridworld"
+ROOT = os.environ.get("CGW_ROOT", "/home/johns/Desktop/CognitiveGridworld")
 sys.path[:0] = [ROOT, os.path.join(ROOT, "main", "REPLICATION"), os.path.join(ROOT, "main", "REPLICATION", "claude_plots")]
 os.environ.setdefault("MPLBACKEND", "Agg")
 import td_tt_gap as gap                                                                       # noqa: E402
@@ -361,7 +361,7 @@ TD = ti.TD
 OUT = os.path.join(TD, "through_training", "memlen")
 TMP = ("/tmp/claude-1002/-home-johns-Desktop-CognitiveGridworld/7af6b091-54ff-45a0-b4dd-ef0a3bc9c778/scratchpad/round3/"
        "memlen")
-PY = "/home/johns/anaconda3/envs/eureka/bin/python"
+PY = os.environ.get("CGW_PY", "/home/johns/anaconda3/envs/eureka/bin/python")
 T, R, NV, NO = 30, 10, 2, 5
 NE, PER_ENV = gap.N_ENV, gap.PER_ENV
 NB = gap.N_BOOT

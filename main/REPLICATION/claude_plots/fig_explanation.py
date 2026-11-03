@@ -28,7 +28,7 @@ import os
 import sys
 import numpy as np
 
-ROOT = "/home/johns/Desktop/CognitiveGridworld"
+ROOT = os.environ.get("CGW_ROOT", "/home/johns/Desktop/CognitiveGridworld")
 sys.path[:0] = [ROOT] + [os.path.join(ROOT, "main", "REPLICATION", *p) for p in ((), ("claude_plots",))]
 os.environ.setdefault("MPLBACKEND", "Agg")
 os.environ.setdefault("CUDA_VISIBLE_DEVICES", "")

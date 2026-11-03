@@ -456,7 +456,7 @@ import warnings
 import numpy as np
 from scipy.special import logsumexp
 
-ROOT = "/home/johns/Desktop/CognitiveGridworld"
+ROOT = os.environ.get("CGW_ROOT", "/home/johns/Desktop/CognitiveGridworld")
 sys.path[:0] = [ROOT, os.path.join(ROOT, "main", "REPLICATION"), os.path.join(ROOT, "main", "REPLICATION", "claude_plots")]
 os.environ.setdefault("MPLBACKEND", "Agg")
 import td_tt_gap as gap                                                                       # noqa: E402
@@ -468,7 +468,7 @@ TMP = ("/tmp/claude-1002/-home-johns-Desktop-CognitiveGridworld/7af6b091-54ff-45
        "memcuts")
 TMP_FIX = ("/tmp/claude-1002/-home-johns-Desktop-CognitiveGridworld/7af6b091-54ff-45a0-b4dd-ef0a3bc9c778/scratchpad/tt_tmp/"
            "fix_memory_cuts")                                 # the controls' worker logs and claims
-PY = "/home/johns/anaconda3/envs/eureka/bin/python"
+PY = os.environ.get("CGW_PY", "/home/johns/anaconda3/envs/eureka/bin/python")
 T, R, NV = 30, 10, 2
 NE, PER_ENV = gap.N_ENV, gap.PER_ENV
 NB = gap.N_BOOT

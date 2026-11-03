@@ -32,7 +32,7 @@ from types import SimpleNamespace
 import numpy as np
 import torch
 
-ROOT = "/home/johns/Desktop/CognitiveGridworld"
+ROOT = os.environ.get("CGW_ROOT", "/home/johns/Desktop/CognitiveGridworld")
 sys.path[:0] = [ROOT, os.path.join(ROOT, "main", "REPLICATION"), os.path.join(ROOT, "main", "REPLICATION", "claude_plots")]
 os.chdir(ROOT)
 import gradflow_analysis as ga                                                    # noqa: E402

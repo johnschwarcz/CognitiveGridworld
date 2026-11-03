@@ -33,7 +33,7 @@ import os
 import sys
 import numpy as np
 
-ROOT = "/home/johns/Desktop/CognitiveGridworld"
+ROOT = os.environ.get("CGW_ROOT", "/home/johns/Desktop/CognitiveGridworld")
 SCAN = os.path.join(ROOT, "main", "DATA", "experimental", "fig1c_compression")
 OUT = os.path.join(SCAN, "figdata", "round7_jumps")
 ENVS = [e for e in range(40) if e != 2]

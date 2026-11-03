@@ -36,7 +36,7 @@ import glob
 import numpy as np
 from scipy.special import logsumexp
 
-ROOT = "/home/johns/Desktop/CognitiveGridworld"
+ROOT = os.environ.get("CGW_ROOT", "/home/johns/Desktop/CognitiveGridworld")
 sys.path[:0] = [ROOT, os.path.join(ROOT, "main", "REPLICATION")]
 TD = os.path.join(ROOT, "main", "DATA", "experimental", "training_dynamics")
 AN = os.path.join(TD, "analysis")

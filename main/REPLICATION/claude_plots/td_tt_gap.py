@@ -31,7 +31,7 @@ import os
 import warnings
 import numpy as np
 
-ROOT = "/home/johns/Desktop/CognitiveGridworld"
+ROOT = os.environ.get("CGW_ROOT", "/home/johns/Desktop/CognitiveGridworld")
 TT = os.path.join(ROOT, "main", "DATA", "experimental", "training_dynamics", "through_training")
 N_ENV, PER_ENV = 50, 200
 N_BOOT = 1000

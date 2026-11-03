@@ -1,0 +1,14 @@
+{
+ "name": "lesfix_49995",
+ "command": "main/REPLICATION/claude_plots/td_tt_lesions_fixed.py one 49995",
+ "seconds": 26.3,
+ "cuda": "1",
+ "reads": [
+  "experimental/training_dynamics/analysis/probes.npz",
+  "experimental/training_dynamics/through_training/wormholes/grid_bayes.npz",
+  "experimental/training_dynamics/trained_s20261029/ckpt_ep49995_net.pth"
+ ],
+ "writes": [
+  "experimental/training_dynamics/through_training/lesions/trained/fixed_49995.npz"
+ ]
+}

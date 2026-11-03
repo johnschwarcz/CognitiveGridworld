@@ -17,6 +17,8 @@ Commands (run from the repository root with the repo's python, /home/johns/anaco
   python main/data_tools.py light-restore   # copy main/DATA_light into main/DATA (missing files only)
   python main/data_tools.py upload [glob]   # checkpoints (or files matching glob) -> the archive (needs a write token)
   python main/data_tools.py fetch <glob>    # archive -> main/DATA, e.g. 'experimental/training_dynamics/trained_s*/*'
+  python main/data_tools.py trace <name> <script.py> [args]  # run it, record the DATA files it reads / writes
+  python main/data_tools.py plan <name>     # minimal rebuild for a traced command: what to fetch, what to run first
 For another agent: clone the repo, run light-restore for the figures, fetch the checkpoints a module needs, then follow
 that module's docstring to regenerate its caches."""
 import os
@@ -164,7 +166,111 @@ def fetch(pattern):
     snapshot_download(repo_id=_repo(), repo_type="dataset", local_dir=DATA, allow_patterns=[pattern])
 
 
+DEPS = os.path.join(ROOT, "main", "deps")                      # one JSON per traced command (trace / plan)
+
+
+def trace(name, script, *args):
+    """run `script args` (a python file, as __main__) and record the main/DATA files it reads and writes -> main/deps/
+    <name>.json; the exact inputs of that command, the base of `plan`"""
+    import json
+    import time
+    import runpy
+    reads, writes = set(), set()
+
+    def hook(event, a):
+        if event == "open" and isinstance(a[0], (str, bytes, os.PathLike)):
+            p = os.path.abspath(os.fsdecode(a[0]))
+            if p.startswith(DATA + os.sep):
+                mode = a[1] if len(a) > 1 and isinstance(a[1], str) else "r"
+                (writes if any(c in mode for c in "wax+") else reads).add(os.path.relpath(p, DATA))
+        elif event == "os.rename" and isinstance(a[1], (str, bytes, os.PathLike)):
+            p = os.path.abspath(os.fsdecode(a[1]))
+            if p.startswith(DATA + os.sep):
+                writes.add(os.path.relpath(p, DATA))
+    sys.addaudithook(hook)
+    t0 = time.time()
+    sys.argv = [script, *args]
+    runpy.run_path(script, run_name="__main__")
+    reads -= writes
+    rec = dict(name=name, command=" ".join([os.path.relpath(script, ROOT), *args]), seconds=round(time.time() - t0, 1),
+               cuda=os.environ.get("CUDA_VISIBLE_DEVICES", ""), reads=sorted(reads),
+               writes=sorted(w for w in writes if not w.endswith(".tmp.npz")))
+    os.makedirs(DEPS, exist_ok=True)
+    with open(os.path.join(DEPS, f"{name}.json"), "w") as f:
+        json.dump(rec, f, indent=1)
+    print(f"trace {name}: {len(rec['reads'])} files read, {len(rec['writes'])} written, {rec['seconds']} s")
+
+
+def plan(name):
+    """the minimal way to rebuild what the traced command `name` needs: its inputs that are archive files (fetch), light
+    files (in git: light-restore), caches written by another trace (run that trace's command first, recursively), and
+    caches no trace writes yet (trace their producer, see the module docstrings)"""
+    import json
+    T = {os.path.splitext(f)[0]: json.load(open(os.path.join(DEPS, f))) for f in os.listdir(DEPS) if f.endswith(".json")}
+    light = set(open(os.path.join(LIGHT, "LIGHT_FILES.txt")).read().split()) if os.path.isdir(LIGHT) else set()
+    writer = {w: n for n, t in T.items() for w in t["writes"]}
+    # per-checkpoint families: a traced writer of .../trained_49995.npz also writes .../trained_00025.npz with the
+    # checkpoint number substituted in its command and inputs (digit runs of the written path -> a pattern)
+    pats = [(re.compile("^" + re.sub(r"\\d+|\d+", r"(\\d+)", re.escape(w)) + "$"), re.findall(r"\d+", w), n)
+            for n, t in T.items() for w in t["writes"]]
+    order, fetch, unknown, lt, fam = [], set(), set(), set(), {}
+
+    def classify(r, n):
+        if r.endswith(CKPT) or RUN_DIR.search(r) or r in ARCHIVE_FILES:
+            fetch.add(r)
+        elif r in light:
+            lt.add(r)
+        elif r in writer and writer[r] != n:
+            visit(writer[r])
+        else:
+            for rx, old, src in pats:
+                m = rx.match(r)
+                if m and src != n:
+                    sub = {a: b for a, b in zip(old, m.groups()) if a != b}
+                    fam.setdefault(src, set()).add(tuple(sorted(sub.items())))
+                    for x in T[src]["reads"]:
+                        for a, b in sub.items():
+                            x = x.replace(a, b)
+                        if x.endswith(CKPT) or RUN_DIR.search(x) or x in ARCHIVE_FILES:
+                            fetch.add(x)
+                    if src not in order:
+                        visit(src)
+                    return
+            unknown.add(r)
+
+    def visit(n):
+        if n in order:
+            return
+        for r in T[n]["reads"]:
+            classify(r, n)
+        order.append(n)
+    visit(name)
+    size = sum(os.path.getsize(os.path.join(DATA, f)) for f in fetch if os.path.exists(os.path.join(DATA, f)))
+    print(f"plan for {name}:")
+    print(f"  1. fetch {len(fetch)} archive files ({size / 1e9:.2f} GB):")
+    for f in sorted(fetch)[:12]:
+        print(f"       {f}")
+    if len(fetch) > 12:
+        print(f"       ... ({len(fetch) - 12} more; patterns in main/deps/{name}.json)")
+    print(f"  2. light-restore ({len(lt)} light files used)")
+    print("  3. run, in order:")
+    for n in order:
+        extra = ""
+        if n in fam:
+            subs = sorted(fam[n])
+            vals = [int(v[0][1]) for v in subs if len(v) == 1]
+            extra = (f" -- and for {len(subs)} more checkpoints: replace {subs[0][0][0] if subs[0] else ''} by each of "
+                     f"{', '.join(str(v) for v in vals[:4])} ... {', '.join(str(v) for v in vals[-2:])} (or the "
+                     "module's batch command)")
+        print(f"       {T[n]['command']}   (~{T[n]['seconds']:.0f} s each{', GPU' if T[n]['cuda'] else ''}){extra}")
+    if unknown:
+        print(f"  ! {len(unknown)} cache files read that no trace writes yet (trace their producers):")
+        for f in sorted(unknown)[:10]:
+            print(f"       {f}")
+
+
 if __name__ == "__main__":
     cmd, *rest = sys.argv[1:] or ["manifest"]
     {"manifest": manifest, "light-build": light_build, "light-restore": light_restore,
-     "upload": lambda: upload(*rest), "fetch": lambda: fetch(*rest)}[cmd]()
+     "upload": lambda: upload(*rest), "fetch": lambda: fetch(*rest), "trace": lambda: trace(*rest),
+     "plan": lambda: plan(*rest)}[cmd]()

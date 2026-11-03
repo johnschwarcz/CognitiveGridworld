@@ -406,7 +406,7 @@ import time
 import numpy as np
 from scipy.special import logsumexp
 
-ROOT = "/home/johns/Desktop/CognitiveGridworld"
+ROOT = os.environ.get("CGW_ROOT", "/home/johns/Desktop/CognitiveGridworld")
 HERE = os.path.join(ROOT, "main", "REPLICATION", "claude_plots")
 sys.path[:0] = [ROOT, os.path.join(ROOT, "main", "REPLICATION")]
 os.environ.setdefault("MPLBACKEND", "Agg")
