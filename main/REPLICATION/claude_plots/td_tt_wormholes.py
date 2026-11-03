@@ -429,6 +429,10 @@ def fig_checkpoints():
     """the figures' checkpoints: every second of the 114 and the last (58; the CPU replay of the forward set costs
     ~10-15 s per checkpoint)"""
     c = checkpoints()
+    if not c:
+        raise FileNotFoundError("td_tt_wormholes: no stored checkpoints found (the figures replay the forward set on "
+                                "them); fetch experimental/training_dynamics/<run>_s20261029/ckpt_ep*_net.pth first "
+                                "(REPRODUCE.md: python main/data_tools.py fetch)")
     return sorted(set(c[::2]) | {c[-1]})
 
 

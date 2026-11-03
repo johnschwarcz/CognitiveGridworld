@@ -311,6 +311,9 @@ def stats(lq, perm):
 
 
 def _stack(rows):
+    if not rows:
+        raise FileNotFoundError("td_tt_jumps: no per-checkpoint data found for this run; fetch its caches first "
+                                "(REPRODUCE.md: python main/data_tools.py plan / fetch; this module's docstring names them)")
     return {k: np.stack([r[k] for r in rows]) for k in rows[0]}
 
 

@@ -7,7 +7,7 @@
 | RL_state_num_reps | 0.64 GB | 6 | 0.64 GB | 0.0 MB | compare_RL_state_num.py |
 | cache | 17.39 GB | 10 | 0.00 GB | 0.0 MB | compare_matched_params.py, compare_sanity_reps.py, fig1c_scan_hidden.py, gradflow_analysis.py, plot_ablation.py, plot_fig1c_all.py ... |
 | controller | 0.02 GB | 3 | 0.00 GB | 0.0 MB | plot_controllers.py |
-| experimental | 174.00 GB | 22,552 | 86.31 GB | 96.1 MB | fig1.py, fig1_movie.py, fig1c_joint_entanglement.py, fig1c_jump_dims.py, fig1c_lesion_test.py, fig1c_mechanisms.py ... |
+| experimental | 174.00 GB | 22,552 | 86.31 GB | 111.3 MB | fig1.py, fig1_movie.py, fig1c_joint_entanglement.py, fig1c_jump_dims.py, fig1c_lesion_test.py, fig1c_mechanisms.py ... |
 | experimental/esn_learnability | 0.37 GB | 1,666 | 0.31 GB | 12.9 MB | fig_minimal_set.py, plot_episode_start_curves.py, plot_ff_deep.py, plot_joint_esn_training.py |
 | experimental/esn_learnability/full_esn_entropy | 0.31 GB | 250 | 0.31 GB | 0.0 MB | plot_ff_deep.py, plot_joint_esn_training.py |
 | experimental/esn_learnability/readout_only | 0.01 GB | 15 | 0.00 GB | 11.2 MB | plot_episode_start_curves.py |
@@ -31,7 +31,7 @@
 | experimental/gradflow_obs | 1.74 GB | 2 | 0.00 GB | 0.0 MB | gradflow_analysis.py |
 | experimental/interaction_bounds | 0.20 GB | 793 | 0.17 GB | 0.0 MB | plot_episode_start_curves.py, plot_ff_deep.py, plot_joint_esn_training.py |
 | experimental/interaction_bounds/analyses | 0.20 GB | 778 | 0.17 GB | 0.0 MB | plot_episode_start_curves.py, plot_ff_deep.py, plot_joint_esn_training.py |
-| experimental/training_dynamics | 113.65 GB | 13,881 | 55.84 GB | 53.0 MB | fig_entanglement_driver.py, fig_td_summary.py, plot_ff_deep.py, plot_joint_esn_training.py, plot_matched_params_new.py, plot_training_dynamics.py ... |
+| experimental/training_dynamics | 113.65 GB | 13,881 | 55.84 GB | 68.2 MB | fig_entanglement_driver.py, fig_td_summary.py, plot_ff_deep.py, plot_joint_esn_training.py, plot_matched_params_new.py, plot_training_dynamics.py ... |
 | experimental/training_dynamics/analysis | 42.77 GB | 1,335 | 0.33 GB | 3.7 MB | fig_entanglement_driver.py, plot_training_dynamics.py, td_analysis.py, td_entanglement_driver.py, td_entanglement_explained.py, td_entanglement_factors.py ... |
 | experimental/training_dynamics/echo_s20261029 | 4.53 GB | 358 | 4.53 GB | 0.0 MB | td_questions_data.py |
 | experimental/training_dynamics/joint_echo_jl_s20261029 | 5.92 GB | 454 | 5.92 GB | 0.0 MB | plot_ff_deep.py, plot_joint_esn_training.py, td_questions_data.py |
@@ -39,7 +39,7 @@
 | experimental/training_dynamics/joint_trained_s20261029 | 6.60 GB | 454 | 6.60 GB | 0.0 MB | td_questions_data.py |
 | experimental/training_dynamics/mlp55_s20261029 | 9.07 GB | 358 | 9.07 GB | 0.0 MB | td_questions_data.py |
 | experimental/training_dynamics/summary_data | 0.85 GB | 17 | 0.00 GB | 0.3 MB | fig_td_summary.py, td_grids_fwd.py, td_summary_data.py, td_tt_latent.py, td_tt_splitting.py, td_tt_wormholes.py |
-| experimental/training_dynamics/through_training | 14.41 GB | 6,554 | 0.00 GB | 48.9 MB | td_tt_chaos_ent.py, td_tt_credit_lags.py, td_tt_entangled_learning.py, td_tt_flips.py, td_tt_gap.py, td_tt_intervene.py ... |
+| experimental/training_dynamics/through_training | 14.41 GB | 6,554 | 0.00 GB | 64.1 MB | td_tt_chaos_ent.py, td_tt_credit_lags.py, td_tt_entangled_learning.py, td_tt_flips.py, td_tt_gap.py, td_tt_intervene.py ... |
 | experimental/training_dynamics/trained_N100_s20261029 | 0.60 GB | 358 | 0.60 GB | 0.0 MB | td_questions_data.py |
 | experimental/training_dynamics/trained_N100_s20261030 | 0.60 GB | 358 | 0.60 GB | 0.0 MB | td_questions.py, td_questions_data.py |
 | experimental/training_dynamics/trained_N100_s20261031 | 0.60 GB | 358 | 0.60 GB | 0.0 MB | td_questions.py, td_questions_data.py |

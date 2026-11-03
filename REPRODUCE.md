@@ -8,7 +8,7 @@ whole: rebuild only what one analysis needs.
 | tier | size | where | how to get it |
 |---|---|---|---|
 | code, figures (`main/REPLICATION/figure_bin`, PNG/SVG) | — | git | clone |
-| light: figure-level summary caches | ~96 MB | git, `main/DATA_light/` | `python main/data_tools.py light-restore` |
+| light: figure-level summary caches | ~110 MB | git, `main/DATA_light/` | `python main/data_tools.py light-restore` (enough for some figures only; most through-training figures also need `analysis/probes.npz` and their per-checkpoint caches from the archive: `plan` / `fetch`) |
 | archive: weights, training-run logs, the probe set, and the costly caches (selection below) | 81 GB | private Hugging Face dataset `johnschwarcz/cognitive-gridworld-data` | `python main/data_tools.py fetch '<pattern>'` (needs a read token: `export HF_TOKEN=...`, ask John) |
 | caches: everything else in `main/DATA` | ~105 GB | not stored | regenerate (below) |
 

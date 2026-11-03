@@ -16021,14 +16021,14 @@ experimental/training_dynamics/through_training/jumps/jumps_joint_echo.npz	27947
 experimental/training_dynamics/through_training/jumps/jumps_joint_trained.npz	27947780	cache
 experimental/training_dynamics/through_training/jumps/jumps_references.npz	502954	light
 experimental/training_dynamics/through_training/jumps/jumps_trained.npz	27947780	cache
-experimental/training_dynamics/through_training/jumps/synthesis.npz	7609106	cache
+experimental/training_dynamics/through_training/jumps/synthesis.npz	7609106	light
 experimental/training_dynamics/through_training/jumps/timeline.npz	27808	light
 experimental/training_dynamics/through_training/latent/modal.npz	3477164	light
 experimental/training_dynamics/through_training/latent/probes_echo.npz	37668500	cache
 experimental/training_dynamics/through_training/latent/probes_trained.npz	37668500	cache
 experimental/training_dynamics/through_training/latent/refs.npz	1076824	light
 experimental/training_dynamics/through_training/latent/same_as_naive.npz	100206	light
-experimental/training_dynamics/through_training/latent/synthesis.npz	7626674	cache
+experimental/training_dynamics/through_training/latent/synthesis.npz	7626674	light
 experimental/training_dynamics/through_training/latent/timeline.npz	49284	light
 experimental/training_dynamics/through_training/lesions/checks.json	4197	light
 experimental/training_dynamics/through_training/lesions/checks_self.json	233	light

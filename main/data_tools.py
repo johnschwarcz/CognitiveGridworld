@@ -35,7 +35,9 @@ CODE = [os.path.join(ROOT, "main", "REPLICATION"), os.path.join(ROOT, "main", "R
 DATA_REPO = os.environ.get("CGW_DATA_REPO", "johnschwarcz/cognitive-gridworld-data")               # e.g. "<hf-user>/cognitive-gridworld-data" (dataset)
 LIGHT_CAP = 5_000_000                                          # bytes per file for the named summary caches
 LIGHT_EXTRA = ("experimental/training_dynamics/through_training/chaos/pairs_ratio.npz",
-               "experimental/training_dynamics/through_training/flips/ratio/*.npz")
+               "experimental/training_dynamics/through_training/flips/ratio/*.npz",
+               "experimental/training_dynamics/through_training/jumps/synthesis.npz",
+               "experimental/training_dynamics/through_training/latent/synthesis.npz")
 CKPT = (".pth", ".pt")
 
 
@@ -164,6 +166,10 @@ ARCH_CACHES = ("experimental/training_dynamics/through_training/", "experimental
                "experimental/training_dynamics/analysis/joint_echo/", "experimental/training_dynamics/analysis/joint_echo_jl/",
                "experimental/training_dynamics/analysis/mlp55/", "experimental/ff_deep/")
 ARCH_SKIP = ("experimental/training_dynamics/through_training/chaos/pairs.npz",)   # superseded (old M4 cache)
+DOC_EXT = (".tex", ".md", ".pdf", ".txt", ".bib")              # notes, theory, logs: always archived (another agent 11-03)
+# upload order (another agent 11-03): the most-used harvests first
+PRIORITY = ("experimental/training_dynamics/analysis/trained/", "experimental/training_dynamics/analysis/echo/",
+            "experimental/training_dynamics/through_training/", "experimental/training_dynamics/analysis/mlp55/")
 STAGE = os.path.join(DATA, "_hf_stage")                       # symlink tree of the selection (upload_large_folder)
 
 
@@ -182,10 +188,11 @@ def archive_selection():
     out = []
     for r in rows:
         p = r["path"]
-        cache = r["tier"] != "archive" and any(p.startswith(d) for d in ARCH_CACHES)
+        cache = r["tier"] != "archive" and (any(p.startswith(d) for d in ARCH_CACHES) or p.endswith(DOC_EXT))
         if r["tier"] != "archive" and not cache and not re.search(r"_s\d{8}\.log$", p):
             continue
-        if any(p.startswith(d) for d in ARCH_DROP) or p in ARCH_SKIP or p.endswith(".tmp.npz"):
+        if any(p.startswith(d) for d in ARCH_DROP) or p in ARCH_SKIP or p.endswith((".tmp.npz", ".pyc")) or \
+                "__pycache__/" in p:
             continue
         m = re.match(r"(.*_s\d{8})/(ckpt_ep|adam_ep)(\d+)", p)
         if m:
@@ -215,10 +222,35 @@ def _repo():
     return DATA_REPO
 
 
-def upload(pattern=None):
-    """the archive selection (default) or the archive-tier files matching pattern -> the archive (a private Hugging
-    Face dataset repo) at their main/DATA paths, in commits of <= ~3 GB / 300 files with retries; files already in the
-    repo are skipped, so a rerun resumes"""
+def _commit(api, ops, msg, log=print):
+    """one commit, retried until it lands: on HTTP 429 (commit-rate limit, ~128 commits / hour on free accounts) wait
+    as long as the server asks (Retry-After, else 10 min); other errors back off; gives up only after 3 hours"""
+    import time
+    from huggingface_hub.errors import HfHubHTTPError
+    t0, k = time.time(), 0
+    while True:
+        try:
+            api.create_commit(repo_id=_repo(), repo_type="dataset", operations=ops, commit_message=msg)
+            return True
+        except HfHubHTTPError as e:                                                     # noqa: PERF203
+            code = getattr(getattr(e, "response", None), "status_code", None)
+            wait = float(getattr(e.response, "headers", {}).get("Retry-After", 600)) if code == 429 else min(60 * 2 ** k, 900)
+            k += 1
+            log(f"  {msg}: HTTP {code}, retry in {wait:.0f} s ({str(e)[:120]})")
+        except Exception as e:                                                          # noqa: BLE001
+            wait = min(60 * 2 ** k, 900)
+            k += 1
+            log(f"  {msg}: {type(e).__name__}, retry in {wait:.0f} s ({str(e)[:120]})")
+        if time.time() - t0 > 3 * 3600:
+            log(f"  {msg}: GAVE UP after 3 h")
+            return False
+        time.sleep(wait)
+
+
+def upload(pattern=None, max_gb=4., max_files=2000):
+    """the archive selection (or its files matching pattern) -> the archive at their main/DATA paths, PRIORITY folders
+    first, in commits of <= max_gb / max_files (few commits: the commit-rate limit); files already in the repo are
+    skipped, so a rerun resumes; a batch that cannot land is reported at the end (exit code 1), never skipped silently"""
     import time
     import fnmatch
     from huggingface_hub import HfApi, CommitOperationAdd
@@ -228,10 +260,11 @@ def upload(pattern=None):
     sel = archive_selection()
     if pattern:
         sel = [(p, b) for p, b in sel if fnmatch.fnmatch(p, pattern)]
-    todo = [(p, b) for p, b in sel if p not in have]
+    rank = lambda p: next((i for i, d in enumerate(PRIORITY) if p.startswith(d)), len(PRIORITY))   # noqa: E731
+    todo = sorted(((p, b) for p, b in sel if p not in have), key=lambda pb: (rank(pb[0]), pb[0]))
     batches, cur, size = [], [], 0
-    for p, b in sorted(todo):
-        if cur and (size + b > 3e9 or len(cur) >= 300 or os.path.dirname(p) != os.path.dirname(cur[-1][0])):
+    for p, b in todo:
+        if cur and (size + b > max_gb * 1e9 or len(cur) >= max_files or rank(p) != rank(cur[-1][0])):
             batches.append(cur)
             cur, size = [], 0
         cur.append((p, b))
@@ -241,28 +274,37 @@ def upload(pattern=None):
     tot = sum(b for _, b in todo)
     print(f"{len(sel):,} selected, {len(sel) - len(todo):,} already in {_repo()}; uploading {len(todo):,} files "
           f"({tot / 1e9:.1f} GB) in {len(batches)} commits", flush=True)
-    t0, done = time.time(), 0
+    t0, done, failed = time.time(), 0, []
     for i, batch in enumerate(batches):
         gb = sum(b for _, b in batch) / 1e9
-        for attempt in range(6):
-            try:
-                api.create_commit(repo_id=_repo(), repo_type="dataset", commit_message=f"archive: {os.path.dirname(batch[0][0])} "
-                                  f"({len(batch)} files, {gb:.2f} GB)",
-                                  operations=[CommitOperationAdd(path_in_repo=p, path_or_fileobj=os.path.join(DATA, p))
-                                              for p, _ in batch])
-                break
-            except Exception as e:                                                      # noqa: BLE001
-                print(f"  batch {i + 1} attempt {attempt + 1} failed: {type(e).__name__}: {str(e)[:200]}", flush=True)
-                time.sleep(30 * (attempt + 1))
-        else:
-            print(f"  batch {i + 1} gave up; rerun upload to resume", flush=True)
+        msg = f"archive {i + 1}/{len(batches)}: {os.path.dirname(batch[0][0])} ... ({len(batch)} files, {gb:.2f} GB)"
+        ops = [CommitOperationAdd(path_in_repo=p, path_or_fileobj=os.path.join(DATA, p)) for p, _ in batch]
+        if not _commit(api, ops, msg, log=lambda m: print(m, flush=True)):
+            failed.append(msg)
             continue
         done += gb * 1e9
         el = time.time() - t0
-        print(f"{time.strftime('%H:%M:%S')} {i + 1}/{len(batches)} {os.path.dirname(batch[0][0])}: {gb:.2f} GB; "
-              f"total {done / 1e9:.1f}/{tot / 1e9:.1f} GB, {done / 1e6 / max(el, 1):.0f} MB/s, ETA "
-              f"{(tot - done) / max(done / max(el, 1), 1) / 60:.0f} min", flush=True)
-    print("done", flush=True)
+        print(f"{time.strftime('%H:%M:%S')} {msg}; total {done / 1e9:.1f}/{tot / 1e9:.1f} GB, "
+              f"{done / 1e6 / max(el, 1):.0f} MB/s", flush=True)
+    print(f"done; {len(failed)} batches failed" + "".join(f"\n  FAILED {m}" for m in failed), flush=True)
+    if failed:
+        sys.exit(1)
+
+
+def upload_extra(local_root, repo_prefix, max_mb=5., exts=None):
+    """files outside main/DATA (e.g. another session's notes) -> repo_prefix/<their path under local_root>: every file
+    <= max_mb, optionally only the extensions exts; one commit"""
+    from huggingface_hub import HfApi, CommitOperationAdd
+    ops = []
+    for d, _, fs in os.walk(local_root):
+        for f in fs:
+            src = os.path.join(d, f)
+            if os.path.getsize(src) <= max_mb * 1e6 and (exts is None or f.endswith(tuple(exts))) and \
+                    "__pycache__" not in src:
+                ops.append(CommitOperationAdd(path_in_repo=f"{repo_prefix}/{os.path.relpath(src, local_root)}",
+                                              path_or_fileobj=src))
+    print(f"{len(ops)} files -> {repo_prefix}/", flush=True)
+    return _commit(HfApi(), ops, f"{repo_prefix}: {len(ops)} files", log=lambda m: print(m, flush=True))
 
 
 def fetch(pattern):

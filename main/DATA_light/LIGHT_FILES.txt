@@ -250,10 +250,12 @@ experimental/training_dynamics/through_training/jumps/jumps_boot_variants.npz
 experimental/training_dynamics/through_training/jumps/jumps_checks.npz
 experimental/training_dynamics/through_training/jumps/jumps_extra_references.npz
 experimental/training_dynamics/through_training/jumps/jumps_references.npz
+experimental/training_dynamics/through_training/jumps/synthesis.npz
 experimental/training_dynamics/through_training/jumps/timeline.npz
 experimental/training_dynamics/through_training/latent/modal.npz
 experimental/training_dynamics/through_training/latent/refs.npz
 experimental/training_dynamics/through_training/latent/same_as_naive.npz
+experimental/training_dynamics/through_training/latent/synthesis.npz
 experimental/training_dynamics/through_training/latent/timeline.npz
 experimental/training_dynamics/through_training/lesions/checks.json
 experimental/training_dynamics/through_training/lesions/checks_self.json
