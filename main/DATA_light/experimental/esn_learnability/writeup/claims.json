@@ -1,0 +1,655 @@
+{
+ "status_words": "proved / measured / computed / cited / open / refuted (and running, for runs in progress)",
+ "paths": "relative to /tmp/claude-1002/-home-johns-Desktop-CognitiveGridworld/d2a8859d-af2d-4881-a4e5-84ac9f884f2b/scratchpad/learn4 unless absolute",
+ "n_claims": 72,
+ "claims": [
+  {
+   "id": "P1.1",
+   "part": "P1",
+   "claim": "Goal-loss training of a joint read-out excludes 50-73 of 100 cells within 10-100 updates, with any start state and without a reservoir.",
+   "status": "measured",
+   "evidence_file": "run_joint/runs/{A1_r3_own_adam,C4_zero_own_adam,B2f_epr_fresh_own_adam}/metrics.json; run_marginal/results_runs.json",
+   "evidence": "read-out: 73 / 70 / 70 excluded at update 100 (R3's start / start 0 / per-episode start); no-reservoir j2: 52 at update 10 at chance accuracy.",
+   "changed_from_draft": "excluded-cell trajectories trimmed to one early and one final value"
+  },
+  {
+   "id": "P1.2",
+   "part": "P1",
+   "claim": "The goal loss sees the joint belief only through row/column sums; fixed couplings have zero slope (every episode) and zero curvature (on average over episodes) at uniform within-row conditionals.",
+   "status": "proved",
+   "evidence_file": "/home/johns/Desktop/CognitiveGridworld/main/DATA/experimental/interaction_bounds/learning_theory/esn_theory_compact.tex (Prop. blind); verify_theory/verdicts.json #0",
+   "evidence": "re-derived by verify_theory.",
+   "changed_from_draft": ""
+  },
+  {
+   "id": "P1.3",
+   "part": "P1",
+   "claim": "A cell's goal-loss gradient is gated by its within-row probability: dgoalCE/dz(j,k) = q(k|j)[q_g(j) - p*_g(j)]; it equals the joint-loss gradient with the network's own conditional in place of Bayes's (Fisher's identity).",
+   "status": "proved; computed to 2e-18",
+   "evidence_file": "literature/fisher_identity_check.json; verify_theory/verdicts.json #1",
+   "evidence": "gate is q(k|j).",
+   "changed_from_draft": "wording: 'gated by its own probability' -> 'gated by its within-row probability q(k|j)'"
+  },
+  {
+   "id": "P1.4",
+   "part": "P1",
+   "claim": "R3's level is set by its alive set: 0.478 = 0.3025 x 0.754 + 0.6975 x 0.359.",
+   "status": "measured",
+   "evidence_file": "joint_harness/validation.json; verify_theory/notes.md section 2",
+   "evidence": "arithmetic checked (0.4785); first-pass pool evaluation.",
+   "changed_from_draft": ""
+  },
+  {
+   "id": "P1.5",
+   "part": "P1",
+   "claim": "Read-out only, an entropy bonus on from the first update prevents the trap: beta = 0.1 leaves no cell excluded; beta = 0.03 all but 3-4 cells, which are excluded by update 20 and never return (truth dead 5%); beta = 0.01 mostly (23 excluded); beta = 0.003 hardly.",
+   "status": "measured (read-out only, one seed per beta; beta 0.01-0.1 still rising on loss)",
+   "evidence_file": "run_joint/runs/A3_r3_own_ent*/metrics.json; synthesis_final/results.json final.readout.exclusion_timing_bonus, final.readout.convergence_last20",
+   "evidence": "acc 0.454/0.472/0.545/0.585/0.603; excluded 69/62/23/3/0; frozen 63/51/3/0/0; truth dead 69.9/63.4/22/5.2/0.4%; beta 0.03: 4 excluded at update 20, 3 at 20k; last-20% changes +0.009/+0.003/+0.004 acc and -4.1/-4.3/-3.7% loss.",
+   "changed_from_draft": "'beta >= 0.03 prevents it fully' corrected; labels 'accuracy flat, loss still falling' -> 'still rising (lower bound)'"
+  },
+  {
+   "id": "P1.6",
+   "part": "P1",
+   "claim": "No accuracy cost of the bonus up to beta 0.1 (the cost is calibration); accuracy collapses above beta ~0.11-0.15.",
+   "status": "measured (0.3, 1.0 collapse) + computed (break-even)",
+   "evidence_file": "run_joint/runs/A3x_*/metrics.json; verify_theory/v4_readouts.json",
+   "evidence": "late-step joint entropy 1.87 at beta 0.1 vs Bayes 1.01; beta 0.3 / 1.0: 0.273 / 0.230; break-even 0.111-0.149.",
+   "changed_from_draft": ""
+  },
+  {
+   "id": "P1.7",
+   "part": "P1",
+   "claim": "The joint-loss read-out on the same states reaches about 0.61 (two runs); beta = 0.1 ends about 0.01 below it at unequal budgets and numerics.",
+   "status": "measured (stored runs)",
+   "evidence_file": "/home/johns/Desktop/CognitiveGridworld/main/DATA/experimental/esn_learnability/readout_only/earlier_joint_vs_own_curves.json; run_joint/results_extra.json",
+   "evidence": "readout_basin E (fp32, 20k): 0.610 at 16k, 0.609 at 20k, accuracy flat, loss -3%; first-pass fp16: 0.594 at 10k, 0.611 at 16k, still rising. 0.677 is the full ESN continued with the joint loss.",
+   "changed_from_draft": "'within ~0.01 (0.603 vs 0.611 at 16k)' -> reference reported as ~0.61 from two runs"
+  },
+  {
+   "id": "P1.8",
+   "part": "P1",
+   "claim": "Annealing the bonus 0.1 -> 0 over 10k does not statically re-trap within 10k plain updates, but functional truth-dead drifts up.",
+   "status": "measured; longer horizon open",
+   "evidence_file": "run_joint/runs/E5_r3_own_ent0.1_anneal10k/metrics.json; verify_joint/verdicts.json",
+   "evidence": "acc 0.574 (still rising on loss); 0 excluded, 0 frozen; truth dead 0.4% (2k) -> 2.0% (10k) -> 3.5% (20k).",
+   "changed_from_draft": ""
+  },
+  {
+   "id": "P1.9",
+   "part": "P1",
+   "claim": "In fp32 an entropy bonus releases R3's frozen rows on Adam's escape-time schedule.",
+   "status": "measured (3,000 updates, batch 1,000, 8k-episode pool; not converged) + computed",
+   "evidence_file": "theory_joint/c2_out; verify_theory/v3_escape_time.json; critic/results.json c4",
+   "evidence": "beta 0.1: 70/70 released by 2.2k; beta 0.03: 57/70 by 3k; formula vs measured median ~600 / 1,900 updates.",
+   "changed_from_draft": ""
+  },
+  {
+   "id": "P1.9b",
+   "part": "P1",
+   "claim": "Released rows do not recover accuracy (\"release is not rescue\").",
+   "status": "open (not converged)",
+   "evidence_file": "critic/results.json c4 (theory_joint/c2_out)",
+   "evidence": "beta 0.1: 0.469 -> 0.344 (1.2k) -> 0.390 (2.7k) -> 0.384 (3k), excluded 70 -> 30; beta 0.03: 0.439 at 3k, excluded 46 and falling; two-stage (0.1 for 1k then 0): 0.434 at 3k, excluded 28 -> 16, still falling.",
+   "changed_from_draft": "'release is not rescue' (stated as a conclusion) -> open; two-stage arm reported"
+  },
+  {
+   "id": "P1.10",
+   "part": "P1",
+   "claim": "In fp16 (the networks' training numerics) a small bonus cannot release frozen rows.",
+   "status": "computed",
+   "evidence_file": "theory_joint/notes.md section 2d; verify_theory/notes.md",
+   "evidence": "per-sample gradient survives only if beta > 0.24 (scale 2^16) or 0.06 (2^18).",
+   "changed_from_draft": ""
+  },
+  {
+   "id": "P1.11",
+   "part": "P1",
+   "claim": "An entropy bonus rescues the full joint ESN (read-in trained, fp16).",
+   "status": "open (running: the main session's paired runs, learn5/fullesn_ent)",
+   "evidence_file": "learn5/fullesn_ent/logs/*.log; synthesis_final/results.json final.learn5.fullesn_entropy",
+   "evidence": "paired, seed 20261021, native trainable start, micro 4,000: at 0.5k / 1k / 1.5k / 2k updates beta 0: 0.192 / 0.239 / 0.264 / 0.290 with 36-37 alive cells; beta 0.03: 0.228 / 0.277 / 0.315 / 0.334 with 100 alive; no frozen rows in either arm yet; R3 stored 0.198 / 0.244 / 0.266 / 0.289; accuracy verdict needs >= 6-10k updates.",
+   "changed_from_draft": "'not run' -> running (launched 15:51 by the main session, not by this workflow)"
+  },
+  {
+   "id": "P1.12",
+   "part": "P1",
+   "claim": "A per-episode random start (sigma = 1) removes the shared step-1 channel, the front-loading and the freeze.",
+   "status": "measured (sigma = 1 only)",
+   "evidence_file": "run_joint/runs/B2f_epr_fresh_own_adam/metrics.json; run_fullesn/offline/summary_tables.txt; verify_fullesn/verdicts.json",
+   "evidence": "read-out: E_fix(1) <= 11 vs 3,207, gaps <= 1 nat, 0 frozen; full ESN: share of u_1 0.005-0.011, ||M_1||_1 12.5-19.3, 0 frozen, gaps 0.17-0.34.",
+   "changed_from_draft": "qualified to sigma = 1"
+  },
+  {
+   "id": "P1.13",
+   "part": "P1",
+   "claim": "A per-episode random start rescues accuracy.",
+   "status": "refuted at sigma = 1, read-out only (one seed); open in the full ESN; untested at smaller sigma",
+   "evidence_file": "run_joint/runs/B2f_epr_fresh_own_adam/metrics.json; run_fullesn/offline/summary_tables.txt; verify_joint/results.json (pool_alignment)",
+   "evidence": "B2f 0.338 converged vs control 0.454 and start 0 0.525; full ESN 0.337 at 4.5k vs R3 0.366 and R4 0.394 (paired), still rising; start noise / spread of S_t 1.41 / 0.40 at t = 1 / 30; memoryless sigma 0.25: ||s||_1 197 vs ||hbar||_1 119.",
+   "changed_from_draft": "'refuted (read-out only)' / 'not a rescue anywhere' -> qualified to sigma = 1, one seed; dissociation from noise untested"
+  },
+  {
+   "id": "P1.14",
+   "part": "P1",
+   "claim": "The per-episode start's cost is paid in learning, not as a test-time random prior.",
+   "status": "measured",
+   "evidence_file": "run_fullesn/offline/start_noise.json; theory_joint/c6_noise_swap.json; run_joint/eval_cross.json",
+   "evidence": "test-time swap to start 0 changes full-ESN accuracy by <= 0.01; read-out trained with fresh starts scores 0.35-0.37 on clean start-0 states.",
+   "changed_from_draft": ""
+  },
+  {
+   "id": "P1.15",
+   "part": "P1",
+   "claim": "Mechanism of the per-episode start's learning cost: lower gradient SNR and/or errors-in-variables attenuation of the shared read-out.",
+   "status": "open (SNR -9 to -27% overall, -28 to -33% on excluded rows: measured contributor; attenuation: candidate)",
+   "evidence_file": "theory_joint/c7_snr.json; run_marginal/analysis_nets.json; run_fullesn/offline/summary_tables.txt",
+   "evidence": "read-outs trained without noise lose 0.15-0.20 under random starts (R3 0.488 -> 0.304; R1 0.435 -> 0.281); no-reservoir read-out norm 55 (per-episode) vs 103 (no start) vs 66 (fixed start).",
+   "changed_from_draft": "errors-in-variables candidate added"
+  },
+  {
+   "id": "P1.16",
+   "part": "P1",
+   "claim": "Reusing one random start per pool episode (B2) is an invalid test: the read-out memorises episodes.",
+   "status": "measured",
+   "evidence_file": "theory_joint/c5_memorization.json; run_joint/train_vs_heldout.json",
+   "evidence": "train 0.592 vs held-out 0.288 at 20k.",
+   "changed_from_draft": ""
+  },
+  {
+   "id": "P1.17",
+   "part": "P1",
+   "claim": "Start 0 shrinks the shared step-1 channel about 5x but keeps about half of u_1 shared, and escapes the trap partly and slowly.",
+   "status": "measured (read-out only, still rising; seed replicate) + cited (stored full-ESN runs)",
+   "evidence_file": "run_joint/runs/C4_zero_own_adam/metrics.json; verify_joint/logs/Cseed.log; critic/results.json c5; /home/johns/Desktop/CognitiveGridworld/main/DATA/experimental/interaction_bounds/analyses/joint_esn_extension/summary.txt",
+   "evidence": "||M_1||_1 141 -> 23-30; shared share of u_1 0.46 (pool), 0.50-0.56 (R4); read-out 0.525 at 20k (+0.018 last 20%), 50 excluded, truth dead 47%; R4 0.615 at 50k, still creeping; R3 continued with start 0 0.627 vs unchanged 0.489 at 54k; joint-loss continuation 0.678.",
+   "changed_from_draft": "'no shared transient', 'removes the shared component without adding noise' and 'clean version' withdrawn"
+  },
+  {
+   "id": "P1.17b",
+   "part": "P1",
+   "claim": "R4's remaining gap to the joint-loss continuation (0.615 vs 0.678) is the cost of the goal loss's self-target and gate without a large shared start.",
+   "status": "open (interpretation; no run separates the two)",
+   "evidence_file": "/home/johns/Desktop/CognitiveGridworld/main/DATA/experimental/interaction_bounds/analyses/joint_esn_extension/summary.txt",
+   "evidence": "-",
+   "changed_from_draft": "added"
+  },
+  {
+   "id": "P1.18",
+   "part": "P1",
+   "claim": "The reservoir relaxation does not amplify biases over training; it supplies a large shared step-1 channel.",
+   "status": "measured",
+   "evidence_file": "joint_harness/results_harvest.json; theory_joint/notes.md sections 3-4",
+   "evidence": "share of u_s identical across episodes 0.95/0.80/0.61/0.50 at s = 1/2/3/5; ||M_1||_1 141 vs 23-30 (start 0) vs 13-19 (per-episode).",
+   "changed_from_draft": ""
+  },
+  {
+   "id": "P1.19",
+   "part": "P1",
+   "claim": "Adam moves each step-1 fixed logit by at most lr x ||M_1||_1 per update (0.14 nats with R3's start); measured deepening is far below this bound.",
+   "status": "proved (bound) + computed (from measured records)",
+   "evidence_file": "literature/adam_stepbound_check.json; critic/results.json c2",
+   "evidence": "median step-1 gap of excluded cells 1.56 (u100) -> 5.7 / 8.3 / 10.9 / 13.7 nats at 2k / 5k / 10k / 20k: 6.1e-4 nats/update on average (2.2e-3 over 100-2k), 65-230x below the bound.",
+   "changed_from_draft": "'measured: deepening 5-20x faster ... (c4b)' replaced; c4b was a computed one-step sign change at batch 500"
+  },
+  {
+   "id": "P1.19b",
+   "part": "P1",
+   "claim": "Step-1 deepening of excluded cells scales with ||M_1||_1.",
+   "status": "refuted (saturates once the channel is large)",
+   "evidence_file": "critic/results.json c1; synthesis/rt/runs/FR{0,1}_own_adam/metrics.json; run_joint/runs/A1_r3_own_adam/metrics.json",
+   "evidence": "untrained shared starts with 28% / 36% larger channels: gaps 1-4% deeper at 2k/5k/10k/20k, E_fix(1) 2-9% larger (proportional: ~+30% and +65-86%); start 0 <= 2.2 nats; per-episode <= 1 nat.",
+   "changed_from_draft": "was listed as measured and as one of three tests of front-loading"
+  },
+  {
+   "id": "P1.20",
+   "part": "P1",
+   "claim": "Under Adam, a start component shared by every episode makes the exclusion permanent (front-loading into step 1 plus the eps / fp16 freeze).",
+   "status": "measured (read-out only: R3's start vs start 0, two untrained shared starts; no-reservoir fixed start feature as an anchor, two seeds)",
+   "evidence_file": "run_joint A1 vs C4; synthesis/rt FR0/FR1; run_marginal e2e_d1_x j2s; verify_marginal/compare_seed.json, start_decomp.json",
+   "evidence": "R3's start: 0.454 converged, 63 frozen, gap 13.7 vs start 0: 0.525 rising, 4 frozen, gap 1.25; no-reservoir fixed start: truth dead 0.54-0.57 to 16-20k, but the start term carries only 3.2-3.6k of 100-122k coupling energy (it anchors a per-step coupling); alive cells creep 37 -> 46; permanence beyond 16-20k open.",
+   "changed_from_draft": "restricted to Adam; test 3 re-described as an anchor (3% of the coupling); 'deepening scales with ||M_1||_1' removed as a test"
+  },
+  {
+   "id": "P1.21",
+   "part": "P1",
+   "claim": "Front-loading plus eps is the only route to a persistent exclusion.",
+   "status": "refuted",
+   "evidence_file": "run_joint/runs/E6_r3_gce_sgd_lr3e-2/metrics.json",
+   "evidence": "plain SGD keeps 73 cells excluded from 3k to 20k at step-1 gap 2.4 nats, no eps; t = 30 gaps 10.6 -> 24 nats. Whether SGD needs the shared start is untested.",
+   "changed_from_draft": ""
+  },
+  {
+   "id": "P1.22",
+   "part": "P1",
+   "claim": "Rows freeze at a 7.7-nat step-1 gap.",
+   "status": "refuted as a general statement (an fp16 fact)",
+   "evidence_file": "run_joint/runs/A1_r3_own_adam/metrics.json",
+   "evidence": "TF32: rows stop moving at 5.6-8 nats from 2-5k; pass sqrt(v_hat) < eps at ~12 nats from ~12k.",
+   "changed_from_draft": ""
+  },
+  {
+   "id": "P1.23",
+   "part": "P1",
+   "claim": "The joint loss rescues R3 in full training even with its trained shared start.",
+   "status": "cited (stored run)",
+   "evidence_file": "/home/johns/Desktop/CognitiveGridworld/main/DATA/experimental/interaction_bounds/analyses/joint_esn_extension/summary.txt",
+   "evidence": "joint_trained 0.678 at 54k vs orig_trained 0.489.",
+   "changed_from_draft": ""
+  },
+  {
+   "id": "P1.24",
+   "part": "P1",
+   "claim": "The start channel comes from initialisation; the excluding table is learned by goal-loss training (Adam and plain SGD); what Adam adds is the eps freeze.",
+   "status": "measured",
+   "evidence_file": "first pass (context); theory_joint/notes.md section 5; run_joint E6; verify_theory #17",
+   "evidence": "R3's start = its random draw shrunk 11-19%; the table forms from W = 0 and from default init; cosine -0.14 with the first write; SGD writes it too.",
+   "changed_from_draft": "'what Adam adds is the depth' -> 'the freeze' (deepening is not proportional to the channel)"
+  },
+  {
+   "id": "P1.25",
+   "part": "P1",
+   "claim": "A random, untrained start shared by all episodes traps exactly like R3's trained start (read-out only, R3's read-in).",
+   "status": "measured (two draws, one seed each)",
+   "evidence_file": "synthesis/rt/runs/FR0_own_adam/metrics.json; synthesis/rt/runs/FR1_own_adam/metrics.json; synthesis/rt_check.json",
+   "evidence": "acc 0.459 / 0.456 (control 0.454), excluded 69 / 70 (69), frozen 64 / 68 (63), step-1 gap 14.2 / 14.0 (13.7), truth dead 70.0 / 71.0% (69.9%), converged.",
+   "changed_from_draft": ""
+  },
+  {
+   "id": "P1.26",
+   "part": "P1",
+   "claim": "The entropy bonus still prevents the trap when the shared channel is 28% larger than R3's.",
+   "status": "measured (one run; still rising on loss)",
+   "evidence_file": "synthesis/rt/runs/FR0_own_ent0.03/metrics.json; synthesis/rt_check.json",
+   "evidence": "beta 0.03: acc 0.575, 4 excluded (from update 20 on), 0 frozen, truth dead 5.3%; last 20%: +0.003 acc, -4.2% loss.",
+   "changed_from_draft": ""
+  },
+  {
+   "id": "P1.27",
+   "part": "P1",
+   "claim": "An untrained fixed start feature traps the no-reservoir joint net persistently to 16-20k updates.",
+   "status": "measured (two seeds); permanence beyond open",
+   "evidence_file": "run_marginal/results.json (e2e_d1_x j2s); verify_marginal/compare_seed.json",
+   "evidence": "truth dead 0.538 (s0, 16k), 0.567 (s1, 20k); accuracy split 0.740-0.765 alive vs 0.40 excluded.",
+   "changed_from_draft": ""
+  },
+  {
+   "id": "P1.28",
+   "part": "P1",
+   "claim": "Adam's sign step writes the prior that traps the joint ESN.",
+   "status": "refuted",
+   "evidence_file": "run_joint/optim_compare.json; run_joint/runs/D6_*, E6_*",
+   "evidence": "SGD excludes 73 vs Adam 48 at acc 0.30 and writes 5,846 vs 2,953 at goal CE 0.95; sign-SGD excludes 0.",
+   "changed_from_draft": ""
+  },
+  {
+   "id": "P1.29",
+   "part": "P1",
+   "claim": "Gradient descent's first update from W = 0 writes no coupling; a sign step writes at most 1/3 of its energy as coupling.",
+   "status": "proved + computed",
+   "evidence_file": "verify_theory/v1_one_third.json",
+   "evidence": "max share 0.330 at 10x10, limit 1/3; random pushes 0.270.",
+   "changed_from_draft": ""
+  },
+  {
+   "id": "P1.30",
+   "part": "P1",
+   "claim": "Why sign-SGD writes little coupling and plain SGD the most.",
+   "status": "open (top-curvature reading not supported)",
+   "evidence_file": "theory_joint/c8_fixed_share.json",
+   "evidence": "-",
+   "changed_from_draft": ""
+  },
+  {
+   "id": "P1.31",
+   "part": "P1",
+   "claim": "Centring the read-out input removes the shared channel without adding noise and lets cells come back.",
+   "status": "measured (read-out only first pass; no-reservoir seed 0); full ESN untested",
+   "evidence_file": "context (first pass); run_marginal/results_runs.json (e2e_d1_x j2c)",
+   "evidence": "read-out only: 86 alive, 0.56; no-reservoir: 0.654 vs plain 0.637 at 16k.",
+   "changed_from_draft": ""
+  },
+  {
+   "id": "P2.1",
+   "part": "P2",
+   "claim": "R1 has the counts: S_T is 98.6% affine in the counts within environments; counts decode with R^2 0.999; Bayes on decoded counts 0.763.",
+   "status": "measured (cited from earlier passes)",
+   "evidence_file": "/home/johns/Desktop/CognitiveGridworld/main/DATA/experimental/interaction_bounds/learning_theory/esn_theory_compact.tex (Prop. esn); theory_marg/notes.md section 2",
+   "evidence": "-",
+   "changed_from_draft": ""
+  },
+  {
+   "id": "P2.2",
+   "part": "P2",
+   "claim": "A per-variable softmax of an affine state gives goal log-odds linear in the counts (naive's family); a joint softmax + row sum has Bayes's form.",
+   "status": "proved",
+   "evidence_file": "/home/johns/Desktop/CognitiveGridworld/main/DATA/experimental/interaction_bounds/learning_theory/esn_theory_compact.tex (Thm format); verify_theory #20",
+   "evidence": "-",
+   "changed_from_draft": ""
+  },
+  {
+   "id": "P2.2b",
+   "part": "P2",
+   "claim": "Fitted per environment, count-linear rules reach 0.497-0.503 (cross-entropy fit) and >= 0.55 (accuracy fit; non-convex, no known ceiling).",
+   "status": "measured (cited, 10-21 / 10-25)",
+   "evidence_file": "/home/johns/Desktop/CognitiveGridworld/main/DATA/experimental/ff_deep/extrapolation/naive_vs_linear/README.txt; verify_2026-10-25/",
+   "evidence": "per context pair; exact tables; T = 30.",
+   "changed_from_draft": "added (the family level was not stated in the draft)"
+  },
+  {
+   "id": "P2.2c",
+   "part": "P2",
+   "claim": "R1 sits below its own family's level: inside the format its shared read-out misses the environment-specific count weights (<= 0.436 shared vs >= 0.586 per environment on R1's own state); the format itself costs the rest (count-linear <= ~0.55 vs Bayes 0.77).",
+   "status": "measured",
+   "evidence_file": "context (10-18); theory_marg/notes.md section 2; synthesis_final/results.json final.R1.shortfall_split",
+   "evidence": "per-environment read-out of S: >= 0.586 with naive 0.428 and Bayes 0.682 on those episodes; S is 98.6% (not 100%) affine, so it carries a little pattern information.",
+   "changed_from_draft": "added (critic gap 1)"
+  },
+  {
+   "id": "P2.3",
+   "part": "P2",
+   "claim": "Bayes's per-step update telescopes to log sum_k pi_{t-1}(k|j) P(o_t|j,k,z); naive / within-step / memory shares 0.474 / 0.258 / 0.268; summed rules 0.452 / 0.614 / 0.771.",
+   "status": "proved + computed",
+   "evidence_file": "theory_marg/a1_increments.json; verify_theory/v2_bayes_parts.json",
+   "evidence": "identity error 5e-14.",
+   "changed_from_draft": ""
+  },
+  {
+   "id": "P2.4",
+   "part": "P2",
+   "claim": "None of R1's nonlinearities sees counts, current bits and z together (softmax: wrong variable; read-in: no counts; gates: linear range).",
+   "status": "measured",
+   "evidence_file": "run_esn/results.json (an2); theory_marg/notes.md section 2",
+   "evidence": "gate drive fluctuation 0.17 vs LSTM 0.95; cross-step interactions 1.2% of Bayes at lags 5-20; increments 1.05/0.13/-0.01.",
+   "changed_from_draft": ""
+  },
+  {
+   "id": "P2.4b",
+   "part": "P2",
+   "claim": "The memory-nonlinearity trade-off is what limits R1.",
+   "status": "refuted as R1's limit (the trade-off exists for a frozen reservoir under drive scaling; a learned deep drive escapes it)",
+   "evidence_file": "context (first pass, 8x drive); run_esn/notes.md 1b; theory_marg/notes.md 2(c); literature/lit.md (dambre2012, inubushi2017)",
+   "evidence": "8x drive: 71% nonlinear, memory 1.24 steps; R1: tau <= 2.5 steps in every unit, nonlinear share 0.4%, memory of the counts = the linear read-out sum; 5/5 rescue: linearisation misses 15/30/45%, 53 units tau > 5. Literature qualitative only.",
+   "changed_from_draft": "added (explicit verdict, critic gap 9)"
+  },
+  {
+   "id": "P2.5",
+   "part": "P2",
+   "claim": "The per-step joint evidence is additive over bits with 2-D pieces; the step-wise marginal function couples all bits and phases.",
+   "status": "proved + computed",
+   "evidence_file": "theory_marg/a2_structure.json; theory_marg/c6_walsh_within.json",
+   "evidence": "within-step part 84% bit interaction; environment-averaged table captures 0.2%.",
+   "changed_from_draft": ""
+  },
+  {
+   "id": "P2.6",
+   "part": "P2",
+   "claim": "One 1000-unit ReLU layer fits the joint per-step evidence (R^2 0.997) but not the step-wise function (0.90); depth 2 does (0.986).",
+   "status": "measured (20k updates, width 1000)",
+   "evidence_file": "run_marginal/results.json (fit_all); verify_marginal/verdicts.json",
+   "evidence": "summed rules 0.700 / 0.404 / 0.545.",
+   "changed_from_draft": ""
+  },
+  {
+   "id": "P2.7",
+   "part": "P2",
+   "claim": "One hidden layer cannot represent the step-wise function.",
+   "status": "open (only class-level lower bounds)",
+   "evidence_file": "literature/lit.md (Maiorov; Pinkus Thm 6.7); verify_theory #21",
+   "evidence": "-",
+   "changed_from_draft": ""
+  },
+  {
+   "id": "P2.7b",
+   "part": "P2",
+   "claim": "Per-step precision / slow learning of z-dependent per-bit tables through summed marginal logits explains part of the depth-1 marginal shortfall.",
+   "status": "measured in part; open as a full account",
+   "evidence_file": "theory_marg/c9_marginal_target_test.json; verify_theory/notes.md section 3 item 8",
+   "evidence": "naive-target depth-1 net 0.384 at 5k (Bayes-target 0.353, step-target 0.376; naive 0.450); naive distillation: per-step R^2 0.98, summed 0.374.",
+   "changed_from_draft": "added (critic gap 1: c9 and the distillation were omitted)"
+  },
+  {
+   "id": "P2.8",
+   "part": "P2",
+   "claim": "Same depth-1 per-step learner, matched loss: joint 0.687 vs marginal 0.438 (own loss); 0.670 vs 0.398 (goal CE). Joint KL 0.713 is a reference only.",
+   "status": "measured (lower bounds, still rising)",
+   "evidence_file": "run_marginal/results_runs.json; verify_marginal/verdicts.json",
+   "evidence": "same input, hidden layer, data and budget; read-outs 116,100 vs 36,020 parameters.",
+   "changed_from_draft": "headline 'joint 0.71 vs marginal 0.44' (loss-mismatched) replaced by matched pairs"
+  },
+  {
+   "id": "P2.8b",
+   "part": "P2",
+   "claim": "The no-reservoir marginal net m1 is still rising (+0.012 over its last 20%) and matches R1's level and curve at about equal update counts.",
+   "status": "measured",
+   "evidence_file": "run_marginal/runs/e2e_d1_s0/m1.json; critic/results.json c3",
+   "evidence": "m1 0.232 / 0.353 / 0.404 / 0.438 at 1k / 5k / 10k / 25k vs R1 0.222 / ~0.36 / 0.396 / 0.42-0.44.",
+   "changed_from_draft": "label 'nearly flat' -> 'still rising (lower bound)'"
+  },
+  {
+   "id": "P2.9",
+   "part": "P2",
+   "claim": "m1 has learned the naive rule.",
+   "status": "refuted as stated (naive-like per-step function at naive level)",
+   "evidence_file": "verify_marginal/verdicts.json; verify_marginal/agree_refs.json",
+   "evidence": "R^2 0.92 vs naive per-step, but answers agree 60.5% vs 57.7% baseline.",
+   "changed_from_draft": ""
+  },
+  {
+   "id": "P2.10",
+   "part": "P2",
+   "claim": "The depth-2 marginal no-reservoir net learned the step-wise rule.",
+   "status": "measured (still rising; 29x parameters)",
+   "evidence_file": "run_marginal/analysis_marg.json; verify_marginal/verdicts.json; synthesis_final/out/lo_check.json",
+   "evidence": "R^2 0.95, coefficient 1.04, naive 0.00; agreement 70.5%.",
+   "changed_from_draft": ""
+  },
+  {
+   "id": "N.1",
+   "part": "P2",
+   "claim": "Learning order: the per-bit naive part is learned first and the within-step part later, at depth 1 and depth 2 (marginal nets).",
+   "status": "measured (check 1; stored snapshots; one seed per net)",
+   "evidence_file": "synthesis_final/out/lo_check.json (scripts/lo_check.py)",
+   "evidence": "at 1k updates features carry N 0.89-0.94 vs W 0.07-0.24; output coefficients N 0.46-0.80 vs W 0.01-0.13.",
+   "changed_from_draft": "new"
+  },
+  {
+   "id": "N.2",
+   "part": "P2",
+   "claim": "At depth 1 the within-step part is learned slowly but is not blocked within 25k updates.",
+   "status": "measured (check 1)",
+   "evidence_file": "synthesis_final/out/lo_check.json",
+   "evidence": "m1 features W 0.08 -> 0.19 -> 0.33 -> 0.40 and output coefficient on W 0.01 -> 0.06 -> 0.13 -> 0.20 at 1k / 5k / 12.5k / 25k, no plateau; depth 2: 0.13 -> 0.45 -> 0.82 -> 1.04.",
+   "changed_from_draft": "new"
+  },
+  {
+   "id": "N.3",
+   "part": "P2",
+   "claim": "Joint no-reservoir nets drop within-step features: their read-in becomes per-bit (affine in the bits).",
+   "status": "measured (check 1)",
+   "evidence_file": "synthesis_final/out/lo_check.json",
+   "evidence": "W capture 0.07-0.08 (1k) -> 0.044 (25k); non-affine share 0.11-0.13 -> 0.02-0.04.",
+   "changed_from_draft": "new"
+  },
+  {
+   "id": "N.4",
+   "part": "P2",
+   "claim": "R1's read-in is more affine than its no-reservoir analogue's (non-affine 0.034 vs 0.076; W capture 0.28 vs 0.40): the reservoir changes what the read-in learns.",
+   "status": "measured (check 1 vs theory_marg c3); why is open",
+   "evidence_file": "synthesis_final/out/lo_check.json; theory_marg/c3_span.json",
+   "evidence": "-",
+   "changed_from_draft": "new"
+  },
+  {
+   "id": "N.5",
+   "part": "P2",
+   "claim": "Handing a depth-1 marginal no-reservoir learner the exact naive per-step part (as an offset) does not speed up its within-step learning; learning the per-bit tables itself costs it about 0.05 at matched updates.",
+   "status": "measured (one seed, 13k of a planned 25k updates; flat by the rule over the last 20%, lower bound)",
+   "evidence_file": "synthesis_final/out/runs/offset_d1_s0/*.json (scripts/mtrain3_offset.py)",
+   "evidence": "learned W weight 0.137 (naive offset, zero init) / 0.127 (naive offset, m1 init) at 13,040 updates vs plain m1 0.128 at 12,500; accuracy 0.462 / 0.462 vs m1 0.404 at 10k and 0.467 / 0.468 at 13k vs m1 0.414 at 12.5k; step-wise-offset control 0.615 -> 0.626, learned W weight 0.002.",
+   "changed_from_draft": "new"
+  },
+  {
+   "id": "P2.11",
+   "part": "P2",
+   "claim": "The 5/5 rescue computes the within-step z-dependent LSE per step (its step-1 map equals the step-wise increment).",
+   "status": "measured",
+   "evidence_file": "run_esn/results.json (an1); verify_esn/results.json",
+   "evidence": "memoryless 0.598; coefficients 0.98/0.95, R^2 0.993.",
+   "changed_from_draft": ""
+  },
+  {
+   "id": "P2.12",
+   "part": "P2",
+   "claim": "The 5/5 rescue needs history x input interaction (>= 0.12 of its accuracy) and approximates windowed Bayes with w ~ 5-6.",
+   "status": "measured",
+   "evidence_file": "verify_esn/results.json (additive_lag_test_wpool, truncation_spot_check); run_esn/results.json (an3, an6)",
+   "evidence": "additive lags keep at most 0.633 of 0.757 (WPOOL: 10 environments x 4,000 episodes); truncation 0.008-0.025 below windowed Bayes at every w.",
+   "changed_from_draft": "'0.01-0.02 below' corrected to 0.008-0.025"
+  },
+  {
+   "id": "P2.13",
+   "part": "P2",
+   "claim": "The 5/5's deep read-in drives the frozen gates; its gates are set by the current input, not past counts.",
+   "status": "measured",
+   "evidence_file": "run_esn/results.json (an2); verify_esn/results.json (within_env)",
+   "evidence": "fluctuation 0.46 vs R1 0.17; current 0.43 vs past counts 0.08.",
+   "changed_from_draft": ""
+  },
+  {
+   "id": "P2.14",
+   "part": "P2",
+   "claim": "R1's reservoir holds usable short memory; a deep per-step read-out extracts about +0.06 of genuine memory.",
+   "status": "measured (still rising)",
+   "evidence_file": "run_esn/results.json (ro_A); verify_esn/results.json (additive_lag_test_wpool)",
+   "evidence": "h2_u 0.668 vs memoryless 0.584.",
+   "changed_from_draft": ""
+  },
+  {
+   "id": "P2.15",
+   "part": "P2",
+   "claim": "Raw short memory is not what separates the 5/5 from R1.",
+   "status": "measured",
+   "evidence_file": "verify_esn/results.json (within_env)",
+   "evidence": "R1 lags 1/2/3 R^2 0.98/0.75/0.57 vs 5/5 0.95/0.73/0.53.",
+   "changed_from_draft": ""
+  },
+  {
+   "id": "P2.16",
+   "part": "P2",
+   "claim": "The trained LSTM computes the posterior in its gates (trained, history-driven gates; all three parts of the update).",
+   "status": "measured; theory proved (Thm lstm)",
+   "evidence_file": "run_esn/results.json; verify_esn/results.json (lstm_weights_vs_default_init); /home/johns/Desktop/CognitiveGridworld/main/DATA/experimental/interaction_bounds/learning_theory/esn_theory_compact.tex",
+   "evidence": "increments 0.75/0.68/0.40; memoryless 0.455; weight s.d. 8.2-8.4x init, max |w| 86-242x the init bound; input-drive fluctuation 0.95 (0.65-1.16 by gate type).",
+   "changed_from_draft": "'weights 86-242x the init bound' clarified as max |w|; canonical gate drive 0.95"
+  },
+  {
+   "id": "P2.17",
+   "part": "P2",
+   "claim": "\"The prior in place of the posterior\" describes naive, R1 and the no-reservoir marginal nets.",
+   "status": "description: tautological for memoryless rules; measured for R1 (increments); transient for the goal-only joint no-reservoir net",
+   "evidence_file": "theory_marg/notes.md 4(ii); run_esn/results.json (increments); verify_marginal/verdicts.json",
+   "evidence": "R1 increments 1.05/0.13/-0.01; joint no-reservoir net: fixed coupling 107k vs episode-specific 62k at 10k updates, 1.5k vs 64k at 25k.",
+   "changed_from_draft": "status 'proved (format) + measured' re-statused"
+  },
+  {
+   "id": "P2.18",
+   "part": "P2",
+   "claim": "R3 is a posterior under a wrong learned support prior, not a prior in place of the posterior.",
+   "status": "measured (interpretation on measured facts)",
+   "evidence_file": "theory_marg/notes.md 4(ii); verify_theory/notes.md section 6",
+   "evidence": "interactions at lags 5-20 63-106% of Bayes; frozen within-row policy 0.478 -> 0.287.",
+   "changed_from_draft": ""
+  },
+  {
+   "id": "P2.19",
+   "part": "P2",
+   "claim": "Naive Bayes is the uniform member of the fixed-within-row-conditional (Gibbs) family.",
+   "status": "refuted",
+   "evidence_file": "theory_joint/c1_gibbs_naive.json; verify_theory/v2_bayes_parts.json",
+   "evidence": "uniform fixed weighting 0.324, average policy 0.276, naive 0.450.",
+   "changed_from_draft": ""
+  },
+  {
+   "id": "P2.20",
+   "part": "P2",
+   "claim": "A start-state or fixed-logit prior causes the marginal ESN's failure.",
+   "status": "not necessary (no-reservoir net) and not detected in R1 [measured]; the draft's \"refuted by five independent results\" is withdrawn",
+   "evidence_file": "run_esn/out/an5_fixed_prior.json; run_marginal/results_runs.json; run_fullesn/offline/summary_tables.txt; /home/johns/Desktop/CognitiveGridworld/main/DATA/experimental/interaction_bounds/analyses/joint_esn_extension/summary.txt; critic/results.json c7",
+   "evidence": "kappa = 1 optimal, free offset -0.001, step-1 fixed goal logits match Bayes, start 0 flat over 54k; m1 0.438 without start or reservoir. Disclosed: the convex goal-CE baseline (0.30-0.32) classifies worse than R1-e5's own read-out (0.425); the matched own+Adam check ran 1,500 updates.",
+   "changed_from_draft": "'refuted (five results)' -> 'not necessary and not detected'"
+  },
+  {
+   "id": "P2.21",
+   "part": "P2",
+   "claim": "Under the networks' own loss, a planted deep prior freezes a marginal read-out.",
+   "status": "measured",
+   "evidence_file": "theory_marg/c1_marginal_readout_convexity.json",
+   "evidence": "30-nat gap unchanged over 1,500 Adam updates; the marginal ESN is protected only because nothing writes such a prior.",
+   "changed_from_draft": ""
+  },
+  {
+   "id": "P2.22",
+   "part": "P2",
+   "claim": "The entropy bonus helps the marginal ESN.",
+   "status": "open (the converged read-out test used a degenerate baseline; the matched check ran 1,500 updates; the main session's full marginal ESN with beta 0.03 is running)",
+   "evidence_file": "theory_marg/c7_marginal_entropy_readout.json; theory_marg/c11_marginal_entropy_own_adam.json; learn5/fullesn_ent/logs/marginal_native_ent0.03.log",
+   "evidence": "c7: 0.3013 -> 0.3022 on a baseline 0.30-0.32 vs 0.425; c11: +0.027 at beta 0.1 after 1,500 updates (joint +0.144); full marginal ESN with beta 0.03 (learn5, first look): 0.215 / 0.261 / 0.279 / 0.289 at 0.5k / 1k / 1.5k / 2k vs R1 stored 0.197 / 0.222 / 0.272 / 0.284 (lead shrinking to within the seed spread).",
+   "changed_from_draft": "'the bonus leaves the converged marginal read-out flat' (as refutation) -> open"
+  },
+  {
+   "id": "P2.23",
+   "part": "P2",
+   "claim": "Inductive-bias (learning-order) prior in the marginal ESN: the naive part is learned first and blocks within-step features.",
+   "status": "learning order measured (N.1); blocking refuted at depth 1 (N.2: no plateau within 25k; N.5: handing over the naive part does not speed up within-step learning)",
+   "evidence_file": "synthesis_final/out/lo_check.json; synthesis_final/out/runs/offset_d1_s0",
+   "evidence": "-",
+   "changed_from_draft": "'open, weakly disfavoured because depth 2 learns the step-wise rule' (a non sequitur) replaced by measurements"
+  },
+  {
+   "id": "P2.24",
+   "part": "P2",
+   "claim": "R1 and R3 have nearly identical from-scratch learning curves; the match does not need a shared start-state prior.",
+   "status": "measured (curves; single seeds, unpaired); interpretation for the second half",
+   "evidence_file": "critic/results.json c3; /home/johns/Desktop/CognitiveGridworld/main/DATA/experimental/interaction_bounds/analyses/joint_esn_extension/summary.txt; run_marginal/runs/e2e_d1_s0/m1.json",
+   "evidence": "R3 / R1: 0.198 / 0.197 (0.5k), 0.289 / 0.284 (2k), 0.398 / 0.391 (8k), 0.410 / 0.396 (10k); plateaus differ (naive share of disagreements 0.20 vs 0.46; long-lag interactions 63-106% vs 1.2%); R1's curve is reproduced by m1 with no start.",
+   "changed_from_draft": "added (critic gap 10)"
+  },
+  {
+   "id": "P2.25",
+   "part": "P2",
+   "claim": "The joint trap does not need a naive-type solution (naive-null task variant); without one the goal-only learner trails the joint loss by more.",
+   "status": "measured (no-reservoir joint nets; 3k updates seed 0 in DATA; 20k updates seeds 0 and 1 in learn5, goal always latent 0); the second half is an interpretation",
+   "evidence_file": "/home/johns/Desktop/CognitiveGridworld/main/DATA/experimental/esn_learnability/naive_null_check; learn5/naive_null/runs",
+   "evidence": "naive 0.096 vs 0.448, Bayes 0.774 vs 0.776; at 3k truth dead 0.86 vs 0.85, gap to the joint loss 0.09 vs 0.11; at 20k (s0 / s1) goal loss 0.485 / 0.558 vs joint loss 0.685 / 0.680 (naive-null) against 0.632 / 0.635 vs 0.713 / 0.707 (original code); truth dead 0.85-0.88 in all goal-loss arms.",
+   "changed_from_draft": "added (critic gap 22a); 20k runs new"
+  },
+  {
+   "id": "P2.26",
+   "part": "P2",
+   "claim": "The goal variable is not uniform in native training (variable 0 is the goal in 41% of training episodes); R3 0.440 vs 0.510 and R1 0.432 vs 0.443 by goal variable; read-out pools are 50/50.",
+   "status": "measured (cited, 10-22); full-ESN first looks did not log it",
+   "evidence_file": "session memory goal-latent-not-uniform (eval_run acc_by_goal_latent); joint_esn/D_critic/pool/meta_jesn_1.npz (goal counts 30,071 / 29,929)",
+   "evidence": "-",
+   "changed_from_draft": "added (critic gap 22b)"
+  },
+  {
+   "id": "P3.1",
+   "part": "P3",
+   "claim": "All read-out-only runs on the 54,000-episode pool over-fit it; held-out accuracies are lower bounds.",
+   "status": "measured (lower-bound reading inferred)",
+   "evidence_file": "run_joint/train_vs_heldout.json; verify_joint/verdicts.json",
+   "evidence": "train - held-out 0.05-0.13.",
+   "changed_from_draft": ""
+  },
+  {
+   "id": "P3.2",
+   "part": "P3",
+   "claim": "Two full-ESN runs per GPU roughly double the total throughput (1.6-2.5 vs ~1.06 updates/s); per-run speed depends mostly on the other jobs; three per GPU untested.",
+   "status": "measured (operational data from today's concurrent runs, not a controlled benchmark)",
+   "evidence_file": "run_fullesn/notes.md; verify_fullesn/verdicts.json; learn5/fullesn_ent/logs/*.log; synthesis_final/results.json final.throughput",
+   "evidence": "single micro-4000 run 0.94 s/update (measured earlier, other loads); two runs 1.29-1.41 (micro 2000) and 0.79-1.25 (micro 4000) s/update each.",
+   "changed_from_draft": "draft's unmeasured estimate ('little total throughput') replaced"
+  }
+ ]
+}

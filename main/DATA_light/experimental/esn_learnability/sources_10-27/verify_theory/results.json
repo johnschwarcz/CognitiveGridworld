@@ -1,0 +1,500 @@
+{
+ "written": "2026-10-27 ~15:00 IST, verify_theory agent",
+ "status_words": "proved / measured / computed / cited / open / refuted",
+ "my_computations": {
+  "v1_one_third_law": {
+   "status": "computed",
+   "definition": "V1 (computed, CPU). 'One-third law': the double-centred (coupling) share of the energy of a sign step\nsign(A(j)+B(k)) on an n x n table. Exhaustive over all monotone staircases for n = 2..10 (every sign(A+B) pattern\nwith distinct sums is a staircase after sorting A and B), plus random Gaussian pushes.",
+   "max_coupling_share_by_n": {
+    "2": 0.25,
+    "3": 0.29629629629629634,
+    "4": 0.3125,
+    "5": 0.32000000000000006,
+    "6": 0.3240740740740742,
+    "7": 0.32653061224489793,
+    "8": 0.328125,
+    "9": 0.3292181069958848,
+    "10": 0.33
+   },
+   "random_gaussian_10x10": {
+    "mean": 0.2702094,
+    "q90": 0.30760000000000004,
+    "max": 0.3264000000000001
+   },
+   "continuum_limit": 0.3333333333333333
+  },
+  "v2_bayes_parts": {
+   "status": "computed",
+   "max_abs_diff_lambda_vs_COMMON": 2.8421709430404007e-13,
+   "telescoping_max_abs_err": 4.973799150320701e-14,
+   "shares_pooled_steps2_30_both_goals": {
+    "N": 0.4737639168636776,
+    "W": 0.2577853107741107,
+    "M": 0.268450772362212
+   },
+   "shares_by_step": {
+    "1": {
+     "N": 0.7369695116188014,
+     "W": 0.26303048838119875,
+     "M": 0.0
+    },
+    "2": {
+     "N": 0.564850017605533,
+     "W": 0.27035966648120535,
+     "M": 0.1647903159132615
+    },
+    "3": {
+     "N": 0.5280784922805551,
+     "W": 0.2730069034487776,
+     "M": 0.1989146042706673
+    },
+    "5": {
+     "N": 0.49707992064740897,
+     "W": 0.26956303059425984,
+     "M": 0.23335704875833116
+    },
+    "10": {
+     "N": 0.4815302762183331,
+     "W": 0.2580349685604008,
+     "M": 0.2604347552212662
+    },
+    "20": {
+     "N": 0.4649690610589343,
+     "W": 0.25341973018975833,
+     "M": 0.28161120875130746
+    },
+    "30": {
+     "N": 0.4598307673454301,
+     "W": 0.2510695899831796,
+     "M": 0.28909964267139027
+    }
+   },
+   "acc_T30_both_latents_as_goal_12000": {
+    "naive": 0.45158333333333334,
+    "stepwise": 0.6135833333333334,
+    "bayes": 0.7714166666666666,
+    "gibbs_uniform": 0.32158333333333333,
+    "gibbs_avgpolicy": 0.27725
+   },
+   "acc_T30_episode_goal_6000": {
+    "naive": 0.45016666666666666,
+    "stepwise": 0.6093333333333333,
+    "bayes": 0.7723333333333333,
+    "gibbs_uniform": 0.3238333333333333,
+    "gibbs_avgpolicy": 0.2758333333333333
+   },
+   "bayes_MI_mean": {
+    "1": 0.18934265553545673,
+    "5": 0.1297242197110796,
+    "10": 0.0880966460274684,
+    "30": 0.049939376109998164
+   },
+   "bayes_MI_median": {
+    "1": 0.13729342171197279,
+    "5": 0.0646202768742522,
+    "10": 0.03730869887244437,
+    "30": 0.009345247140670199
+   },
+   "bayes_joint_entropy_mean": {
+    "1": 3.794498547033037,
+    "5": 2.5859507147485563,
+    "10": 1.968707228754002,
+    "20": 1.3499382217124045,
+    "30": 1.0091455218933656
+   },
+   "own_uniform_heldout6000": 0.4104084035750243,
+   "goalCE_uniform_heldout6000": 1.3650831757686135,
+   "own_bayes_heldout6000": 0.00010000000014463024,
+   "uniform_joint_entropy": 4.605170185988092,
+   "definition": "V2 (computed, CPU; independent re-implementation, nothing trained). On the held-out pool episodes 54,000-59,999\n(exact generator through COMMON.bayes_loglik / logits_x only):\n - telescoping identity: A_t(j) - A_{t-1}(j) == log sum_k pi_{t-1}(k|j) P(o_t|j,k,z)\n - the three parts N (naive), W (within-step), M (memory) and their additive shares Cov(part, Delta)/Var(Delta)\n   (centred over the goal value, pooled over episodes x steps 2..30, both latents as goal)\n - accuracies at T=30 of naive / step-wise / Bayes / uniform-Gibbs (mean_k lambda) / average-policy-Gibbs, both with\n   the episode's own goal (6,000) and with both latents as goal (12,000 pairs)\n - Bayes's posterior mutual information between r0 and r1 at t = 1, 10, 30\n - the networks' 'own' loss (COMMON.loss_fn) at uniform beliefs and at Bayes's own beliefs on the same episodes."
+  },
+  "v3_escape_time": {
+   "status": "computed (toy)",
+   "beta0.1_K104_x013.5": {
+    "adam_updates": 798,
+    "ode_updates": 785.8,
+    "ratio_ode_over_adam": 0.98
+   },
+   "beta0.1_K104_x014.5": {
+    "adam_updates": 803,
+    "ode_updates": 795.4,
+    "ratio_ode_over_adam": 0.99
+   },
+   "beta0.1_K104_x015.4": {
+    "adam_updates": 806,
+    "ode_updates": 804.1,
+    "ratio_ode_over_adam": 1.0
+   },
+   "beta0.1_K141_x013.5": {
+    "adam_updates": 597,
+    "ode_updates": 579.6,
+    "ratio_ode_over_adam": 0.97
+   },
+   "beta0.1_K141_x014.5": {
+    "adam_updates": 601,
+    "ode_updates": 586.7,
+    "ratio_ode_over_adam": 0.98
+   },
+   "beta0.1_K141_x015.4": {
+    "adam_updates": 603,
+    "ode_updates": 593.1,
+    "ratio_ode_over_adam": 0.98
+   },
+   "beta0.03_K104_x013.5": {
+    "adam_updates": 2527,
+    "ode_updates": 2511.6,
+    "ratio_ode_over_adam": 0.99
+   },
+   "beta0.03_K104_x014.5": {
+    "adam_updates": 2537,
+    "ode_updates": 2521.3,
+    "ratio_ode_over_adam": 0.99
+   },
+   "beta0.03_K104_x015.4": {
+    "adam_updates": 2542,
+    "ode_updates": 2529.9,
+    "ratio_ode_over_adam": 1.0
+   },
+   "beta0.03_K141_x013.5": {
+    "adam_updates": 1874,
+    "ode_updates": 1852.6,
+    "ratio_ode_over_adam": 0.99
+   },
+   "beta0.03_K141_x014.5": {
+    "adam_updates": 1882,
+    "ode_updates": 1859.6,
+    "ratio_ode_over_adam": 0.99
+   },
+   "beta0.03_K141_x015.4": {
+    "adam_updates": 1886,
+    "ode_updates": 1866.0,
+    "ratio_ode_over_adam": 0.99
+   },
+   "beta0.01_K104_x013.5": {
+    "adam_updates": 7453,
+    "ode_updates": 7429.8,
+    "ratio_ode_over_adam": 1.0
+   },
+   "beta0.01_K104_x014.5": {
+    "adam_updates": 7474,
+    "ode_updates": 7452.2,
+    "ratio_ode_over_adam": 1.0
+   },
+   "beta0.01_K104_x015.4": {
+    "adam_updates": 7484,
+    "ode_updates": 7460.9,
+    "ratio_ode_over_adam": 1.0
+   },
+   "beta0.01_K141_x013.5": {
+    "adam_updates": 5508,
+    "ode_updates": 5480.2,
+    "ratio_ode_over_adam": 0.99
+   },
+   "beta0.01_K141_x014.5": {
+    "adam_updates": 5525,
+    "ode_updates": 5496.7,
+    "ratio_ode_over_adam": 0.99
+   },
+   "beta0.01_K141_x015.4": {
+    "adam_updates": 5532,
+    "ode_updates": 5503.1,
+    "ratio_ode_over_adam": 0.99
+   },
+   "definition": "V3 (computed, toy; nothing from the networks). Lemma adam (e) escape time vs exact Adam on one gated coordinate.\nA frozen row's step-1 gap x (nats) falls by K per unit of weight motion (K = ||M_1||_1-like, 104-141). Its per-entry\nrestoring gradient grows as the cell rises: |g(x)| = g0 * exp(x0 - x) (gate e^{-gap}). Quasi-static ODE (the lemma):\ndx/dn = -lr*K*|g|/(|g| + eps)  ->  tau(X) = [(x0 - X) + e^{x0 - X} - 1]/(lr K), X = x0 - ln(eps/g0), then full speed.\nExact Adam (beta1 0.9, beta2 0.999, eps 1e-8, bias correction, fresh moments) on the same deterministic gradient.\nReported: updates until x <= 7.7 (c2's 'released' threshold), for the c2 settings (x0 = 14.5 median; g0 = beta * 1.3e-9\nper unit beta, the E1 per-entry rms of the bonus gradient at R3)."
+  },
+  "v4_readouts": {
+   "status": "measured (forward passes of stored read-outs)",
+   "uniform": {
+    "acc_T30": 0.09266666666666666,
+    "H_bar": 4.605170726776123,
+    "H_T30": 4.605170726776123,
+    "own": 0.4104084035750243,
+    "goalCE": 1.3650831757686135
+   },
+   "A1_r3_own_adam": {
+    "acc_T30": 0.45366666666666666,
+    "H_bar": 1.246471643447876,
+    "H_T30": 0.5878157019615173,
+    "own": 0.15490773529804552,
+    "goalCE": 1.6996631889960228,
+    "pool": "r3",
+    "beta": 0.0,
+    "update": 20000
+   },
+   "A3_r3_own_ent0.003": {
+    "acc_T30": 0.4723333333333333,
+    "H_bar": 1.361505389213562,
+    "H_T30": 0.6503145098686218,
+    "own": 0.14141496357336406,
+    "goalCE": 1.2433960578613086,
+    "pool": "r3",
+    "beta": 0.003,
+    "update": 20000
+   },
+   "A3_r3_own_ent0.01": {
+    "acc_T30": 0.5448333333333333,
+    "H_bar": 1.876160740852356,
+    "H_T30": 0.9677477478981018,
+    "own": 0.1064816736170636,
+    "goalCE": 0.5333343837130793,
+    "pool": "r3",
+    "beta": 0.01,
+    "update": 20000
+   },
+   "A3_r3_own_ent0.03": {
+    "acc_T30": 0.5845,
+    "H_bar": 2.153700590133667,
+    "H_T30": 1.2294780015945435,
+    "own": 0.09553014457105444,
+    "goalCE": 0.3360665714576917,
+    "pool": "r3",
+    "beta": 0.03,
+    "update": 20000
+   },
+   "A3_r3_own_ent0.1": {
+    "acc_T30": 0.6031666666666666,
+    "H_bar": 2.730473279953003,
+    "H_T30": 1.8709962368011475,
+    "own": 0.1301826976266245,
+    "goalCE": 0.3225189071953089,
+    "pool": "r3",
+    "beta": 0.1,
+    "update": 20000
+   },
+   "A3x_r3_own_ent0.3": {
+    "acc_T30": 0.2728333333333333,
+    "H_bar": 4.56832218170166,
+    "H_T30": 4.525232791900635,
+    "own": 0.39183120667873544,
+    "goalCE": 1.2361982637157272,
+    "pool": "r3",
+    "beta": 0.3,
+    "update": 10000
+   },
+   "A3x_r3_own_ent1.0": {
+    "acc_T30": 0.22966666666666666,
+    "H_bar": 4.601926326751709,
+    "H_T30": 4.5978851318359375,
+    "own": 0.4055656851072968,
+    "goalCE": 1.3277979182024204,
+    "pool": "r3",
+    "beta": 1.0,
+    "update": 10000
+   },
+   "E5_r3_own_ent0.1_anneal10k": {
+    "acc_T30": 0.574,
+    "H_bar": 2.014425754547119,
+    "H_T30": 1.0683246850967407,
+    "own": 0.09371704763177485,
+    "goalCE": 0.3737857769930517,
+    "pool": "r3",
+    "beta": 0.0,
+    "update": 20000
+   },
+   "C4_zero_own_adam": {
+    "acc_T30": 0.5246666666666666,
+    "H_bar": 1.60037100315094,
+    "H_T30": 0.7419891953468323,
+    "own": 0.11714282050448147,
+    "goalCE": 0.6597824341032944,
+    "pool": "zero",
+    "beta": 0.0,
+    "update": 20000
+   },
+   "B2f_epr_fresh_own_adam": {
+    "acc_T30": 0.338,
+    "H_bar": 1.8763597011566162,
+    "H_T30": 1.018513798713684,
+    "own": 0.22452984068796872,
+    "goalCE": 1.424355135144918,
+    "pool": "episode_random",
+    "beta": 0.0,
+    "update": 20000
+   },
+   "breakeven_beta_vs_uniform": {
+    "A3_r3_own_ent0.03": 0.1284446644066521,
+    "A3_r3_own_ent0.1": 0.1494778298350344,
+    "A3_r3_own_ent0.01": 0.1113688595958295
+   },
+   "definition": "V4 (measured: forward passes of stored run_joint read-outs on frozen pool states; nothing trained; CPU, 3 threads).\nIndependent recomputation (COMMON loss code, not the harness) on the held-out episodes 54,000-59,999 of each run's pool:\nT=30 goal accuracy, mean joint entropy over steps H_bar and at T=30, the networks' 'own' loss (one batch of 6,000),\ngoalCE, and the entropy-bonus objective own - beta*H_bar for each read-out and for uniform beliefs, to check\ntheory_joint's collapse break-even (beta ~ 0.15 between the beta = 0.1 solution and uniform beliefs)."
+  }
+ },
+ "read_from_other_folders": {
+  "definition": "numbers read (not recomputed) from the run/theory folders to score claims; source given per entry",
+  "run_joint_E6_sgd_goalCE_lr0.03": {
+   "source": "run_joint/notes.md s7, optim_compare.json, theory_joint/c8_fixed_share.json",
+   "acc_T30_20k": 0.329,
+   "excluded_from_3k_to_20k": 73,
+   "truth_alive_3k_to_20k": 0.284,
+   "median_t30_gap_excluded_nats": {
+    "1k": 10.6,
+    "3k": 15.2,
+    "8k": 19.9,
+    "20k": 24.0
+   },
+   "step1_gap_20k": 2.4,
+   "E_fix30_at_goalCE_0p952_update5k": 5846.1,
+   "adam_E_fix30_at_goalCE_0p957_update100": 2953,
+   "excluded_at_acc_0p30": {
+    "SGD": 73,
+    "Adam": 48
+   }
+  },
+  "run_joint_D6_signsgd_goalCE": {
+   "source": "run_joint/notes.md s7",
+   "acc_T30_10k": 0.372,
+   "excluded_from_5k": 0,
+   "E_fix30": 434
+  },
+  "run_joint_D6_adam_goalCE": {
+   "source": "run_joint/notes.md s7",
+   "acc_T30_10k": 0.491,
+   "excluded": 52,
+   "step1_gap": 9.23,
+   "frozen": 0
+  },
+  "run_joint_B2_invalid": {
+   "source": "run_joint/notes.md s5a",
+   "train_acc_20k": 0.592,
+   "heldout_acc_20k": 0.288,
+   "definition": "one random start per pool episode, reused ~3,000 times: memorised; not a valid test"
+  },
+  "run_joint_c6_noise_swap": {
+   "source": "theory_joint/c6_noise_swap.json via notes s8.2",
+   "B2f_5k_readout": {
+    "r3_start": 0.348,
+    "zero": 0.363,
+    "random": 0.348
+   },
+   "control_readout": {
+    "r3_start": 0.447,
+    "zero": 0.44,
+    "random": 0.314
+   },
+   "beta0p03_readout": {
+    "r3_start": 0.582,
+    "zero": 0.584,
+    "random": 0.334
+   }
+  },
+  "run_fullesn_first_look": {
+   "source": "run_fullesn/notes.md",
+   "A_updates": 4839,
+   "B_updates": 4708,
+   "acc_T30_at_4500": {
+    "A_joint_episode_random": 0.337,
+    "R3": 0.366,
+    "R4_start0_paired": 0.394,
+    "B_marg_episode_random": 0.295,
+    "R1": 0.357
+   },
+   "start_noise_share_logit_var_T30": {
+    "A": 0.008,
+    "B": 0.009
+   },
+   "test_time_start_swap_acc": {
+    "A_random_vs_zero": [
+     0.3535,
+     0.3515
+    ],
+    "B_random_vs_zero": [
+     0.303,
+     0.3105
+    ]
+   },
+   "frozen_rows_A": 0,
+   "R1_step1_fixed_goal_spread_vs_bayes": [
+    0.59,
+    0.57
+   ],
+   "R1_share_u1": 0.953,
+   "R1_M1_l1": 149,
+   "B_fixed_goal_spread_T30_nats": [
+    12,
+    17
+   ],
+   "bayes_fixed_goal_spread_T30": 12.1
+  },
+  "run_marginal_final": {
+   "source": "run_marginal/results_runs.json (final records)",
+   "m1_marg_d1_own_25k": 0.4381,
+   "m1g_marg_d1_goalCE_25k": 0.3975,
+   "j1_joint_d1_jointKL_25k": 0.7125,
+   "j2_joint_d1_own_25k": 0.6868,
+   "j2a_fp16_25k": 0.6831,
+   "jg_goalCE_25k": 0.6698,
+   "x16k": {
+    "j2": 0.6369,
+    "j2c_centred": 0.6541,
+    "j2e_ent0.01": 0.6636,
+    "j2ea_anneal": 0.6421,
+    "j2r_episode_start": 0.5525,
+    "j2s_fixed_start": 0.5609
+   }
+  },
+  "run_esn_an5_fixed_prior_R1e5": {
+   "source": "run_esn/out/an5_fixed_prior.json",
+   "F_T30_scale_on_bayesF": 2.189,
+   "R2_on_bayesF": 0.9952,
+   "scale_on_naiveF": 1.588,
+   "R2_on_naiveF": 0.9964,
+   "free_offset_T30": [
+    0.4352,
+    0.4342
+   ],
+   "kappa_scan_T30": {
+    "0": 0.244,
+    "0.75": 0.406,
+    "1": 0.437,
+    "1.25": 0.402,
+    "2": 0.246
+   }
+  },
+  "mem_harness_naive_distill_d1_smoke": {
+   "source": "mem_harness/runs/smoke_distill_naive_d1.json",
+   "update": 4000,
+   "r2_step": 0.9816,
+   "summed_acc_T30": 0.3735,
+   "naive_exact_acc_T30": 0.4496,
+   "definition": "depth-1 width-1000 net distilled to naive per-step log-likelihood; its summed rule"
+  },
+  "e1_entropy_force_flip": {
+   "source": "theory_joint/e1_entropy_force.json",
+   "own_zero_at_250": {
+    "H1": 3.95,
+    "surprisal1": 5.88,
+    "frac_restoring_beta0.003": 0.466,
+    "beta0.01": 0.945
+   },
+   "own_def0_at_500": {
+    "H1": 3.72,
+    "surprisal1": 7.17,
+    "frac_restoring_beta0.003": 0.324,
+    "beta0.01": 0.971
+   },
+   "R3": {
+    "H1": 2.94,
+    "surprisal1": 18.1,
+    "frac_restoring_beta0.003": 0.563,
+    "beta0.01": 1.0
+   },
+   "implied_c_out_definition": "c_out ~ beta_50% * (surprisal1 - H1), beta_50% read from the flip curve",
+   "implied_c_out": {
+    "own_zero@250": 0.007,
+    "own_def0@500": 0.016,
+    "R3": 0.045
+   }
+  },
+  "prediction_file_mtimes": {
+   "source": "stat",
+   "theory_marg_v2": "2026-10-27 11:27:25",
+   "theory_joint_v2": "2026-10-27 11:28:13",
+   "earliest_run_outputs": {
+    "run_marginal validation/tests": "11:20-11:21",
+    "run_joint validation vt_*": "11:24-11:25",
+    "run_fullesn smoke": "11:26",
+    "run_esn first outputs": "11:36"
+   }
+  }
+ }
+}

@@ -11,4 +11,7 @@ temp/
 temp.py
 .vscode/
 main/DATA/
-main/REPLICATION/figure_bin/
+main/REPLICATION/figure_bin/**/*.gif
+*.pid
+*.tmp.npz
+/cov30_echo.txt

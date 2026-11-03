@@ -1,0 +1,228 @@
+{
+ "n_params": {
+  "readin": 16000,
+  "W_ih_i": 1000000,
+  "W_ih_f": 1000000,
+  "W_ih_g": 1000000,
+  "W_ih_o": 1000000,
+  "W_hh_i": 1000000,
+  "W_hh_f": 1000000,
+  "W_hh_g": 1000000,
+  "W_hh_o": 1000000,
+  "b_i": 2000,
+  "b_f": 2000,
+  "b_g": 2000,
+  "b_o": 2000,
+  "readout": 20020,
+  "start": 2000,
+  "rand_W": 1000000,
+  "rand_b": 2000
+ },
+ "partition_total": 8046020,
+ "all_weights": 8046020,
+ "swap_exact": {
+  "readin": true,
+  "W_ih_i": true,
+  "W_ih_f": true,
+  "W_ih_g": true,
+  "W_ih_o": true,
+  "W_hh_i": true,
+  "W_hh_f": true,
+  "W_hh_g": true,
+  "W_hh_o": true,
+  "b_i": true,
+  "b_f": true,
+  "b_g": true,
+  "b_o": true,
+  "readout": true,
+  "start": true,
+  "rand_W": true,
+  "rand_b": true
+ },
+ "all_fine_swapped_is_wb": true,
+ "controls_inside": {
+  "rand_W": [
+   "LSTM.weight_ih_l0",
+   "LSTM.weight_hh_l0"
+  ],
+  "rand_b": [
+   "LSTM.bias_ih_l0",
+   "LSTM.bias_hh_l0"
+  ]
+ },
+ "family_seed1_is_control": {
+  "rW1M": true,
+  "rb2k": true
+ },
+ "families": {
+  "rW1M": {
+   "size": [
+    1000000,
+    1000000,
+    1000000
+   ],
+   "target": 1000000,
+   "pool_size": 8000000,
+   "keys": [
+    "LSTM.weight_hh_l0",
+    "LSTM.weight_ih_l0"
+   ],
+   "inside_pool_rows": true,
+   "overlap_s1_s2": 125151
+  },
+  "rb2k": {
+   "size": [
+    2000,
+    2000,
+    2000
+   ],
+   "target": 2000,
+   "pool_size": 8000,
+   "keys": [
+    "LSTM.bias_hh_l0",
+    "LSTM.bias_ih_l0"
+   ],
+   "inside_pool_rows": true,
+   "overlap_s1_s2": 475
+  },
+  "rHH1M": {
+   "size": [
+    1000000,
+    1000000,
+    1000000
+   ],
+   "target": 1000000,
+   "pool_size": 4000000,
+   "keys": [
+    "LSTM.weight_hh_l0"
+   ],
+   "inside_pool_rows": true,
+   "overlap_s1_s2": 250165
+  },
+  "rIH1M": {
+   "size": [
+    1000000,
+    1000000,
+    1000000
+   ],
+   "target": 1000000,
+   "pool_size": 4000000,
+   "keys": [
+    "LSTM.weight_ih_l0"
+   ],
+   "inside_pool_rows": true,
+   "overlap_s1_s2": 249928
+  },
+  "rG1M": {
+   "size": [
+    1000000,
+    1000000,
+    1000000
+   ],
+   "target": 1000000,
+   "pool_size": 2000000,
+   "keys": [
+    "LSTM.weight_hh_l0",
+    "LSTM.weight_ih_l0"
+   ],
+   "inside_pool_rows": true,
+   "overlap_s1_s2": 499892
+  },
+  "rHH2M": {
+   "size": [
+    2000000,
+    2000000,
+    2000000
+   ],
+   "target": 2000000,
+   "pool_size": 4000000,
+   "keys": [
+    "LSTM.weight_hh_l0"
+   ],
+   "inside_pool_rows": true,
+   "overlap_s1_s2": 1000162
+  },
+  "rW2M": {
+   "size": [
+    2000000,
+    2000000,
+    2000000
+   ],
+   "target": 2000000,
+   "pool_size": 8000000,
+   "keys": [
+    "LSTM.weight_hh_l0",
+    "LSTM.weight_ih_l0"
+   ],
+   "inside_pool_rows": true,
+   "overlap_s1_s2": 500308
+  },
+  "rW4M": {
+   "size": [
+    4000000,
+    4000000,
+    4000000
+   ],
+   "target": 4000000,
+   "pool_size": 8000000,
+   "keys": [
+    "LSTM.weight_hh_l0",
+    "LSTM.weight_ih_l0"
+   ],
+   "inside_pool_rows": true,
+   "overlap_s1_s2": 1999658
+  }
+ },
+ "family_swap_exact": {
+  "rHH1M_2": true,
+  "rG1M_1": true,
+  "rW4M_3": true
+ },
+ "ro_dir_construction": {
+  "norm_rel_diff": 1.6287482473842374e-10,
+  "cos_to_other": 0.9999999999999943,
+  "others_unchanged": true
+ },
+ "intact_acc_vs_ck": {
+  "n": 114,
+  "max_abs": 9.999999999998899e-05,
+  "n_differ": 1,
+  "probes_differ": 1
+ },
+ "intact_loss_vs_stored": {
+  "n": 114,
+  "max_rel_per_episode": 2.6252728402509362e-05
+ },
+ "reproduce": {
+  "25": {
+   "val": 0.0,
+   "boot": 0.0,
+   "loss": 0.0
+  },
+  "2100": {
+   "val": 0.0,
+   "boot": 0.0,
+   "loss": 0.0
+  },
+  "49995": {
+   "val": 0.0,
+   "boot": 0.0,
+   "loss": 0.0
+  }
+ },
+ "window_identity": 0.0,
+ "window_identity_boot": 0.0,
+ "telescoping": 8.881784197001252e-16,
+ "nan_rows": {
+  "0-800": [
+   "band4"
+  ],
+  "800-1.6k": [],
+  "1.6k-4k": [],
+  "4k-11.2k": [],
+  "11.2k-40k": []
+ },
+ "ro_all_vs_stored_readout": 0.0,
+ "gains_forward_vs_engine": 0.0003833770751953125,
+ "seconds": 21.958258152008057
+}

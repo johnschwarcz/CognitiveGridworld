@@ -61,6 +61,7 @@ class CognitiveGridworld(Env_model_manager):
         self.ff_regenerate = init.get('ff_regenerate', False)
         self.ff_shared_readin = init.get('ff_shared_readin', False)       # one readin for all the time-injected layers
         self.ff_inject_first_only = init.get('ff_inject_first_only', False)   # control: input at layer 1 only (standard depth-T FF)
+        self.ff_layer_gains = init.get('ff_layer_gains', False)           # one trainable gain per time-injected layer's input
         self.output_joint = init.get('output_joint', False)
         self.gpu_inference = init.get('gpu_inference', False)
         self.embedding_grad = init.get('embedding_grad', 'generator')   # 'generator' | 'classifier' | 'both'

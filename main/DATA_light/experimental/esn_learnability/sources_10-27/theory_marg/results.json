@@ -1,0 +1,1536 @@
+{
+ "about": "theory_marg results (27 Oct 2026). Every entry: value(s), definition, source file, status word.",
+ "telescoping_and_parts": {
+  "status": "identity proved; numbers computed",
+  "source": "a1_increments.json",
+  "definition": "Delta_s(j)=LSE_k lam_s(j,k)-LSE_k lam_{s-1}(j,k); naive N_s(j)=sum_i log mean_k P(o_si|j,k); within W_s=log mean_k prod_i P(o_si|j,k)-N_s; memory M_s=Delta_s-N_s-W_s; all centred over j; additive share = Cov(part,Delta)/Var(Delta) pooled over (episode,goal,step); var_ratio = Var(part)/Var(Delta); held-out pool episodes 54000-59999, both latents as goal",
+  "telescoping_max_abs_err": 1.1368683772161603e-13,
+  "acc_T30": {
+   "naive": 0.45158333333333334,
+   "stepwise": 0.6135833333333334,
+   "bayes": 0.7714166666666666,
+   "bayes_direct": 0.7714166666666666
+  },
+  "shares_pooled_steps2_30": {
+   "naive": 0.47376391686367786,
+   "naive_var_ratio": 0.6070063791418834,
+   "within": 0.25778531077411065,
+   "within_var_ratio": 0.22040106984399108,
+   "memory": 0.2684507723622117,
+   "memory_var_ratio": 0.35294799225594364,
+   "rms_Delta": 1.2150727262005103
+  },
+  "memory_share_by_step": {
+   "1": 0.0,
+   "2": 0.16479031591326151,
+   "3": 0.19891460427066726,
+   "5": 0.23335704875833108,
+   "10": 0.2604347552212661,
+   "20": 0.2816112087513075,
+   "30": 0.2890996426713904
+  },
+  "shares_of_final_logposterior": {
+   "naive": 0.6789672291688853,
+   "within": 0.22976832867987587,
+   "memory": 0.09126444215123891
+  }
+ },
+ "persistence_ladder": {
+  "status": "computed",
+  "source": "c2_prior_ladder.json",
+  "definition": "exact posteriors of models in which the other latent is redrawn per bit (naive), per step (block_1), per block of b steps, once per bit (bit_persistent), never (Bayes); ADF = factorised filter; fixed_policy_* = Gibbs identity with a frozen within-row policy on Bayes lambda_T (Jensen bound). Held-out pool 54,000-59,999, both latents as goal.",
+  "acc_T30": {
+   "bayes": 0.7714166666666666,
+   "naive": 0.45158333333333334,
+   "block_1": 0.6135833333333334,
+   "block_2": 0.6795833333333334,
+   "block_3": 0.7045833333333333,
+   "block_5": 0.7270833333333333,
+   "block_6": 0.7385833333333334,
+   "block_10": 0.7535833333333333,
+   "block_15": 0.7614166666666666,
+   "block_30": 0.7714166666666666,
+   "bit_persistent": 0.6309166666666667,
+   "adf": 0.7230833333333333,
+   "fixed_policy_uniform": 0.32158333333333333,
+   "fixed_policy_average": 0.27641666666666664
+  },
+  "se": {
+   "bayes": 0.003833329634660052,
+   "naive": 0.004542904966253136,
+   "block_1": 0.004445023681872506,
+   "block_2": 0.00425979094155344,
+   "block_3": 0.004164789507708465,
+   "block_5": 0.004066459964578346,
+   "block_6": 0.004011213376851153,
+   "block_10": 0.003933779915208309,
+   "block_15": 0.0038908153214642226,
+   "block_30": 0.003833329634660052,
+   "bit_persistent": 0.004405118484869702,
+   "adf": 0.004084868688106641,
+   "fixed_policy_uniform": 0.004263874343985326,
+   "fixed_policy_average": 0.004082589997533792
+  }
+ },
+ "fixed_components": {
+  "status": "computed",
+  "source": "c2_prior_ladder.json",
+  "definition": "episode mean of each rule's centred goal log-belief per goal value (profile), its SD over values (nats) and its share of the total variance, t = 1, 5, 10, 30",
+  "values": {
+   "bayes": {
+    "1": {
+     "sd": 0.1857859435903788,
+     "share": 0.028857319941910375
+    },
+    "5": {
+     "sd": 0.7317941399581833,
+     "share": 0.030450755180414874
+    },
+    "10": {
+     "sd": 1.4115933911112455,
+     "share": 0.03100369273270616
+    },
+    "30": {
+     "sd": 3.9961500401125156,
+     "share": 0.029468212746387876
+    }
+   },
+   "naive": {
+    "1": {
+     "sd": 0.18741489664340866,
+     "share": 0.0394252690434354
+    },
+    "5": {
+     "sd": 0.9221635327882604,
+     "share": 0.059504406526733146
+    },
+    "10": {
+     "sd": 1.8602148898757362,
+     "share": 0.06484890534955996
+    },
+    "30": {
+     "sd": 5.580420735351947,
+     "share": 0.06864288937392944
+    }
+   },
+   "stepwise": {
+    "1": {
+     "sd": 0.1857859435903788,
+     "share": 0.028857319941910375
+    },
+    "5": {
+     "sd": 0.9236554872354464,
+     "share": 0.04890568610796507
+    },
+    "10": {
+     "sd": 1.8738648849026909,
+     "share": 0.05507373504926572
+    },
+    "30": {
+     "sd": 5.537426159159484,
+     "share": 0.057554402798957335
+    }
+   },
+   "adf": {
+    "1": {
+     "sd": 0.1857859435903788,
+     "share": 0.028857319941910375
+    },
+    "5": {
+     "sd": 1.6448769240467322,
+     "share": 0.0790459376406048
+    },
+    "10": {
+     "sd": 4.060501079556667,
+     "share": 0.09322648387259586
+    },
+    "30": {
+     "sd": 14.304430004625669,
+     "share": 0.09793900758536112
+    }
+   }
+  },
+  "corr_T30": {
+   "bayes~naive": 0.9973354790565642,
+   "bayes~stepwise": 0.9985215859451488,
+   "naive~stepwise": 0.9997885693923549,
+   "adf~bayes": 0.9983002452836787,
+   "adf~naive": 0.9995501505924033,
+   "adf~stepwise": 0.9998407992774628
+  }
+ },
+ "structure": {
+  "status": "computed",
+  "source": "a2_structure.json",
+  "definition": "V: soft_roll fitted by a cos(om r)+b sin(om r); x two-ridge: 0.5 A^2 [cos(om(j-k)-(th0-th1)) + cos(om(j+k)-(th0+th1))] with mean amplitude and linear phase; harmonics: least squares on cos/sin of 2pi(m z0 + n z1), |m|,|n|<=M, R^2 on held-out z pairs (pool z law); marginal: goal r0, targets centred over j, R^2 on held-out samples of the data law; pattern_table_only = z-independent table E[.|o,j] (z-consistency); per_bit_additive = sum_i g_i(o_i, z_i0, z_i1) with harmonics |m|,|n|<=M per bit and bit value",
+  "V": {
+   "max_abs_resid_sinusoid_in_r": 1.9984014443252818e-15,
+   "amp_mean": 1.955737041035733,
+   "amp_rel_sd_under_zlaw": 3.476441988733831e-05,
+   "amp_min": 1.9556408781365333,
+   "amp_max": 1.9558331830709506,
+   "phase_slope": 6.283185304867938,
+   "phase_slope_over_2pi": 0.9999999996320897,
+   "phase_rms_dev_from_linear_under_zlaw": 7.933747015914048e-05,
+   "phase_max_dev": 0.00011220186272753452
+  },
+  "x_two_ridge_R2": 0.9999999838566571,
+  "logsig_R2_by_harmonic_order": {
+   "1": {
+    "plus": 0.8883541478240702,
+    "minus": 0.9146588539805147,
+    "n_ridge_directions": 4
+   },
+   "2": {
+    "plus": 0.9989679194597245,
+    "minus": 0.999211085126144,
+    "n_ridge_directions": 12
+   },
+   "3": {
+    "plus": 0.9993117824380845,
+    "minus": 0.9994739192127188,
+    "n_ridge_directions": 24
+   },
+   "4": {
+    "plus": 0.9999816364466648,
+    "minus": 0.9999859575264463,
+    "n_ridge_directions": 40
+   },
+   "6": {
+    "plus": 0.9999995283878003,
+    "minus": 0.9999996343305615,
+    "n_ridge_directions": 84
+   }
+  },
+  "marginal": {
+   "var_f": 1.2170463671331113,
+   "var_naive": 0.907425657409466,
+   "var_within": 0.3242904348024642,
+   "within_share_additive": 0.26043015354433774,
+   "pattern_table_only_M2": {
+    "naive_R2": 0.07345146049337214,
+    "within_R2": 0.0019944144099788286,
+    "stepwise_R2": 0.05348279960702096,
+    "n_basis": 32
+   },
+   "per_bit_additive_M2": {
+    "naive_R2": 0.9863530977693662,
+    "within_R2": 0.004805596818673652,
+    "stepwise_R2": 0.7196305389418558,
+    "n_basis": 250
+   },
+   "pattern_plus_per_bit_M2": {
+    "naive_R2": 0.9863481022407204,
+    "within_R2": 0.006653512761953251,
+    "stepwise_R2": 0.7201322191789096,
+    "n_basis": 282
+   },
+   "per_bit_additive_M4": {
+    "naive_R2": 0.9995112303292923,
+    "within_R2": -0.0013240906317588674,
+    "stepwise_R2": 0.7241102520215593,
+    "n_basis": 810
+   },
+   "pattern_plus_per_bit_M4": {
+    "naive_R2": 0.9995109955658089,
+    "within_R2": 0.0005396405526206793,
+    "stepwise_R2": 0.7246220543443509,
+    "n_basis": 842
+   }
+  }
+ },
+ "count_window": {
+  "status": "computed",
+  "source": "a5_count_window.json",
+  "definition": "within-environment R^2 = 1 - sum((y-ybar_env)-(yhat-yhatbar_env))^2 / sum((y-ybar_env)^2), y = n_{T-1} (5 counts), 400 environments x 40 episodes, pool z law",
+  "R2_by_window": {
+   "1": 0.4753751086660277,
+   "2": 0.6576634073622019,
+   "3": 0.7484083648971427,
+   "4": 0.8021443222936391,
+   "5": 0.8389244333714776,
+   "6": 0.8649581147755004,
+   "8": 0.8997954362068841,
+   "10": 0.9222419288376305,
+   "15": 0.9546966455750967
+  },
+  "within_env_var": {
+   "rate_part": 66.04793980945577,
+   "binomial_part": 4.369466017475552,
+   "rate_share": 0.9379490629317612
+  },
+  "reference": "R1-e5 linear decoder of n_{T-1} from u_T: within-environment R^2 0.87 (c5_count_rule); innovation R^2 by lag 0..8: 0.87 0.62 0.18 0.11 0.08 0.055 0.033 0.016 0.006 (f4_window_decode)"
+ },
+ "one_layer_span": {
+  "status": "computed",
+  "source": "c3_span.json",
+  "definition": "c3: what per-step functions does a SHARED LINEAR read-out get from one layer of ReLU features of [o_t; z]?\n(CPU, least squares; nothing trained by gradient.)  Successor of a7_span.py (never run in the first pass).\nFeature sets h(o, z) (1000 units unless stated), each followed by a shared least-squares read-out (+ constant):\n  stored read-ins: R1 (reservoir_ctx_2), R1-e5, the trained LSTM's read-in, the 5/5 rescue's 5-layer read-in (its last\n  ReLU output, the reservoir's input); random ReLU features at PyTorch default init (widths 1000 / 4000: z enters weakly);\n  random ReLU features with z-weights scaled to the cosines' scale (w_z ~ N(0, 4^2), o-weights N(0,1), bias U(-4, 4);\n  widths 1000 / 4000 / 8000).\nTargets per step (fresh z of the pool's training environments 0-53,999; uniform cell; o drawn from it):\n  N = naive part, W = within-step part, f = step-wise marginal log-likelihood (both latents as goal, centred per latent,\n  20 outputs), joint = the per-step joint evidence (100 outputs, centred over cells).\nHeld-out R^2 on z of environments 54,000-59,999. Summed rule: the fitted per-step function summed over the 30 steps of the\n6,000 held-out pool episodes; accuracy for both latents as goal (f-fit: argmax per latent; joint-fit: row/column LSE).\nIn the linear-response regime a marginal ESN's per-step contribution is a shared linear combination of its read-in features\n(window theorem f), so these numbers bound what one ReLU layer offers a shared linear read-out per step.\n",
+  "values": {
+   "R1": {
+    "width": 1000,
+    "active_frac": 0.5090168,
+    "feature_rank_tol1e-6": 999,
+    "nonaffine_share_within_env": 0.033505626615366706,
+    "N_R2": 0.9769568718423051,
+    "W_R2": 0.28355280712569597,
+    "f_R2": 0.7937963044912966,
+    "joint_R2": 0.9727148203901445,
+    "within_captured_by_f_fit": 0.2506460011741428,
+    "f_summed_rule_acc": 0.37925,
+    "joint_summed_rule_acc": 0.59875
+   },
+   "R1_e5": {
+    "width": 1000,
+    "active_frac": 0.5197301666666667,
+    "feature_rank_tol1e-6": 998,
+    "nonaffine_share_within_env": 0.03382959341484977,
+    "N_R2": 0.9765001108163645,
+    "W_R2": 0.27527873260846314,
+    "f_R2": 0.7911306570891141,
+    "joint_R2": 0.9721244782153493,
+    "within_captured_by_f_fit": 0.24095891222378574,
+    "f_summed_rule_acc": 0.38449999999999995,
+    "joint_summed_rule_acc": 0.5896666666666667
+   },
+   "LSTM_trained": {
+    "width": 1000,
+    "active_frac": 0.2939365,
+    "feature_rank_tol1e-6": 999,
+    "nonaffine_share_within_env": 0.038466585377079886,
+    "N_R2": 0.9818079357748908,
+    "W_R2": 0.08052669919680733,
+    "f_R2": 0.737827282984359,
+    "joint_R2": 0.9843140539093996,
+    "within_captured_by_f_fit": 0.04725192536416856,
+    "f_summed_rule_acc": 0.37075,
+    "joint_summed_rule_acc": 0.5839166666666666
+   },
+   "rescue_5in5out_readin": {
+    "width": 1000,
+    "active_frac": 0.2878015666666667,
+    "feature_rank_tol1e-6": 415,
+    "nonaffine_share_within_env": 0.06869536426578653,
+    "N_R2": 0.9882058254595537,
+    "W_R2": 0.912958786011323,
+    "f_R2": 0.9786451979648887,
+    "joint_R2": 0.9936699612470506,
+    "within_captured_by_f_fit": 0.9223956376743512,
+    "f_summed_rule_acc": 0.54375,
+    "joint_summed_rule_acc": 0.70275
+   },
+   "init_w1000": {
+    "width": 1000,
+    "active_frac": 0.5160894,
+    "feature_rank_tol1e-6": 999,
+    "nonaffine_share_within_env": 0.08108083098646729,
+    "N_R2": 0.4337231503000504,
+    "W_R2": 0.031767157703597726,
+    "f_R2": 0.3220975677728417,
+    "joint_R2": 0.3986637170935827,
+    "within_captured_by_f_fit": -1.4635295558112555,
+    "f_summed_rule_acc": 0.19891666666666669,
+    "joint_summed_rule_acc": 0.22675
+   },
+   "init_w4000": {
+    "width": 4000,
+    "active_frac": 0.49811721666666664,
+    "feature_rank_tol1e-6": 3990,
+    "nonaffine_share_within_env": 0.08607407917695122,
+    "N_R2": 0.5584714484941626,
+    "W_R2": 0.0677621079413111,
+    "f_R2": 0.4265012071104243,
+    "joint_R2": 0.5308068641942452,
+    "within_captured_by_f_fit": -1.084121784109667,
+    "f_summed_rule_acc": 0.23458333333333334,
+    "joint_summed_rule_acc": 0.26683333333333337
+   },
+   "zscaled_w1000": {
+    "width": 1000,
+    "active_frac": 0.5089884666666666,
+    "feature_rank_tol1e-6": 1000,
+    "nonaffine_share_within_env": 0.03647485009976671,
+    "N_R2": 0.5003757229683303,
+    "W_R2": 0.015017905819971533,
+    "f_R2": 0.3667837280678099,
+    "joint_R2": 0.47179392185373614,
+    "within_captured_by_f_fit": -1.3011379321955951,
+    "f_summed_rule_acc": 0.2029166666666667,
+    "joint_summed_rule_acc": 0.23008333333333333
+   },
+   "zscaled_w4000": {
+    "width": 4000,
+    "active_frac": 0.504230425,
+    "feature_rank_tol1e-6": 4000,
+    "nonaffine_share_within_env": 0.03697585096435048,
+    "N_R2": 0.6725997820686683,
+    "W_R2": 0.04563498921231712,
+    "f_R2": 0.5070883497471581,
+    "joint_R2": 0.659101251785102,
+    "within_captured_by_f_fit": -0.79126428977714,
+    "f_summed_rule_acc": 0.24816666666666665,
+    "joint_summed_rule_acc": 0.2935833333333333
+   },
+   "zscaled_w8000": {
+    "width": 8000,
+    "active_frac": 0.4992900041666667,
+    "feature_rank_tol1e-6": 7999,
+    "nonaffine_share_within_env": 0.037303428424450724,
+    "N_R2": 0.7399186380104242,
+    "W_R2": 0.0520368506901705,
+    "f_R2": 0.554986832343422,
+    "joint_R2": 0.7306737820895431,
+    "within_captured_by_f_fit": -0.6171989347278357,
+    "f_summed_rule_acc": 0.2665833333333333,
+    "joint_summed_rule_acc": 0.33325000000000005
+   }
+  }
+ },
+ "projection_test": {
+  "status": "measured",
+  "source": "c5_projection_test.json",
+  "definition": "c5: how many principal directions of R1-e5's summed state S does its own read-out need?  Held-out accuracy (T=30) of\nR1-e5's stored marginal read-out applied to S projected on the top-K eigen-directions of S's uncentred second moment\n(training episodes 0-11,999 of the D_critic esn pool; held out 24,000-29,999).  Decides K for the read-out fits c1/c4.",
+  "values": {
+   "64": {
+    "acc_T30": 0.2625,
+    "energy_share": 0.9840662144174875,
+    "readout_norm_share": 0.19265864680366074
+   },
+   "128": {
+    "acc_T30": 0.31816666666666665,
+    "energy_share": 0.9929260206410905,
+    "readout_norm_share": 0.4310167164012499
+   },
+   "256": {
+    "acc_T30": 0.4066666666666667,
+    "energy_share": 0.9974081661798339,
+    "readout_norm_share": 0.7270464437185111
+   },
+   "384": {
+    "acc_T30": 0.4181666666666667,
+    "energy_share": 0.9986942552112211,
+    "readout_norm_share": 0.8119223419421373
+   },
+   "512": {
+    "acc_T30": 0.425,
+    "energy_share": 0.9993149434923494,
+    "readout_norm_share": 0.8673302371544022
+   },
+   "640": {
+    "acc_T30": 0.4266666666666667,
+    "energy_share": 0.9996506785277373,
+    "readout_norm_share": 0.910204169117227
+   },
+   "768": {
+    "acc_T30": 0.4265,
+    "energy_share": 0.999841939968332,
+    "readout_norm_share": 0.9485055288322345
+   },
+   "896": {
+    "acc_T30": 0.428,
+    "energy_share": 0.9999507990493038,
+    "readout_norm_share": 0.9799355903949658
+   },
+   "1000": {
+    "acc_T30": 0.42583333333333334,
+    "energy_share": 1.0,
+    "readout_norm_share": 1.0
+   }
+  }
+ },
+ "marginal_readout_convexity": {
+  "status": "measured (Parts A-C) / computed (Part D)",
+  "source": "c1_marginal_readout_convexity.json",
+  "definition": "c1 (final version): can a prior trap a MARGINAL read-out on fixed features?  (CPU, read-out only, R1-e5's frozen states.)\nFeatures: R1-e5's per-step LSTM outputs u_t (D_critic pool u_esn_2.npy, one fresh environment per episode; episodes\n0-11,999 train, 24,000-29,999 held out), S_t = cumsum u_t, ROTATED onto the top K = 512 eigen-directions of the uncentred\nsecond moment of S (X_t = V_K^T S_t, no rescaling; R1-e5's own read-out keeps 0.425 of its 0.426 held-out accuracy there,\nc5_projection_test). Earlier versions (all 1000 directions whitened; top 256 / 128 whitened) were stopped (c1_old_stopped_*):\nwhitening let Adam over-fit, or the projection lost R1's read-out directions (K = 128: 0.318).\nRead-out: goal block of Y_t = W X_t + t c (W 20 x 512, c 20), per-latent softmax.\nLosses: 'own' (the networks' SANITY loss: soft clip 1e-3, per-value symmetric KL, minus batch min + 1e-8, power 0.5, mean)\nand 'goalCE' = KL(Bayes goal marginal || network), every step.\nPart A (convexity, goalCE): full-batch L-BFGS (strong Wolfe) on the WHITENED top-512 coordinates (each direction divided\nby its RMS) with a small ridge 1e-4 * ||W||^2 / 2 (a first L-BFGS try on the unwhitened rotation had not converged after\n318 evaluations, gradient norm 0.18, and over-fitted: train goalCE 0.74 vs held-out 0.93), from four inits: zero; default (nn.Linear init in R1's\ncoordinates, rotated); r1own (R1-e5's stored read-out, rotated); prior30 (W = 0, c = 15 v, v = +1 on 5 random values and -1\non the other 5 of each latent: a fixed table with a 30-nat step-1 gap, every disfavoured value below the soft-clip floor).\nPart B (the networks' optimiser): Adam lr 1e-3 (constant, as the networks), eps 1e-8, batch 2000 x 30 steps, 1,500 updates,\nloss 'own' from zero / r1own / prior12 (kappa 6) / prior30, and goalCE from prior30 and zero. For prior inits: share of\ndisfavoured (episode, value) pairs with q < 1e-3 at t = 1, 30; mean bias gap; sqrt(v_hat) of the disfavoured biases.\nPart C: loss along segments between end points (max excess over the chord; > 0 violates convexity).\nPart D: one-dimensional 'own' terms in the logit difference (non-convexity).\n",
+  "A": {
+   "zero": {
+    "start": {
+     "acc_T30": 0.0976666659116745,
+     "acc_t10": 0.0976666659116745,
+     "ho_own": 0.4102646240793787,
+     "ho_goalCE": 1.3629601052711549
+    },
+    "final": {
+     "acc_T30": 0.3179999887943268,
+     "acc_t10": 0.2941666543483734,
+     "ho_own": 0.24525992569039853,
+     "ho_goalCE": 0.9968806843685303
+    },
+    "train_objective": 0.68263824612353,
+    "grad_norm": 0.0006798420217819512,
+    "n_evals": 313,
+    "train_goalCE": 0.6691934636925757
+   },
+   "default": {
+    "start": {
+     "acc_T30": 0.09749999642372131,
+     "acc_t10": 0.10116666555404663,
+     "ho_own": 0.39029933418206053,
+     "ho_goalCE": 1.9231757462631975
+    },
+    "final": {
+     "acc_T30": 0.31983333826065063,
+     "acc_t10": 0.29350000619888306,
+     "ho_own": 0.24540422904260625,
+     "ho_goalCE": 0.9975171038607323
+    },
+    "train_objective": 0.6831241943324432,
+    "grad_norm": 0.00261602271348238,
+    "n_evals": 320,
+    "train_goalCE": 0.6693032199071546
+   },
+   "r1own": {
+    "start": {
+     "acc_T30": 0.42500001192092896,
+     "acc_t10": 0.35749998688697815,
+     "ho_own": 0.17051220678180168,
+     "ho_goalCE": 1.9294456145283403
+    },
+    "final": {
+     "acc_T30": 0.3188333213329315,
+     "acc_t10": 0.2916666567325592,
+     "ho_own": 0.24612462017236175,
+     "ho_goalCE": 0.9959690869497237
+    },
+    "train_objective": 0.7016113391821902,
+    "grad_norm": 0.034563664346933365,
+    "n_evals": 313,
+    "train_goalCE": 0.6702628185335288
+   },
+   "prior30": {
+    "start": {
+     "acc_T30": 0.09716666489839554,
+     "acc_t10": 0.09716666489839554,
+     "ho_own": 0.428511445609068,
+     "ho_goalCE": 234.66511216090316,
+     "share_disfavoured_below_1e-3_t1": 1.0,
+     "share_disfavoured_below_1e-3_t30": 1.0,
+     "bias_gap": 30.0
+    },
+    "final": {
+     "acc_T30": 0.3190000057220459,
+     "acc_t10": 0.2941666543483734,
+     "ho_own": 0.24539514542011073,
+     "ho_goalCE": 0.9970901332462391,
+     "share_disfavoured_below_1e-3_t1": 0.0,
+     "share_disfavoured_below_1e-3_t30": 0.3808666666666667,
+     "bias_gap": 0.08744560927152634
+    },
+    "train_objective": 0.6830579711928144,
+    "grad_norm": 0.004412103909999132,
+    "n_evals": 329,
+    "train_goalCE": 0.6692818244654644
+   }
+  },
+  "A_rms_logit_diff_vs_zero": {
+   "zero": 0.0,
+   "default": 0.14302413165569305,
+   "r1own": 0.36355653405189514,
+   "prior30": 0.10743888467550278
+  },
+  "A_answer_agreement_vs_zero": {
+   "zero": 1.0,
+   "default": 0.9893333315849304,
+   "r1own": 0.9623333215713501,
+   "prior30": 0.9896666407585144
+  },
+  "B": {
+   "own|zero": {
+    "final": {
+     "update": 1500,
+     "train_loss": 0.19159353017435485,
+     "acc_T30": 0.2953333258628845,
+     "acc_t10": 0.2723333239555359,
+     "ho_own": 0.2344210224531485,
+     "ho_goalCE": 1.513844341510374
+    },
+    "last20_change_acc": 0.012833327054977417,
+    "last20_change_loss": -0.011414326449398632
+   },
+   "own|r1own": {
+    "final": {
+     "update": 1500,
+     "train_loss": 0.14792020101080547,
+     "acc_T30": 0.40283334255218506,
+     "acc_t10": 0.3479999899864197,
+     "ho_own": 0.17973296193120106,
+     "ho_goalCE": 2.1497456255762235
+    },
+    "last20_change_acc": -0.006833314895629883,
+    "last20_change_loss": 0.0020194299843417363
+   },
+   "own|prior12": {
+    "final": {
+     "update": 1500,
+     "train_loss": 0.2881761534260087,
+     "acc_T30": 0.257999986410141,
+     "acc_t10": 0.24183332920074463,
+     "ho_own": 0.30832387409850703,
+     "ho_goalCE": 81.31868108461222,
+     "share_disfavoured_below_1e-3_t1": 0.0,
+     "share_disfavoured_below_1e-3_t30": 1.0,
+     "bias_gap": 11.599664688110352,
+     "sqrt_vhat_c_disfavoured_median": 1.9749799321289174e-05,
+     "sqrt_vhat_c_favoured_median": 0.004407238215208054
+    },
+    "last20_change_acc": 0.012499988079071045,
+    "last20_change_loss": -0.007503694261716487
+   },
+   "own|prior30": {
+    "final": {
+     "update": 1500,
+     "train_loss": 0.2957633961919791,
+     "acc_T30": 0.25566667318344116,
+     "acc_t10": 0.24166665971279144,
+     "ho_own": 0.31582289152326665,
+     "ho_goalCE": 236.93444917770495,
+     "share_disfavoured_below_1e-3_t1": 1.0,
+     "share_disfavoured_below_1e-3_t30": 1.0,
+     "bias_gap": 30.001577377319336,
+     "sqrt_vhat_c_disfavoured_median": 1.7244363931813016e-16,
+     "sqrt_vhat_c_favoured_median": 0.0043909563682973385
+    },
+    "last20_change_acc": 0.009500011801719666,
+    "last20_change_loss": -0.0073547563250562775
+   },
+   "goalCE|prior30": {
+    "final": {
+     "update": 1500,
+     "train_loss": 138.4540200851763,
+     "acc_T30": 0.2240000069141388,
+     "acc_t10": 0.2161666601896286,
+     "ho_own": 0.40248340649830916,
+     "ho_goalCE": 138.9370648575728,
+     "share_disfavoured_below_1e-3_t1": 0.0042,
+     "share_disfavoured_below_1e-3_t30": 1.0,
+     "bias_gap": 27.013946533203125,
+     "sqrt_vhat_c_disfavoured_median": 0.7763975262641907,
+     "sqrt_vhat_c_favoured_median": 0.7616434097290039
+    },
+    "last20_change_acc": 0.00033333897590637207,
+    "last20_change_loss": -31.14838996115705
+   },
+   "goalCE|zero": {
+    "final": {
+     "update": 1500,
+     "train_loss": 0.7108551569057877,
+     "acc_T30": 0.30516666173934937,
+     "acc_t10": 0.28299999237060547,
+     "ho_own": 0.2674728066866806,
+     "ho_goalCE": 0.9609611604993106
+    },
+    "last20_change_acc": -0.0011666715145111084,
+    "last20_change_loss": -0.0034493896655070078
+   }
+  },
+  "C": {
+   "own: ('own', 'zero') -> ('own', 'r1own')": 0.0,
+   "own: ('lbfgs_goalCE', 'zero') -> ('own', 'r1own')": 0.0,
+   "own: ('own', 'zero') -> ('lbfgs_goalCE', 'zero')": 0.0,
+   "own: ('own', 'prior30') -> ('own', 'zero')": 0.0918930609485537,
+   "own: ('lbfgs_goalCE', 'zero') -> ('lbfgs_goalCE', 'prior30')": 0.0,
+   "goalCE: ('own', 'zero') -> ('own', 'r1own')": 0.0,
+   "goalCE: ('lbfgs_goalCE', 'zero') -> ('own', 'r1own')": 0.0,
+   "goalCE: ('own', 'zero') -> ('lbfgs_goalCE', 'zero')": 0.0,
+   "goalCE: ('own', 'prior30') -> ('own', 'zero')": 0.0,
+   "goalCE: ('lbfgs_goalCE', 'zero') -> ('lbfgs_goalCE', 'prior30')": 0.0
+  },
+  "D": {
+   "D_one_dim_per_value_term_value0": {
+    "min_second_derivative": -0.22808853511683908,
+    "at_s": -6.575,
+    "share_of_grid_concave": 0.7709939570743904
+   },
+   "D_one_dim_per_value_sqrt_value0": {
+    "min_second_derivative": -0.0990483103979446,
+    "at_s": -6.52,
+    "share_of_grid_concave": 0.9426963950823088
+   },
+   "D_one_dim_sum_of_sqrt_terms": {
+    "min_second_derivative": -0.12649152600015465,
+    "at_s": -1.4749999999999999,
+    "share_of_grid_concave": 0.9539487393206918
+   },
+   "D_one_dim_goalCE": {
+    "min_second_derivative": 5.1221960006825965e-06,
+    "at_s": 11.975,
+    "share_of_grid_concave": 0.0
+   }
+  }
+ },
+ "marginal_start_readout": {
+  "status": "measured",
+  "source": "c4_marginal_start_readout.json",
+  "definition": "c4: the start state as a 'prior' for the MARGINAL ESN, read-out only.  (CPU; forward passes of R1-e5 + read-out fits.)\nR1-e5 (sanity/reservoir_ctx_2_e5: read-in Linear(15->1000)+ReLU, frozen LSTM-1000, marginal read-out) is re-run on the\nD_critic pool's episodes (meta_esn_2.npz: fresh environment per episode; train 0-11,999, held out 24,000-29,999) with three\nstart states (h0, c0): 'native' (R1-e5's stored STM, LTM; checked against the pool's stored u_t), 'zero', and\n'episode_random' (an independent N(0,1) draw of h0 and of c0 for every episode, not trainable; seed 7).\nFor each: ||M_1||_1 (episode mean of u_1, L1 over units), the episode-independent share of u_s (||mean u_s||^2 / mean ||u_s||^2),\nand the read-out-only marginal optimum under goalCE (convex; summed logits W S_t + t c, goal block, per-latent softmax),\nfound by full-batch L-BFGS from zero on S projected on the top-512 eigen-directions of that variant's own S and whitened there,\nwith ridge lambda * ||W||^2 / 2 for lambda in {1e-4, 1e-3, 1e-2} (as c1 part A; with 1e-4 alone the goalCE optimum\nover-fits the 12,000 training environments: c1 part A from zero, train goalCE 0.67 vs held-out 1.00, accuracy 0.32);\nreported per lambda and for the lambda with the lowest held-out goalCE.\nAlso: R1-e5's own stored read-out applied to each variant's states (no refit).\n",
+  "check_native_vs_pool": 0.0002440810203552246,
+  "values": {
+   "native": {
+    "M1_l1": 148.96435546875,
+    "M30_l1": 1862.415771484375,
+    "share_episode_independent_u_s": {
+     "1": 0.9550229907035828,
+     "2": 0.8211024403572083,
+     "3": 0.6619894504547119,
+     "5": 0.5600481629371643,
+     "30": 0.5567538142204285
+    },
+    "own_readout_no_refit": {
+     "acc_T30": 0.4259999990463257,
+     "acc_t10": 0.36016666889190674,
+     "acc_t1": 0.19433332979679108,
+     "ho_own": 0.16867371838382872,
+     "ho_goalCE": 1.9043191690397048
+    },
+    "energy_share_topK": 0.9993149450133254,
+    "own_readout_projected_topK": {
+     "acc_T30": 0.42516666650772095,
+     "acc_t10": 0.35716667771339417,
+     "acc_t1": 0.20016667246818542,
+     "ho_own": 0.17051214890535424,
+     "ho_goalCE": 1.9294415288183033
+    },
+    "fit_goalCE_lbfgs": {
+     "0.0001": {
+      "final": {
+       "acc_T30": 0.3186666667461395,
+       "acc_t10": 0.29483333230018616,
+       "acc_t1": 0.18516667187213898,
+       "ho_own": 0.24529827728999287,
+       "ho_goalCE": 0.9967974093084675
+      },
+      "train_objective": 0.6826400997887465,
+      "train_goalCE": 0.6692185027172696,
+      "grad_norm": 0.0006151959532871842
+     },
+     "0.001": {
+      "final": {
+       "acc_T30": 0.30133333802223206,
+       "acc_t10": 0.27916666865348816,
+       "acc_t1": 0.17766666412353516,
+       "ho_own": 0.26900227723004766,
+       "ho_goalCE": 0.9691799950026995
+      },
+      "train_objective": 0.7590665771012716,
+      "train_goalCE": 0.7003431210927177,
+      "grad_norm": 2.72773777396651e-05
+     },
+     "0.01": {
+      "final": {
+       "acc_T30": 0.27383333444595337,
+       "acc_t10": 0.25699999928474426,
+       "acc_t1": 0.1599999964237213,
+       "ho_own": 0.32402026215389895,
+       "ho_goalCE": 1.0280062320114531
+      },
+      "train_objective": 0.9576411268350951,
+      "train_goalCE": 0.8474094771807625,
+      "grad_norm": 1.384404913551407e-05
+     }
+    },
+    "best_lambda_by_heldout_goalCE": "0.001"
+   },
+   "zero": {
+    "M1_l1": 32.626285552978516,
+    "M30_l1": 1884.3856201171875,
+    "share_episode_independent_u_s": {
+     "1": 0.5162175893783569,
+     "2": 0.5446153283119202,
+     "3": 0.5525165796279907,
+     "5": 0.5559708476066589,
+     "30": 0.5567540526390076
+    },
+    "own_readout_no_refit": {
+     "acc_T30": 0.4241666793823242,
+     "acc_t10": 0.34950000047683716,
+     "acc_t1": 0.1886666715145111,
+     "ho_own": 0.17358401433111398,
+     "ho_goalCE": 1.9313838503032965
+    },
+    "energy_share_topK": 0.9993513399438206,
+    "own_readout_projected_topK": {
+     "acc_T30": 0.4216666519641876,
+     "acc_t10": 0.3491666615009308,
+     "acc_t1": 0.18933333456516266,
+     "ho_own": 0.1752217891186682,
+     "ho_goalCE": 1.9545530824901223
+    },
+    "fit_goalCE_lbfgs": {
+     "0.0001": {
+      "final": {
+       "acc_T30": 0.31450000405311584,
+       "acc_t10": 0.2931666672229767,
+       "acc_t1": 0.18916666507720947,
+       "ho_own": 0.24597616263318903,
+       "ho_goalCE": 1.0112946875636004
+      },
+      "train_objective": 0.6804639955146403,
+      "train_goalCE": 0.6665409823576669,
+      "grad_norm": 0.0009315948700532317
+     },
+     "0.001": {
+      "final": {
+       "acc_T30": 0.29866665601730347,
+       "acc_t10": 0.2854999899864197,
+       "acc_t1": 0.18549999594688416,
+       "ho_own": 0.2701552660183711,
+       "ho_goalCE": 0.9788149695491684
+      },
+      "train_objective": 0.7589011196060422,
+      "train_goalCE": 0.6990377122219528,
+      "grad_norm": 3.19564642268233e-05
+     },
+     "0.01": {
+      "final": {
+       "acc_T30": 0.2709999978542328,
+       "acc_t10": 0.25816667079925537,
+       "acc_t1": 0.17033334076404572,
+       "ho_own": 0.3253142777098652,
+       "ho_goalCE": 1.0332445862954798
+      },
+      "train_objective": 0.9597478848726703,
+      "train_goalCE": 0.8490023829025514,
+      "grad_norm": 3.5845685033564223e-06
+     }
+    },
+    "best_lambda_by_heldout_goalCE": "0.001"
+   },
+   "episode_random": {
+    "M1_l1": 21.300479888916016,
+    "M30_l1": 1859.523681640625,
+    "share_episode_independent_u_s": {
+     "1": 0.012682674452662468,
+     "2": 0.11201225966215134,
+     "3": 0.29729002714157104,
+     "5": 0.5104535818099976,
+     "30": 0.5567539930343628
+    },
+    "own_readout_no_refit": {
+     "acc_T30": 0.2759999930858612,
+     "acc_t10": 0.16816666722297668,
+     "acc_t1": 0.10516666620969772,
+     "ho_own": 0.32868682801149235,
+     "ho_goalCE": 7.981832231741959
+    },
+    "energy_share_topK": 0.9758241451418317,
+    "own_readout_projected_topK": {
+     "acc_T30": 0.2759999930858612,
+     "acc_t10": 0.17399999499320984,
+     "acc_t1": 0.10466666519641876,
+     "ho_own": 0.3259193547662716,
+     "ho_goalCE": 7.517792954359344
+    },
+    "fit_goalCE_lbfgs": {
+     "0.0001": {
+      "final": {
+       "acc_T30": 0.2485000044107437,
+       "acc_t10": 0.18400000035762787,
+       "acc_t1": 0.10316666960716248,
+       "ho_own": 0.3173796980895772,
+       "ho_goalCE": 1.1933958412917678
+      },
+      "train_objective": 0.9156846491943056,
+      "train_goalCE": 0.9126231026126932,
+      "grad_norm": 2.9739763704128563e-05
+     },
+     "0.001": {
+      "final": {
+       "acc_T30": 0.2475000023841858,
+       "acc_t10": 0.18166667222976685,
+       "acc_t1": 0.10300000011920929,
+       "ho_own": 0.3241700193347494,
+       "ho_goalCE": 1.1808827961631434
+      },
+      "train_objective": 0.9385123716171705,
+      "train_goalCE": 0.9164155086759818,
+      "grad_norm": 1.7177837435156107e-05
+     },
+     "0.01": {
+      "final": {
+       "acc_T30": 0.23466666042804718,
+       "acc_t10": 0.17283333837985992,
+       "acc_t1": 0.10533333569765091,
+       "ho_own": 0.3524242235914777,
+       "ho_goalCE": 1.1727163977152544
+      },
+      "train_objective": 1.0469795157069584,
+      "train_goalCE": 0.9719567095656713,
+      "grad_norm": 1.8022614312940277e-05
+     }
+    },
+    "best_lambda_by_heldout_goalCE": "0.01"
+   }
+  }
+ },
+ "within_env_bit_degree": {
+  "status": "computed",
+  "source": "c6_walsh_within.json",
+  "definition": "c6: inside one environment, how much of the within-step part W (and of the step-wise target f) is linear in the 5 bits\nand how much is interaction among bits?  (CPU, exact enumeration of the 32 bit patterns; nothing trained.)\nFor 3,000 environments (z of pool episodes 0-2,999) and goal latent r0 (r1 is the same by symmetry): for every pattern o,\nf(j;o) = log mean_k prod_i P(o_i|j,k,z) (centred over j), N(j;o) = sum_i log mean_k P(o_i|j,k,z) (centred), W = f - N.\nWithin each environment, weighted least squares of each table (10 values x 32 patterns) on [1, o_1..o_5] with weights\nw(o) = P(o|z) (patterns drawn from a uniform cell = the data law): the fit is the 'degree <= 1' (count-linear) part, the\nresidual the interaction part (degree >= 2 under that law). Shares are of the data-law variance pooled over environments.\nA count-linear rule dedicated to one environment can use the degree<=1 part; no count-linear rule can use the interaction\npart. Also: the share of W's degree<=1 part that a SHARED per-bit additive function captures is ~0 (a2: W R^2 0.0005).\n",
+  "values": {
+   "W": {
+    "var_total_about_pattern_mean": 3.22060298966634,
+    "var_incl_env_constant": 3.2658732714134917,
+    "share_degree_le1_of_pattern_variance": 0.1621568887734034,
+    "share_interaction_of_pattern_variance": 0.8378431112265966,
+    "env_constant_share_of_total": 0.01386161616968029
+   },
+   "f": {
+    "var_total_about_pattern_mean": 11.57037709928781,
+    "var_incl_env_constant": 12.110445875939394,
+    "share_degree_le1_of_pattern_variance": 0.766787200993318,
+    "share_interaction_of_pattern_variance": 0.23321279900668201,
+    "env_constant_share_of_total": 0.044595284284666414
+   },
+   "N": {
+    "var_total_about_pattern_mean": 8.407392198054472,
+    "var_incl_env_constant": 8.949582327492124,
+    "share_degree_le1_of_pattern_variance": 1.0,
+    "share_interaction_of_pattern_variance": 1.1662221523534749e-29,
+    "env_constant_share_of_total": 0.060582729964068105
+   }
+  }
+ },
+ "marginal_entropy_readout": {
+  "status": "measured",
+  "source": "c7_marginal_entropy_readout.json",
+  "definition": "c7: an entropy bonus on a MARGINAL read-out of R1-e5's frozen states (read-out only).  (CPU.)\nSame features and fitting as c4 ('native' start: the D_critic esn pool's stored u_t; episodes 0-11,999 train,\n24,000-29,999 held out; S projected on its top-512 eigen-directions and whitened there; ridge 1e-3 * ||W||^2 / 2),\nobjective goalCE - beta * mean_{e,t} H(q_goal), q_goal = the read-out's goal marginal; beta in {0, 0.003, 0.01, 0.03, 0.1};\nfull-batch L-BFGS from zero. Reports held-out T=30 / t=10 accuracy, held-out goalCE, 'own', and the mean goal entropy at\nT=30 (Bayes's own mean goal entropy at T=30 for reference). Prediction (notes 4(iii)): accuracy within +-0.02 of beta = 0.\n",
+  "bayes_mean_goal_entropy_T30": 0.5274433740864811,
+  "values": {
+   "0.0": {
+    "acc_T30": 0.30133333802223206,
+    "acc_t10": 0.27916666865348816,
+    "ho_goalCE": 0.9691806420247766,
+    "ho_own": 0.26900528399369866,
+    "mean_goal_entropy_T30": 1.330606181632637
+   },
+   "0.003": {
+    "acc_T30": 0.30149999260902405,
+    "acc_t10": 0.27900001406669617,
+    "ho_goalCE": 0.9687088558468512,
+    "ho_own": 0.269150551404856,
+    "mean_goal_entropy_T30": 1.3322424612249764
+   },
+   "0.01": {
+    "acc_T30": 0.30149999260902405,
+    "acc_t10": 0.2788333296775818,
+    "ho_goalCE": 0.9676243049540423,
+    "ho_own": 0.2694995791088351,
+    "mean_goal_entropy_T30": 1.3361113261971307
+   },
+   "0.03": {
+    "acc_T30": 0.3018333315849304,
+    "acc_t10": 0.27933332324028015,
+    "ho_goalCE": 0.964667959812558,
+    "ho_own": 0.27051901982058046,
+    "mean_goal_entropy_T30": 1.3472158044376539
+   },
+   "0.1": {
+    "acc_T30": 0.3021666705608368,
+    "acc_t10": 0.2796666622161865,
+    "ho_goalCE": 0.9558849444346159,
+    "ho_own": 0.2742843946817855,
+    "mean_goal_entropy_T30": 1.386372638385692
+   }
+  }
+ },
+ "marginal_start_ownrefit": {
+  "status": "measured",
+  "source": "c8_marginal_start_ownrefit.json",
+  "definition": "c8: the start state as a 'prior' for the MARGINAL ESN, read-out only, with the networks' own loss (CPU).\nR1-e5 re-run on the D_critic esn pool's episodes (train 0-11,999, held out 24,000-29,999) with three start states:\n'native' (stored STM, LTM), 'zero', 'episode_random' (independent N(0,1) h0 and c0 per episode, seed 7), as c4.\nFor each, R1-e5's own read-out (W 20 x 1000, c 20, on the full summed state S_t, no projection) is (a) applied as is and\n(b) re-fitted with the networks' loss 'own' (Adam lr 1e-3 for 1,000 updates, then cosine to 1e-5 over 500; eps 1e-8;\nbatch 2000 x 30 steps; fp32) starting from R1-e5's read-out: the nearest 'own'-optimum of each variant's states.\nc4 gives the goalCE optima (which are far less accurate than R1's own read-out: 0.30-0.32 vs 0.425 on native states),\nso this is the comparison at R1's own operating point. Prediction (notes 4(iii)): episode_random within -0.03..+0.01 of\nnative after refit; zero within +-0.02 of native (start 0 gave R1 nothing in full training).\n",
+  "values": {
+   "native": {
+    "as_is": {
+     "acc_T30": 0.4259999990463257,
+     "acc_t10": 0.36016666889190674,
+     "acc_t1": 0.19433332979679108,
+     "ho_own": 0.16867371838382872,
+     "ho_goalCE": 1.9043191690397048
+    },
+    "refit": {
+     "update": 1500,
+     "train_own": 0.15872883638472451,
+     "acc_T30": 0.4169999957084656,
+     "acc_t10": 0.35499998927116394,
+     "acc_t1": 0.2029999941587448,
+     "ho_own": 0.1721187086924818,
+     "ho_goalCE": 1.9792454328899456
+    },
+    "refit_last20_change_acc": 0.002333343029022217
+   },
+   "zero": {
+    "as_is": {
+     "acc_T30": 0.4241666793823242,
+     "acc_t10": 0.34950000047683716,
+     "acc_t1": 0.1886666715145111,
+     "ho_own": 0.17358401433111398,
+     "ho_goalCE": 1.9313838503032965
+    },
+    "refit": {
+     "update": 1500,
+     "train_own": 0.1594719787140489,
+     "acc_T30": 0.41183334589004517,
+     "acc_t10": 0.3543333411216736,
+     "acc_t1": 0.19816666841506958,
+     "ho_own": 0.17311545213000143,
+     "ho_goalCE": 1.9851167812467778
+    },
+    "refit_last20_change_acc": -0.0034999847412109375
+   },
+   "episode_random": {
+    "as_is": {
+     "acc_T30": 0.2759999930858612,
+     "acc_t10": 0.16816666722297668,
+     "acc_t1": 0.10516666620969772,
+     "ho_own": 0.32868682801149235,
+     "ho_goalCE": 7.981832231741959
+    },
+    "refit": {
+     "update": 1500,
+     "train_own": 0.2719449064268508,
+     "acc_T30": 0.28049999475479126,
+     "acc_t10": 0.17733334004878998,
+     "acc_t1": 0.10649999976158142,
+     "ho_own": 0.3213702434154469,
+     "ho_goalCE": 7.982409911332787
+    },
+    "refit_last20_change_acc": -0.00016668438911437988
+   }
+  }
+ },
+ "marginal_target_test": {
+  "status": "measured",
+  "source": "c9_marginal_target_test.json",
+  "definition": "c9: is the depth-1 MARGINAL per-step learner slow because its Bayes target is unreachable (misspecification noise)?\n(CPU, 3 threads; mem_harness imported read-only: generator, references, MemNet, losses.)\nThree identical memoryless marginal nets (MemNet depth 1, width 1000, out 20; PyTorch default init with the same seed),\ntrained on the SAME fresh-environment batches (batch 2000, Adam lr 1e-3, eps 1e-8, loss 'own' = the networks' loss)\ntoward three different goal-marginal targets at every step:\n  bayes : Bayes's goal marginal (the networks' target; = run_marginal e2e m1),\n  step  : the step-wise rule's cumulative goal marginal (softmax over values of sum_s log mean_k P(o_s|j,k)),\n  naive : naive's cumulative goal marginal.\nEach target is the exact posterior of a model in which the other latent persists for the whole episode (bayes), for one\nstep (step) or for one bit (naive); 'naive' is representable by a depth-1 per-step net, 'step' only partly.\nHeld-out: 8,000 fixed episodes (mem_harness cache, seed 20261027): goal accuracy at T = 30 against the TRUE value, and\nagreement of the network's T=30 answer with its own target rule's answer.\nPrediction (notes, open item 8, written before running): the naive-target net reaches naive's accuracy (~0.45) by 5k\nupdates, faster than the bayes-target net; the step-target net learns at least as fast as the bayes-target net.\n",
+  "heldout_reference_acc_T30": {
+   "bayes": 0.7747499942779541,
+   "naive": 0.4496249854564667,
+   "step": 0.6148750185966492
+  },
+  "curves": {
+   "bayes": [
+    {
+     "update": 100,
+     "acc_T30": 0.14387500286102295,
+     "acc_t10": 0.14174999296665192,
+     "agree_bayes_T30": 0.14662499725818634,
+     "agree_naive_T30": 0.15037499368190765,
+     "agree_step_T30": 0.1523749977350235
+    },
+    {
+     "update": 250,
+     "acc_T30": 0.17212499678134918,
+     "acc_t10": 0.164000004529953,
+     "agree_bayes_T30": 0.17274999618530273,
+     "agree_naive_T30": 0.19237500429153442,
+     "agree_step_T30": 0.18150000274181366
+    },
+    {
+     "update": 500,
+     "acc_T30": 0.19812500476837158,
+     "acc_t10": 0.1926250010728836,
+     "agree_bayes_T30": 0.20237499475479126,
+     "agree_naive_T30": 0.23137499392032623,
+     "agree_step_T30": 0.21462500095367432
+    },
+    {
+     "update": 1000,
+     "acc_T30": 0.23800000548362732,
+     "acc_t10": 0.22175000607967377,
+     "agree_bayes_T30": 0.2318750023841858,
+     "agree_naive_T30": 0.28737500309944153,
+     "agree_step_T30": 0.25450000166893005
+    },
+    {
+     "update": 1500,
+     "acc_T30": 0.26087498664855957,
+     "acc_t10": 0.24587500095367432,
+     "agree_bayes_T30": 0.2591249942779541,
+     "agree_naive_T30": 0.3408749997615814,
+     "agree_step_T30": 0.2879999876022339
+    },
+    {
+     "update": 2000,
+     "acc_T30": 0.28187501430511475,
+     "acc_t10": 0.26087498664855957,
+     "agree_bayes_T30": 0.28299999237060547,
+     "agree_naive_T30": 0.382874995470047,
+     "agree_step_T30": 0.3226250112056732
+    },
+    {
+     "update": 3000,
+     "acc_T30": 0.3140000104904175,
+     "acc_t10": 0.28462499380111694,
+     "agree_bayes_T30": 0.3178749978542328,
+     "agree_naive_T30": 0.44350001215934753,
+     "agree_step_T30": 0.36912500858306885
+    },
+    {
+     "update": 4000,
+     "acc_T30": 0.33662500977516174,
+     "acc_t10": 0.30649998784065247,
+     "agree_bayes_T30": 0.3395000100135803,
+     "agree_naive_T30": 0.4819999933242798,
+     "agree_step_T30": 0.40412500500679016
+    },
+    {
+     "update": 5000,
+     "acc_T30": 0.3527500033378601,
+     "acc_t10": 0.3163749873638153,
+     "agree_bayes_T30": 0.36500000953674316,
+     "agree_naive_T30": 0.5090000033378601,
+     "agree_step_T30": 0.4300000071525574
+    }
+   ],
+   "step": [
+    {
+     "update": 100,
+     "acc_T30": 0.15662500262260437,
+     "acc_t10": 0.15337499976158142,
+     "agree_bayes_T30": 0.1589999943971634,
+     "agree_naive_T30": 0.16625000536441803,
+     "agree_step_T30": 0.16075000166893005
+    },
+    {
+     "update": 250,
+     "acc_T30": 0.18837499618530273,
+     "acc_t10": 0.1811250001192093,
+     "agree_bayes_T30": 0.19200000166893005,
+     "agree_naive_T30": 0.23887500166893005,
+     "agree_step_T30": 0.20762500166893005
+    },
+    {
+     "update": 500,
+     "acc_T30": 0.2238750010728836,
+     "acc_t10": 0.21150000393390656,
+     "agree_bayes_T30": 0.22237500548362732,
+     "agree_naive_T30": 0.27649998664855957,
+     "agree_step_T30": 0.24312500655651093
+    },
+    {
+     "update": 1000,
+     "acc_T30": 0.26237499713897705,
+     "acc_t10": 0.2446250021457672,
+     "agree_bayes_T30": 0.2574999928474426,
+     "agree_naive_T30": 0.35062500834465027,
+     "agree_step_T30": 0.2938750088214874
+    },
+    {
+     "update": 1500,
+     "acc_T30": 0.27937498688697815,
+     "acc_t10": 0.26524999737739563,
+     "agree_bayes_T30": 0.28325000405311584,
+     "agree_naive_T30": 0.398250013589859,
+     "agree_step_T30": 0.3187499940395355
+    },
+    {
+     "update": 2000,
+     "acc_T30": 0.30274999141693115,
+     "acc_t10": 0.2797499895095825,
+     "agree_bayes_T30": 0.30512499809265137,
+     "agree_naive_T30": 0.4261249899864197,
+     "agree_step_T30": 0.3512499928474426
+    },
+    {
+     "update": 3000,
+     "acc_T30": 0.3332499861717224,
+     "acc_t10": 0.30262500047683716,
+     "agree_bayes_T30": 0.33662500977516174,
+     "agree_naive_T30": 0.4950000047683716,
+     "agree_step_T30": 0.40400001406669617
+    },
+    {
+     "update": 4000,
+     "acc_T30": 0.35612499713897705,
+     "acc_t10": 0.31575000286102295,
+     "agree_bayes_T30": 0.3659999966621399,
+     "agree_naive_T30": 0.5418750047683716,
+     "agree_step_T30": 0.4423750042915344
+    },
+    {
+     "update": 5000,
+     "acc_T30": 0.37599998712539673,
+     "acc_t10": 0.328125,
+     "agree_bayes_T30": 0.3851250112056732,
+     "agree_naive_T30": 0.5659999847412109,
+     "agree_step_T30": 0.46775001287460327
+    }
+   ],
+   "naive": [
+    {
+     "update": 100,
+     "acc_T30": 0.1693750023841858,
+     "acc_t10": 0.16762499511241913,
+     "agree_bayes_T30": 0.16824999451637268,
+     "agree_naive_T30": 0.21287499368190765,
+     "agree_step_T30": 0.18799999356269836
+    },
+    {
+     "update": 250,
+     "acc_T30": 0.20350000262260437,
+     "acc_t10": 0.19724999368190765,
+     "agree_bayes_T30": 0.2029999941587448,
+     "agree_naive_T30": 0.2630000114440918,
+     "agree_step_T30": 0.22237500548362732
+    },
+    {
+     "update": 500,
+     "acc_T30": 0.22962500154972076,
+     "acc_t10": 0.22224999964237213,
+     "agree_bayes_T30": 0.22550000250339508,
+     "agree_naive_T30": 0.29624998569488525,
+     "agree_step_T30": 0.2487500011920929
+    },
+    {
+     "update": 1000,
+     "acc_T30": 0.26649999618530273,
+     "acc_t10": 0.2540000081062317,
+     "agree_bayes_T30": 0.2626250088214874,
+     "agree_naive_T30": 0.3801249861717224,
+     "agree_step_T30": 0.3062500059604645
+    },
+    {
+     "update": 1500,
+     "acc_T30": 0.2927500009536743,
+     "acc_t10": 0.2762500047683716,
+     "agree_bayes_T30": 0.2904999852180481,
+     "agree_naive_T30": 0.42500001192092896,
+     "agree_step_T30": 0.3362500071525574
+    },
+    {
+     "update": 2000,
+     "acc_T30": 0.30662500858306885,
+     "acc_t10": 0.28862500190734863,
+     "agree_bayes_T30": 0.30562499165534973,
+     "agree_naive_T30": 0.47487500309944153,
+     "agree_step_T30": 0.3606249988079071
+    },
+    {
+     "update": 3000,
+     "acc_T30": 0.34850001335144043,
+     "acc_t10": 0.30387499928474426,
+     "agree_bayes_T30": 0.3555000126361847,
+     "agree_naive_T30": 0.5665000081062317,
+     "agree_step_T30": 0.4247500002384186
+    },
+    {
+     "update": 4000,
+     "acc_T30": 0.36537501215934753,
+     "acc_t10": 0.3238750100135803,
+     "agree_bayes_T30": 0.3763749897480011,
+     "agree_naive_T30": 0.6221250295639038,
+     "agree_step_T30": 0.4612500071525574
+    },
+    {
+     "update": 5000,
+     "acc_T30": 0.3840000033378601,
+     "acc_t10": 0.3371250033378601,
+     "agree_bayes_T30": 0.3889999985694885,
+     "agree_naive_T30": 0.6661249995231628,
+     "agree_step_T30": 0.48362499475479126
+    }
+   ]
+  }
+ },
+ "random_start_offset": {
+  "status": "measured",
+  "source": "c10_random_start_offset.json",
+  "definition": "c10: is a per-episode random start a random per-episode PRIOR for the marginal ESN?  (CPU, forward passes only.)\nR1-e5 on 3,000 pool episodes (D_critic esn pool, 24,000-26,999), run twice on identical observations: with its native\n(trained, shared) start state and with an independent N(0,1) start per episode. With R1-e5's own read-out, the goal-logit\ndifference D_t = Y_t(random) - Y_t(native) (centred over the 10 goal values) is the random start's contribution.\nReported per step t: RMS of D_t; the fraction of D_t that is constant after the transient (corr of D_t with D_30);\nRMS of the native logits' episode-dependent part (centred over values, minus the episode mean); and the accuracy change.\nIf D_t settles to a fixed per-episode vector of size comparable to the evidence part, the random start acts as a random\nprior over the goal values redrawn every episode.\n",
+  "by_step": {
+   "1": {
+    "rms_offset": 4.2010884284973145,
+    "rms_native_episode_part": 0.762226402759552,
+    "corr_with_offset_T30": 0.934916079044342,
+    "acc_native": 0.2006666660308838,
+    "acc_random": 0.11266666650772095
+   },
+   "2": {
+    "rms_offset": 6.729169845581055,
+    "rms_native_episode_part": 1.5632139444351196,
+    "corr_with_offset_T30": 0.9695024490356445,
+    "acc_native": 0.23800000548362732,
+    "acc_random": 0.11366666853427887
+   },
+   "3": {
+    "rms_offset": 8.279366493225098,
+    "rms_native_episode_part": 2.4541854858398438,
+    "corr_with_offset_T30": 0.9848621487617493,
+    "acc_native": 0.26466667652130127,
+    "acc_random": 0.11733333021402359
+   },
+   "5": {
+    "rms_offset": 9.789843559265137,
+    "rms_native_episode_part": 4.329928874969482,
+    "corr_with_offset_T30": 0.9963617920875549,
+    "acc_native": 0.31333333253860474,
+    "acc_random": 0.12666666507720947
+   },
+   "10": {
+    "rms_offset": 10.604228973388672,
+    "rms_native_episode_part": 9.112569808959961,
+    "corr_with_offset_T30": 0.9999106526374817,
+    "acc_native": 0.36500000953674316,
+    "acc_random": 0.1653333306312561
+   },
+   "20": {
+    "rms_offset": 10.679139137268066,
+    "rms_native_episode_part": 18.606901168823242,
+    "corr_with_offset_T30": 1.0000029802322388,
+    "acc_native": 0.40966665744781494,
+    "acc_random": 0.23499999940395355
+   },
+   "30": {
+    "rms_offset": 10.6797513961792,
+    "rms_native_episode_part": 28.21247100830078,
+    "corr_with_offset_T30": 1.0000028610229492,
+    "acc_native": 0.4286666810512543,
+    "acc_random": 0.28299999237060547
+   }
+  },
+  "offset_T30_share_explained_by_native_logits": 0.001260995864868164
+ },
+ "marginal_entropy_own_adam": {
+  "status": "measured",
+  "source": "c11_marginal_entropy_own_adam.json",
+  "definition": "c11: entropy bonus on a MARGINAL read-out with the networks' loss and optimiser (matched to run_joint A3's design:\nread-out from zero, loss 'own' - beta * mean_{e,t} H(goal marginal), Adam lr 1e-3, eps 1e-8). CPU.\nFeatures: R1-e5's frozen states, as c1 Part B (S projected on its top-512 eigen-directions, unwhitened; train pool\nepisodes 0-11,999, held out 24,000-29,999); batch 2000 x 30 steps; 1,500 updates (CPU budget; c1 Part B: from zero 'own'\nreaches 0.295 at 1,500 and is still rising), beta in {0, 0.03, 0.1}; same batches for all betas.\nQuestion: does an entropy bonus change the marginal read-out's accuracy, as it changes the joint read-out's\n(run_joint A3: 0.454 -> 0.585 / 0.593 at beta 0.03 / 0.1)?  Prediction (notes 4(ii)): no (within +-0.02).\n",
+  "runs": {
+   "0.0": {
+    "final": {
+     "update": 1500,
+     "acc_T30": 0.2953333258628845,
+     "acc_t10": 0.2723333239555359,
+     "ho_own": 0.2344210224531485,
+     "mean_goal_entropy_T30": 0.7809247818080987
+    },
+    "change_last_250": 0.003999978303909302
+   },
+   "0.03": {
+    "final": {
+     "update": 1500,
+     "acc_T30": 0.30300000309944153,
+     "acc_t10": 0.2798333466053009,
+     "ho_own": 0.23412750229193063,
+     "mean_goal_entropy_T30": 0.9014824196359649
+    },
+    "change_last_250": 0.006999999284744263
+   },
+   "0.1": {
+    "final": {
+     "update": 1500,
+     "acc_T30": 0.32216668128967285,
+     "acc_t10": 0.2901666760444641,
+     "ho_own": 0.24042980982405904,
+     "mean_goal_entropy_T30": 1.1519615974833215
+    },
+    "change_last_250": 0.005833357572555542
+   }
+  }
+ },
+ "external_results_used": {
+  "note": "numbers read from other agents' folders for the predictions-vs-results comparison (their definitions apply); see notes.md section 6",
+  "run_esn": "learn4/run_esn/results.json and out/*.json (an1 increments, an2 gates, an3 windows, an4 lesions, an5 fixed logits, ro_A/ro_B read-outs)",
+  "run_marginal": "learn4/run_marginal/results_runs.json, runs/*/*.json, logs/*.log (e2e_d1_s0, e2e_d2_s0, fit_all, e2e_d1_x)",
+  "run_joint": "learn4/run_joint/runs/*/metrics.json, logs/A.log (A1, A3 entropy, B2 episode_random)",
+  "run_fullesn": "learn4/run_fullesn/runs/*/log.jsonl, offline/*.json"
+ },
+ "predictions_v2_scored": {
+  "note": "scored after the results; predictions_v2.json is the unchanged pre-results record",
+  "scored": [
+   {
+    "id": "G1",
+    "claim": "A marginal read-out on frozen features under goalCE is convex in (W, c): from zero, PyTorch default init, and a deliberately 'prior-loaded' init (large episode-independent goal-logit table), goalCE read-out training on R1-e5's frozen states ends at the same held-out loss (within 1%) and accuracy (within 0.01). Under 'own' (not convex) the same holds within 0.02 accuracy, except that an init putting goal values below the soft-clip floor (q < 1e-3) in most episodes can slow their recovery.",
+    "result": "goalCE: L-BFGS from zero/default/R1 read-out/30-nat prior -> one solution (objective 0.683/0.683/0.702/0.683; acc 0.318-0.320; answers agree 96-99%; prior erased). own: 30-nat prior frozen (gap 30.00 after 1,500 Adam updates), 12-nat frozen at 11.6; from zero own is slow (0.295 at 1,500, rising); own non-convex along a segment (+0.092)",
+    "verdict": "partly: goalCE part confirmed; own-part caveat understated (freeze, not slow recovery); own convergence part untested"
+   },
+   {
+    "id": "MF1",
+    "claim": "At matched updates its acc is within +-0.04 of R1's own from-scratch curve (0.196 / 0.363 / 0.420 at 500 / 5k / 25k; interpolate log-linearly), most likely slightly below it in the first ~2k updates.",
+    "result": "B (marginal ESN, per-episode random start) 0.189/0.217/0.238/0.261/0.277/0.282 at 0.5k/1k/1.5k/2k/3k/3.5k; minus R1: -0.008/-0.005/-0.034/-0.023/-0.047/-0.053",
+    "verdict": "refuted from ~2.5k on (B falls behind R1); revised prediction (0.05-0.15 below, written 12:40) reached only at the last checkpoint"
+   },
+   {
+    "id": "MF2",
+    "claim": "Never above 0.45 within its budget; extrapolated (if fitted) to <= 0.46 at 50k updates.",
+    "result": "B max 0.282 within its budget (3.5k updates)",
+    "verdict": "confirmed (trivially at this length)"
+   },
+   {
+    "id": "MF3",
+    "claim": "The fixed (episode-mean) goal logits are not an arbitrary written prior: centred over goal values, their profile at T=30 correlates >= 0.7 with naive's own episode-mean centred log-belief profile on comparable episodes (computed by me, c2), and their spread (SD over values) is within a factor 2 of naive's.",
+    "result": "B fixed goal-logit spread at T=30 14.6-17.1 nats vs naive 17.1 (run_fullesn); R1-e5 R^2 0.996 on naive profile, scale 1.59 (run_esn an5)",
+    "verdict": "confirmed (spread and profile); correlation for B not reported"
+   },
+   {
+    "id": "JF1",
+    "claim": "Acc at matched updates within +-0.05 of R4 (start 0 frozen, from scratch: 0.20 / 0.31 / 0.40 / 0.47 / 0.49 / 0.52 at 0.5k / 2k / 5k / 8k / 10k / 14.5k).",
+    "result": "A (joint ESN, per-episode random start) 0.185/0.228/0.258/0.267/0.295/0.317 at 0.5k/1k/1.5k/2k/3k/4k; minus R4: -0.014/-0.020/-0.025/-0.041/-0.046/-0.064; below R3 own curve at 4k by 0.041",
+    "verdict": "refuted from 4k on (slower than start 0 and than the trapped trained start)"
+   },
+   {
+    "id": "JF2",
+    "claim": "Mechanism at checkpoints >= 2k updates: frozen read-out rows <= 10 (a fixed-random-start control would show >= 30); median step-1 gap of excluded cells < 5 nats; ||M_1||_1 <= 35; alive cells rise between the second and the last checkpoint.",
+    "result": "A frozen rows 0, fp16-zero rows 0 at every checkpoint, median step-1 gap of excluded cells 0.28-0.33 nats, ||M_1||_1 12.5-17.7, E_fix_1 <= 1.3, alive 44->56 (0.5k->4k)",
+    "verdict": "confirmed (first look)"
+   },
+   {
+    "id": "JF3",
+    "claim": "If it reaches <= 10k updates, its acc is still <= 0.52, i.e. accuracy alone cannot yet separate rescue from trap (R4 itself was 0.47 at 8k); separation by accuracy needs >= 15-20k updates (>= 0.52 at 15k and >= 0.57 at 30k if it follows R4).",
+    "result": "A 0.317 at 4k",
+    "verdict": "consistent; not testable at this length"
+   },
+   {
+    "id": "RJ1",
+    "claim": "No front-loaded freeze (frozen rows <= 10, step-1 gaps of excluded cells median < 5 nats); alive cells at 20k >= 50; acc at 20k 0.51 [0.46, 0.57], at least 0.03 above the r3 control and within +-0.04 of the zero pool.",
+    "result": "episode_random pool: 0 frozen, excluded 71->10, step-1 gap median 0.47; acc 0.288 (control 0.454, zero pool 0.525); fresh starts per update 0.342 at 13.5k",
+    "verdict": "partly: mechanism confirmed; accuracy refuted"
+   },
+   {
+    "id": "RJ2",
+    "claim": "Trap: acc 0.46-0.49; alive 25-40; frozen rows >= 30.",
+    "result": "control 0.454, alive 31, frozen 63",
+    "verdict": "confirmed except level (0.006 below 0.46)"
+   },
+   {
+    "id": "RJ3",
+    "claim": "acc 0.51 [0.46, 0.57] and still rising; alive >= 50; few frozen rows (<= 15).",
+    "result": "zero pool 0.525 (still rising), alive 50, frozen 4",
+    "verdict": "confirmed"
+   },
+   {
+    "id": "RJ4",
+    "claim": "beta 0.003: trap largely intact (alive <= 50, acc <= 0.50); beta 0.01: alive >= 45 and acc 0.47-0.55; beta 0.03: alive >= 70 and acc 0.50-0.58; beta 0.1: alive >= 80 but acc not above beta 0.03's by more than 0.02 (flattening cost).",
+    "result": "beta 0.003/0.01/0.03/0.1: 0.472/0.545/0.585/0.603 (20k); alive 38/77/97/100; frozen 51/3/0/0; beta 0.3/1.0: 0.273/0.230 at 10k",
+    "verdict": "mostly confirmed: beta 0.03 level 0.005 above interval; flattening cost appears only above beta 0.1"
+   },
+   {
+    "id": "RJ5",
+    "claim": "Adam 10k: trap (alive <= 55; acc 0.48-0.53). signSGD 10k: trap at least as strong as Adam (alive <= 55; acc <= 0.53). Plain SGD (best stable lr, 20k): no frozen rows; at matched accuracy its excluded-cell count is <= half of Adam's; its final acc 0.40-0.56 (slow, not trapped).",
+    "result": "optimiser check not run by the deadline",
+    "verdict": "untested"
+   },
+   {
+    "id": "M1",
+    "claim": "acc 0.48 [0.43, 0.54]; converged or rising <= 0.01 over the last 20%; far below the step-wise rule (0.615).",
+    "result": "memoryless marginal depth 1 own: 0.439 at 25k (+0.012 last 20%)",
+    "verdict": "confirmed on level (lower end); still rising"
+   },
+   {
+    "id": "M2",
+    "claim": "acc 0.66 [0.60, 0.72], at least 0.10 above M1; still rising slowly.",
+    "result": "joint depth 1 joint loss: 0.713 (+0.012); +0.27 over M1",
+    "verdict": "confirmed"
+   },
+   {
+    "id": "M3",
+    "claim": "An exclusion forms early (harness excluded_t30 >= 20 at some evaluation before 5k) and recedes later; no step-1 front-loading (excluded_t1 <= 2 throughout); acc at 25k 0.52 [0.42, 0.62], at least 0.05 below M2.",
+    "result": "joint depth 1 own: excluded 52/70/46/26/3 at 10/300/5k/15k/25k; excluded_t1 0; acc 0.687; 0.026 below M2",
+    "verdict": "partly: mechanism confirmed; level and gap refuted"
+   },
+   {
+    "id": "M4",
+    "claim": "acc 0.56 [0.49, 0.63]; at least 0.05 above M1; not above 0.65.",
+    "result": "marginal depth 2 own: 0.568 at 24.4k (+0.014 last 20%)",
+    "verdict": "confirmed (lower bound)"
+   },
+   {
+    "id": "M5a",
+    "claim": "held-out per-step R^2 0.995 [0.990, 0.999]; summed-rule acc 0.67 [0.61, 0.73].",
+    "result": "joint distillation depth 1: R2 0.9972, summed 0.700",
+    "verdict": "confirmed"
+   },
+   {
+    "id": "M5b",
+    "claim": "R^2 >= 0.997; summed acc 0.71 [0.66, 0.75]; gain over depth 1 smaller than the marginal target's gain from depth 1 to 2 (in R^2 error reduction factor).",
+    "result": "joint distillation depth 2: R2 0.9969, summed 0.692; depth gains nothing for joint, 7x error drop for marginal",
+    "verdict": "partly: ordering confirmed, R2 0.0001 short"
+   },
+   {
+    "id": "M5c",
+    "claim": "R^2 0.90 [0.86, 0.94]; within-step part captured <= 0.70; summed acc 0.42 [0.35, 0.48] (at or below naive).",
+    "result": "step-wise distillation depth 1: R2 0.8996, within ~0.64, summed 0.404",
+    "verdict": "confirmed"
+   },
+   {
+    "id": "M5d",
+    "claim": "R^2 0.965 [0.93, 0.985]; within-step part captured >= 0.80; summed acc 0.52 [0.45, 0.58], still below the exact step-wise rule (0.615).",
+    "result": "step-wise distillation depth 2: R2 0.9856, within ~0.95, summed 0.545",
+    "verdict": "confirmed except R2 interval (0.0006 above)"
+   },
+   {
+    "id": "M6",
+    "claim": "End-to-end marginal depth-1 (M1) beats the summed rule of its own-depth distilled step-wise fit (M5c) by >= 0.03 acc.",
+    "result": "end-to-end 0.439 vs distilled step-wise depth 1 0.404",
+    "verdict": "confirmed"
+   },
+   {
+    "id": "M7",
+    "claim": "The format effect at depth 1 (M2 - M1) is larger than the depth effect in the marginal format (M4 - M1).",
+    "result": "format effect 0.274 > depth effect 0.129",
+    "verdict": "confirmed"
+   },
+   {
+    "id": "E1",
+    "claim": "Reproduces 0.746 +- 0.02; LSTM weights equal PyTorch default init statistics (frozen).",
+    "result": "5/5 0.755 +- 0.004; LSTM weights at init statistics",
+    "verdict": "confirmed"
+   },
+   {
+    "id": "E2",
+    "claim": "5/5's input-driven gate pre-activation RMS 0.6 [0.3, 1.5] (R1 0.17; trained LSTM 0.97).",
+    "result": "5/5 gate drive RMS 0.89 (all gates)",
+    "verdict": "confirmed"
+   },
+   {
+    "id": "E3",
+    "claim": "Count trace beyond a 5-step window in u_t (partial R^2 of n_{t-5} after the last 5 bits and z, within environment): R1-e5 <= 0.05; trained LSTM >= 0.4; 5/5 between 0.05 and 0.4.",
+    "result": "not measured in this form",
+    "verdict": "untested"
+   },
+   {
+    "id": "E4",
+    "claim": "R1-e5: a in [0.4, 1.1], b <= 0.3, c <= 0.2. Trained LSTM: b >= 0.6 and c >= 0.5. 5/5: b >= 0.5 and c in [0.15, 0.9].",
+    "result": "R1-e5 1.05/0.13/-0.01; LSTM 0.75/0.68/0.40; 5/5 0.67/0.71/0.51",
+    "verdict": "partly: LSTM memory coefficient 0.40 < 0.5"
+   },
+   {
+    "id": "E5",
+    "claim": "All three drop by >= 0.10 (trained LSTM to <= 0.40; R1-e5 to 0.20-0.40; 5/5 to <= 0.60). Because the reset also replaces every step's state by a step-1-like state (a large shared offset), a drop is NOT evidence of memory use; only a retrained read-out on reset states (run_esn 3) is.",
+    "result": "reset: R1-e5 0.437->0.353; LSTM 0.769->0.455; 5/5 0.755->0.598",
+    "verdict": "partly; interpretation refuted (reset is a clean memoryless control)"
+   },
+   {
+    "id": "E6",
+    "claim": "R1-e5's fixed goal-logit profile at T=30 (centred) correlates >= 0.7 with naive's episode-mean centred log-belief profile (c2) and is not larger than 2x naive's in SD; the trained LSTM's profile correlates >= 0.7 with Bayes's.",
+    "result": "R1-e5 fixed profile R2 0.996 on naive, scale 1.59; LSTM R2 0.958 on Bayes",
+    "verdict": "confirmed"
+   },
+   {
+    "id": "E7",
+    "claim": "acc 0.60 [0.53, 0.68]; the memoryless control (MLP on reset u_t) 0.56 [0.48, 0.63]; difference +0.04 [0.00, 0.10]; both >= 0.08 above R1-e5's own linear read-out (0.43-0.44).",
+    "result": "2-layer MLP on u_t 0.668, reset 0.584, diff +0.083; 1-layer 0.574/0.527",
+    "verdict": "confirmed"
+   },
+   {
+    "id": "E8",
+    "claim": "No read-out of R1-e5's frozen u_t (linear or 2-layer MLP, summed over steps) exceeds 0.70.",
+    "result": "best 0.668",
+    "verdict": "confirmed"
+   },
+   {
+    "id": "D1",
+    "claim": "all three within +-0.03 at every matched update count; none above 0.46.",
+    "result": "not run (John's call)",
+    "verdict": "untested"
+   },
+   {
+    "id": "D2",
+    "claim": "acc within +-0.02 of the no-bonus run (calibration improves: fewer values below the soft-clip floor; argmax unchanged in family).",
+    "result": "not run in full training; read-out only: c7 optimum flat, c11 +0.027 at beta 0.1 early",
+    "verdict": "untested (full training)"
+   },
+   {
+    "id": "D3",
+    "claim": "within +-0.03 of each other: R1's deficit is the depth-1 per-step marginal family, not the reservoir.",
+    "result": "not run; suggestive: memoryless depth-1 marginal 0.439 at 25k vs R1 0.42 at 25k",
+    "verdict": "untested"
+   }
+  ]
+ }
+}

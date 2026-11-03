@@ -16,6 +16,8 @@ collect(net)  one replay of the first N_EP harvested episodes (CPU is fine: run 
                                    episode's mean error direction and the error's top principal direction
 collect_directions(net)  the error's own direction and two random directions sent back instead (<net>_directions.npz)
 
+`python gradflow_explain.py explain` writes explain.png: explain_two, explain_error and explain_crossband as the rows of
+one figure (John 2026-11-01; fig_explain), panel letters running on.
 `python gradflow_explain.py plot` (after both collects, for trained and echo) writes into figure_bin:
   explain_error.png      the error at entangled steps: its size, its direction, and the swap test (fixed / random
                          directions sent back in its place)
@@ -512,9 +514,13 @@ def _lines(ax, items, title, ylabel=None, legend="upper right"):
 
 
 def _save(fig, name):
-    fig.savefig(ga.fig_path(name), dpi=150, bbox_inches="tight", pad_inches=.3)
+    """into figure_bin under name, or into a file object (a row of the combined figure, fig_explain)"""
+    if isinstance(name, str):
+        fig.savefig(ga.fig_path(name), dpi=150, bbox_inches="tight", pad_inches=.3)
+        print(f"saved {ga.fig_path(name)}")
+    else:
+        fig.savefig(name, format="png", dpi=150, bbox_inches="tight", pad_inches=.3)
     plt.close(fig)
-    print(f"saved {ga.fig_path(name)}")
 
 
 def _quad(F):
@@ -547,14 +553,16 @@ SWAPS = (("the real error", "total", "-"), ("the error's main axis, fixed", "err
          ("random, in the readout's space", "swap_q", "-."), ("random", "swap_u", "-"))
 
 
-def fig_error(R, Rd):
+def fig_error(R, Rd, name="explain_error.png", first="a"):
     """the error at entangled steps is ordinary in size and direction; what changes is how the network carries the
-    error's usual direction back (its lag pieces cancel less), and that alone makes dW's dimension dip"""
+    error's usual direction back (its lag pieces cancel less), and that alone makes dW's dimension dip. first: the
+    first panel's letter (fig_explain runs them on across rows)"""
+    L = lambda i: chr(ord(first) + i)
     fig, axs = plt.subplots(1, 4, figsize=(20.5, 4.8), gridspec_kw=dict(wspace=.3))
     for net, lab in (("trained", "Trained"), ("echo", "Echo")):
         b = _ref(net, N_FIG)
         eE = np.load(ga.BANDP_BOTH.format(PCT, net))["err_E"][:N_FIG].astype(np.float64)
-        _lines(axs[0], [(_r(eE.sum(-1), b), COL[lab], lab)], "(a) The error is not bigger\n" + r"$\|e_t\|^2$",
+        _lines(axs[0], [(_r(eE.sum(-1), b), COL[lab], lab)], f"({L(0)}) The error is not bigger\n" + r"$\|e_t\|^2$",
                "r (Cross-correlation)", legend=False)
     axs[0].legend(frameon=False, fontsize=FS["legend"] * .9, loc="upper right")
     X = Rd["trained"]
@@ -567,7 +575,7 @@ def fig_error(R, Rd):
     _lines(axs[1], [(_decode(_quad(a), b), COL["activity"], "the activity's direction"),
                     (_decode(_quad(e), b), COL["error"], "the error's direction"),
                     (_r(turn, b[:, 1:]), COL["error"], "the error's turn\n" + r"$1 - \cos(e_{t-1}, e_t)$", "--")],
-           "(b) Nor does it point anywhere special (trained)\nentanglement read out from each direction", legend=False)
+           f"({L(1)}) Nor does it point anywhere special (trained)\nentanglement read out from each direction", legend=False)
     axs[1].legend(frameon=False, fontsize=FS["legend"] * .8, loc="upper right")
     # the error's main axis is one direction for all episodes and steps (the episode-mean direction is nearly the
     # error itself: within an episode the error keeps its direction, median |cos| 0.95)
@@ -579,7 +587,7 @@ def fig_error(R, Rd):
     ce = coh(_grams("echo", n)[0])
     _lines(axs[2], [(_r(coh(g), b), COL[c], lab, ls) for g, (lab, c, ls) in zip(G, SWAPS)]
            + [(_r(ce, _ref("echo", n)), COL["Echo"], "Echo, the real error")],
-           "(c) But its lag pieces cancel less\n" + r"$\|\sum_k \delta_k\|^2 / \sum_k \|\delta_k\|^2$", legend=False)
+           f"({L(2)}) But its lag pieces cancel less\n" + r"$\|\sum_k \delta_k\|^2 / \sum_k \|\delta_k\|^2$", legend=False)
     h, l = axs[2].get_legend_handles_labels()
     axs[2].legend(h[-1:], l[-1:], frameon=False, fontsize=FS["legend"] * .8, loc="lower right")
     lev = [np.median(coh(g)) for g in G]
@@ -587,20 +595,20 @@ def fig_error(R, Rd):
                 f"{np.median(ce):.2f}\n(below 1: the pieces cancel)", transform=axs[2].transAxes, ha="right",
                 va="center", fontsize=FS["annot"] * .75, color="0.3")
     _lines(axs[3], [(_split(_pr(g, ZZ), [_pr(g, mZZ)], b)[0], COL[c], lab, ls) for g, (lab, c, ls) in zip(G, SWAPS)],
-           r"(d) Backward-pass part of $\Delta W$'s eff. dim." + "\nwhen a fixed direction is sent back instead",
+           f"({L(3)}) Backward-pass part of " + r"$\Delta W$'s eff. dim." + "\nwhen a fixed direction is sent back instead",
            legend=False)
-    axs[3].legend(frameon=False, fontsize=FS["legend"] * .8, loc="upper right", title="sent back (c, d):",
+    axs[3].legend(frameon=False, fontsize=FS["legend"] * .8, loc="upper right", title=f"sent back ({L(2)}, {L(3)}):",
                   title_fontsize=FS["legend"] * .8)
     lo = min(ax.get_ylim()[0] for ax in axs)
     hi = max(ax.get_ylim()[1] for ax in axs)
     for ax in axs:
         ax.set_ylim(lo, hi)
     fig.suptitle("At entangled steps the error has its usual size and direction; it only turns a little more from "
-                 "the step before (a, b). What changes is how the network\ncarries the error's usual direction back "
-                 "in time: its pieces from different lags cancel less (c). Held fixed, the error's main axis gives "
+                 f"the step before ({L(0)}, {L(1)}). What changes is how the network\ncarries the error's usual direction back "
+                 f"in time: its pieces from different lags cancel less ({L(2)}). Held fixed, the error's main axis gives "
                  r"$\Delta W$" + "'s whole dip;\na random direction in the readout's space gives part of it, a "
-                 "random direction none (d)", y=1.17, fontsize=FS["title"] * .95)
-    _save(fig, "explain_error.png")
+                 f"random direction none ({L(3)})", y=1.17, fontsize=FS["title"] * .95)
+    _save(fig, name)
 
 
 def fig_flip(R):
@@ -665,9 +673,10 @@ def fig_flip(R):
     _save(fig, "explain_flip.png")
 
 
-def fig_crossband(R):
+def fig_crossband(R, name="explain_crossband.png", first="a"):
     """the cross-band share is set by the backward pass; the forward pass's change at tau +1 moves the band pieces and
-    their total together, so it barely reaches the share"""
+    their total together, so it barely reaches the share. first: the first panel's letter"""
+    L = lambda i: chr(ord(first) + i)
     fig = plt.figure(figsize=(19, 4.8))
     gs = fig.add_gridspec(1, 4, wspace=.3, width_ratios=[1.15, 1, 1, .06])
     a0 = fig.add_subplot(gs[0, 0])
@@ -680,7 +689,7 @@ def fig_crossband(R):
     _lines(a0, [(_r(P[0], b), COL["total"], "cross-band share (the panel)"),
                 (err, COL["error"], "backward-pass part", "--"), (inp, COL["input"], "forward-pass part", "--"),
                 (rest, COL["swap_u"], "rest (both together)")],
-           "(a) Cross-band share = backward + forward pass", "r (Cross-correlation)", legend=False)
+           f"({L(0)}) Cross-band share = backward + forward pass", "r (Cross-correlation)", legend=False)
     a0.legend(frameon=False, fontsize=FS["legend"] * .85, loc="upper right")
     Pb = [X["cross"][:, :, i] / E[:, :, i, None] for i in range(3)]
     nb = Pb[0].shape[-1]
@@ -689,7 +698,7 @@ def fig_crossband(R):
         sd = Pb[0].std(1, keepdims=True) + 1e-12
         maps.append(ga._lagged(_cen(Pb[i]) / sd, b).T)                            # (bands, TAU)
     vmax = max(np.abs(m_).max() for m_ in maps)
-    for k, (m_, title) in enumerate(zip(maps, ("(b) By band: backward-pass part", "(c) By band: forward-pass part"))):
+    for k, (m_, title) in enumerate(zip(maps, (f"({L(1)}) By band: backward-pass part", f"({L(2)}) By band: forward-pass part"))):
         ax = fig.add_subplot(gs[0, 1 + k])
         im = ax.imshow(m_, aspect="auto", cmap=ga.HEAT_CMAP, vmin=-vmax, vmax=vmax, interpolation="nearest",
                        extent=(ga.TAU[0] - .5, ga.TAU[-1] + .5, nb, 0))
@@ -702,11 +711,11 @@ def fig_crossband(R):
             ax.set_ylabel(f"Band ({PCT}% of variance)")
     cb = fig.colorbar(im, cax=fig.add_subplot(gs[0, 3]))
     cb.set_label("part of r")
-    fig.suptitle("The cross-band share does not flip: it is set by the backward pass (a, b). It weighs every pair of "
+    fig.suptitle(f"The cross-band share does not flip: it is set by the backward pass ({L(0)}, {L(1)}). It weighs every pair of "
                  "lags by the same inputs in its numerator and\nits denominator, so the inputs' change one step later "
-                 "barely moves it (a, c), while it does move " + r"$\Delta W$" + "'s dimension",
+                 f"barely moves it ({L(0)}, {L(2)}), while it does move " + r"$\Delta W$" + "'s dimension",
                  y=1.1, fontsize=FS["title"] * .95)
-    _save(fig, "explain_crossband.png")
+    _save(fig, name)
 
 
 def fig_bands(R):
@@ -964,9 +973,11 @@ def _heldout(y, groups, b, lam=1e-6):
     return float(np.mean(out))
 
 
-def _rows_figure(name, rows, note):
+def _rows_figure(name, rows, note, first=None):
     """one figure: each row a set of variables (keys of _fit_variables) and a title; a within-episode pooled fit of
-    dW's effective dimension on the set, then the additive split of its r curve into the fit and what is left"""
+    dW's effective dimension on the set, then the additive split of its r curve into the fit and what is left. first:
+    letter the panels from it (fig_explain), else no letters"""
+    tag = (lambda i: f"({chr(ord(first) + i)}) ") if first else (lambda i: "")
     N = N_FIG
     b = _ref("trained", N)
     DD, ZU, ZX = _grams("trained", N)
@@ -984,7 +995,8 @@ def _rows_figure(name, rows, note):
         for col, (k, cv) in enumerate(zip(keys, comb)):
             label, formula, v = V[k]
             ax = fig.add_subplot(gs[i, col])                 # a single measure: its own curve; bands: the fitted sum
-            _lines(ax, [(_r(v if v.ndim == 2 else cv, b), ROLE_COL[k], label)], f"{label}\n{formula}", legend=False)
+            _lines(ax, [(_r(v if v.ndim == 2 else cv, b), ROLE_COL[k], label)], f"{tag(i * (nv + 1) + col)}{label}\n{formula}",
+                   legend=False)
             ax.title.set_fontsize(FS["title"] * (.85 if v.ndim == 2 and len(formula) < 60 else .7 if v.ndim == 2
                                                  else .65))
             axs.append(ax)
@@ -994,7 +1006,8 @@ def _rows_figure(name, rows, note):
         _lines(ax, [(tot, COL["total"], "actual"),
                     (sum(parts[:-1]), "0.45", f"fit ({expl:.1f}% of the curve, held out)", "--"),
                     (parts[-1], COL["swap_u"], "left over", "-")],
-               r"$\Delta W$ effective dim." + "\n" + r"$(\sum_i \sigma_i^2)^2 \, / \, \sum_i \sigma_i^4$", legend=False)
+               tag(i * (nv + 1) + nv) + r"$\Delta W$ effective dim." + "\n" + r"$(\sum_i \sigma_i^2)^2 \, / \, \sum_i \sigma_i^4$",
+               legend=False)
         ax.legend(frameon=False, fontsize=FS["legend"] * .8, loc="upper left")
         axs.append(ax)
     lo = min(a.get_ylim()[0] for a in axs)
@@ -1006,7 +1019,7 @@ def _rows_figure(name, rows, note):
     for (title, _), top in zip(rows, tops):
         fig.text(.5, top + 1.25 / fig.get_figheight(), title, ha="center", va="bottom", fontsize=FS["title"])
     bottom = gs.get_grid_positions(fig)[0][-1]
-    fig.text(.5, bottom - 1.4 / fig.get_figheight(), r"The update at step $t$ is $\Delta W = \sum_k \delta_k\, [x_{t-k};\ "
+    fig.text(.5, bottom - .95 / fig.get_figheight(), r"The update at step $t$ is $\Delta W = \sum_k \delta_k\, [x_{t-k};\ "
              r"u_{t-k-1}]^T$ (as in the dW schematic).  $\delta_k$: the credit (gradient on the gate inputs) $k$ steps "
              r"back;  $x_t$: the LSTM's input (observation and context);  $u_t$: the activity;  $\mathrm{proj}_{pc}$: "
              r"its projection on PC $pc$, $B$: a band of 1% of its variance;  lag $\tau$: steps after the entangled "
@@ -1036,11 +1049,39 @@ def fig_three():
         "centre of mass (97.4-97.7%).  " + r"$\mathrm{pos}_B$" + ": band B's place in the variance ranking (0 = top band).")
 
 
-def fig_two():
-    _rows_figure("explain_two.png", [
+def fig_two(name="explain_two.png", first=None):
+    _rows_figure(name, [
         ("Credit coherence and the activity turn over three steps", ["coh", "u_3"])],
         "The only pair of single-number variables that keeps more than 90% of the curve on held-out episodes; the "
-        "next best, credit coherence and the newest activity turn, keeps 88%.")
+        "next best, credit coherence and the newest activity turn, keeps 88%.", first)
+
+
+def fig_explain(R=None, Rd=None, name="explain.png"):
+    """explain_two, explain_error and explain_crossband as the rows of one figure (John 2026-11-01), in that order:
+    what dW's effective dimension follows, why the credit changes, why the cross-band share does not flip. Each row is
+    drawn by its own function (unchanged content), panel letters running on across rows (a-c, d-g, h-j), and the rows
+    stacked centred"""
+    import io
+    from PIL import Image
+    R = R or {net: collect(net) for net in ("trained", "echo")}
+    Rd = Rd or {net: collect_directions(net) for net in ("trained", "echo")}
+    rows = []
+    with plt.rc_context(ga.RC):
+        for draw in (lambda f: fig_two(f, first="a"), lambda f: fig_error(R, Rd, f, first="d"),
+                     lambda f: fig_crossband(R, f, first="h")):
+            buf = io.BytesIO()
+            draw(buf)
+            buf.seek(0)
+            rows.append(Image.open(buf).convert("RGB"))
+    gap = 70                                                                     # pixels between rows
+    W = max(im.width for im in rows)
+    out = Image.new("RGB", (W, sum(im.height for im in rows) + gap * (len(rows) - 1)), "white")
+    y = 0
+    for im in rows:
+        out.paste(im, ((W - im.width) // 2, y))
+        y += im.height + gap
+    out.save(ga.fig_path(name), dpi=(150, 150))
+    print(f"saved {ga.fig_path(name)}")
 
 
 def plot_all(R=None, Rd=None):
@@ -1056,6 +1097,8 @@ def plot_all(R=None, Rd=None):
 if __name__ == "__main__":
     if sys.argv[1:] == ["plot"]:
         plot_all()
+    elif sys.argv[1:] == ["explain"]:
+        fig_explain()
     elif sys.argv[1:2] == ["directions"]:
         for net in sys.argv[2:] or ("trained", "echo"):
             collect_directions(net)

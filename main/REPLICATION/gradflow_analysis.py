@@ -830,11 +830,35 @@ def check(batch_num=8, t=20):
 # ═══════════════════════════════════════════════════════════════════
 
 FIG_CACHE = os.path.join(sp._ROOT, "main", "DATA", "experimental", "gradflow_ctx", "figure_series_{}.pkl")
+ENT_VARS = os.path.join(sp._ROOT, "main", "DATA", "experimental", "gradflow_ctx", "ent_vars_{}.npz")
+ENT_NAMES = {"mean": "entanglement", "max": "max entanglement (the larger of the two variables')"}
+
+
+def entanglement(net, kind="mean"):
+    """the harvest's entanglement per episode and step (episodes, T): "mean" is the stored rev, the mean over the two
+    variables (contexts) of 0.5 Jeffreys(the naive's per-step likelihood, the joint belief's effective update
+    approx_lik) - the Harvester's definition; "max" the larger of the two variables' values (John 10-29), recomputed
+    from ep_naive_px and ep_joint_belief (their mean reproduces rev) and cached in gradflow_ctx/ent_vars_<net>.npz"""
+    f = np.load(CACHE.format(net))
+    if kind == "mean":
+        return f["rev"].astype(np.float64)
+    path = ENT_VARS.format(net)
+    if not os.path.exists(path):
+        px = f["ep_naive_px"].astype(np.float64)
+        per = sp.step_dkl(px / px.sum(-1, keepdims=True), sp.approx_lik(f["ep_joint_belief"].astype(np.float64)))
+        rev = f["rev"].astype(np.float64)
+        err = float(np.abs(per.mean(-1) - rev).max() / rev.max())
+        assert err < 1e-4, f"per-variable entanglement does not reproduce rev ({err:.1e})"
+        np.savez(path, per_variable=per.astype(np.float32), goal_ind=f["ep_goal_ind"], check=err)
+    per = np.load(path)["per_variable"].astype(np.float64)                           # (episodes, T, 2) raw order
+    return {"max": per.max(-1)}[kind]
+
+
 SENSE_COLORS = ("#0b5345", "#52be80")             # sensory panel: novelty, change (not trained/echo)
 RC = {"xtick.labelsize": 13, "ytick.labelsize": 13, "axes.labelsize": 14, "legend.fontsize": 12, "legend.title_fontsize": 12}
 
 
-def figure_series(net, pct, ctrl=None, k_null=10):
+def figure_series(net, pct, ctrl=None, k_null=10, ent="mean"):
     """every curve of the figure for one network and bands of pct% of u's variance (band_both; first BAND1_EP episodes,
     dW from both contexts' losses), as cross-correlations with entanglement ("r": each series z-scored within the
     episode), cached per (ctrl, pct): the activity's norm, effective dimension and turn 1 - cos(u_t, u_{t-1}); the credit
@@ -842,14 +866,15 @@ def figure_series(net, pct, ctrl=None, k_null=10):
     o_t: its novelty (novelty()) and the number of features changed since o_{t-1}.  The band quantities are shares of each step's squared norm, each its own series (the paper's head / tail
     convention, proj^2 / ||u_t||^2): the activity energy by band over ||u_t - mu||^2, and the cross-band terms - in all,
     ||dW||^2 - sum_B ||dW_B||^2, and by band, <dW_B, dW - dW_B> - over ||dW||^2.  ctrl: a sensory_set kind; the
-    reference is then the part of entanglement beyond it, minus the same for k_null other episodes' entanglement"""
-    path = FIG_CACHE.format(net)
+    reference is then the part of entanglement beyond it, minus the same for k_null other episodes' entanglement.
+    ent: which entanglement (entanglement()); other than "mean", cached in its own file"""
+    path = FIG_CACHE.format(net if ent == "mean" else f"{net}_ent-{ent}")
     store = pickle.load(open(path, "rb")) if os.path.exists(path) else {}
     if "nov" in store.get((ctrl, pct), {}).get("r", {}):                             # older entries: recomputed
         return store[(ctrl, pct)]
     N, s = BAND1_EP, slice(SRC[0], SRC[-1] + 1)
     f = np.load(CACHE.format(net))
-    ent = f["rev"][:N, s].astype(np.float64)
+    ent = entanglement(net, ent)[:N, s]
     Z = sensory_set(net, N, ctrl) if ctrl else None
     ref = (lambda x: _zs(x) - _fit(_zs(x), Z)) if ctrl else _zs
     b = ref(ent)
@@ -936,7 +961,7 @@ def band_panels(fig, H, C, M, keep, pct, titles, lab_part, head=.075):
     cb.set_label(lab_part)
 
 
-def plot(pct=10, ctrl=None):
+def plot(pct=10, ctrl=None, ent="mean"):
     """the figure for bands of pct% of the variance, cross-correlation with entanglement (figure_series)
     -> dynamics_interference_<pct>pct_xcorr.png
       row 1      the sensory input (novelty, features changed; the mean of the two networks' episode sets; its own
@@ -948,7 +973,7 @@ def plot(pct=10, ctrl=None):
                  and the cross-band terms by band <dW_B, dW - dW_B> over ||dW||^2 - each band its own series, as
                  heatmaps and curves; one scale"""
     nets = (("trained", "Trained"), ("echo", "Echo"))
-    X = {lab: figure_series(net, pct, ctrl) for net, lab in nets}
+    X = {lab: figure_series(net, pct, ctrl, ent=ent) for net, lab in nets}
     Xm = {lab: X[lab]["r"] for lab in X}
     lab_r = "r (Cross-correlation)"
     nb = 100 // pct
@@ -1003,8 +1028,9 @@ def plot(pct=10, ctrl=None):
                 if t.get_position() == (.5, 1.015):
                     t.set_fontsize(sp.FS["title"] * .8)
         fig.suptitle(f"Bands of {pct}% of the variance; " + (f"beyond {ctrl} sensory statistics" if ctrl else "raw")
-                     + ". Cross-correlation with entanglement", y=.975, fontsize=sp.FS["title"] * 1.05)
-        fig.savefig(fig_path(f"dynamics_interference_{pct}pct{f'_ctrl-{ctrl}' if ctrl else ''}_xcorr.png"), dpi=150,
+                     + f". Cross-correlation with {ENT_NAMES[ent]}", y=.975, fontsize=sp.FS["title"] * 1.05)
+        fig.savefig(fig_path(f"dynamics_interference_{pct}pct{f'_ctrl-{ctrl}' if ctrl else ''}"
+                             f"{f'_ent-{ent}' if ent != 'mean' else ''}_xcorr.png"), dpi=150,
                     bbox_inches="tight", pad_inches=.3)
         plt.show()                                                                   # inside rc_context: same type sizes
         plt.close(fig)
@@ -1178,6 +1204,9 @@ def plot_schematic():
 if __name__ == "__main__":
     if sys.argv[1:] == ["check"]:
         check()
+    elif sys.argv[1:] == ["ent-max"]:                                               # John 10-29: max entanglement
+        for pct in (1, 10):
+            plot(pct, ent="max")
     else:
         for pct in (1, 10):
             plot(pct)

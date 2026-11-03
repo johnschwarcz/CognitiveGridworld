@@ -1,0 +1,15 @@
+{
+ "name": "d9_p1_lr0.001_rep0",
+ "depth": 9,
+ "power": 1,
+ "lr": 0.001,
+ "seed": 0,
+ "status": "ok",
+ "checkpoints": 41,
+ "last_ep": 19999,
+ "acc_last3": 0.727375,
+ "maxprob_last3": 0.7488104119213919,
+ "top_share_last3": 0.11091329566733628,
+ "naive": 0.4501768292682927,
+ "joint": 0.766390243902439
+}

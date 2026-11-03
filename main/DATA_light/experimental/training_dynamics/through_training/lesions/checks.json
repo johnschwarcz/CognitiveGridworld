@@ -1,0 +1,182 @@
+{
+ "trained_2100": {
+  "intact": {
+   "max_abs": 0.000125885009765625,
+   "right_diff": 0
+  },
+  "intact_fwdset": {
+   "max_abs": 0.0,
+   "right_diff": 0
+  },
+  "mean_f": {
+   "max_abs": 5.7220458984375e-05,
+   "right_diff": 0
+  },
+  "mean_ifgo": {
+   "max_abs": 3.0517578125e-05,
+   "right_diff": 0
+  },
+  "res_i": {
+   "max_abs": 7.62939453125e-05,
+   "right_diff": 1
+  },
+  "res_i_fwdset": {
+   "max_abs": 9.1552734375e-05,
+   "right_diff": 0
+  },
+  "res_o": {
+   "max_abs": 5.340576171875e-05,
+   "right_diff": 0
+  },
+  "f_units": {
+   "max_abs": 9.1552734375e-05,
+   "right_diff": 0
+  },
+  "c_units": {
+   "max_abs": 4.673004150390625e-05,
+   "right_diff": 0
+  },
+  "clamp_u50": {
+   "max_abs": 0.0001220703125,
+   "right_diff": 0
+  },
+  "tr_joint_vs_fac": 1.2399036020127596e-07,
+  "tr_joint_rel": 1.104007473691283e-07,
+  "tr_r0_vs_fac": 2.631197366653737e-07,
+  "tr_r1_vs_fac": 1.799082234299476e-07,
+  "tot_vs_fac": 4.054134144837462e-06,
+  "tot_max": 44.97904382603777,
+  "dvar_vs_fac_rel": 1.4852770269246918e-07,
+  "tau_ref_vs_ck_rel": 5.585769802252116e-08,
+  "mu_chk": 6.943979300594316e-07,
+  "joint5_residual": 1.2218952178955078e-06,
+  "keep20_residual": 8.344650268554688e-07,
+  "joint5_step1_logq": 1.430511474609375e-06,
+  "keep20_step1_logq": 2.384185791015625e-06,
+  "joint5_readout_orth": 2.3071822230491534e-16,
+  "self_repeat": {
+   "max_abs": 0.0,
+   "right_diff": 0
+  }
+ },
+ "trained_49995": {
+  "intact": {
+   "max_abs": 2.09808349609375e-05,
+   "right_diff": 0
+  },
+  "intact_fwdset": {
+   "max_abs": 0.0,
+   "right_diff": 0
+  },
+  "mean_f": {
+   "max_abs": 2.288818359375e-05,
+   "right_diff": 0
+  },
+  "mean_ifgo": {
+   "max_abs": 3.0517578125e-05,
+   "right_diff": 0
+  },
+  "res_i": {
+   "max_abs": 3.0517578125e-05,
+   "right_diff": 0
+  },
+  "res_i_fwdset": {
+   "max_abs": 1.52587890625e-05,
+   "right_diff": 0
+  },
+  "res_o": {
+   "max_abs": 2.288818359375e-05,
+   "right_diff": 0
+  },
+  "f_units": {
+   "max_abs": 2.288818359375e-05,
+   "right_diff": 0
+  },
+  "c_units": {
+   "max_abs": 2.09808349609375e-05,
+   "right_diff": 0
+  },
+  "clamp_u50": {
+   "max_abs": 1.9073486328125e-05,
+   "right_diff": 0
+  },
+  "tr_joint_vs_fac": 7.678162516899789e-08,
+  "tr_joint_rel": 1.007572078779222e-07,
+  "tr_r0_vs_fac": 1.1263465449218302e-07,
+  "tr_r1_vs_fac": 9.138045120593574e-08,
+  "tot_vs_fac": 1.7305550734647568e-06,
+  "tot_max": 16.758363274054037,
+  "dvar_vs_fac_rel": 1.3042301205690165e-07,
+  "tau_ref_vs_ck_rel": 5.667638225403948e-08,
+  "mu_chk": 9.278821824360017e-07,
+  "joint5_residual": 7.934868335723877e-07,
+  "keep20_residual": 8.344650268554688e-07,
+  "joint5_step1_logq": 1.6689300537109375e-06,
+  "keep20_step1_logq": 2.384185791015625e-06,
+  "joint5_readout_orth": 1.491862189340054e-16,
+  "self_repeat": {
+   "max_abs": 0.0,
+   "right_diff": 0
+  }
+ },
+ "echo_2100": {
+  "intact": {
+   "max_abs": 1.52587890625e-05,
+   "right_diff": 0
+  },
+  "intact_fwdset": {
+   "max_abs": 0.0,
+   "right_diff": 0
+  },
+  "mean_f": {
+   "max_abs": 1.52587890625e-05,
+   "right_diff": 1
+  },
+  "mean_ifgo": {
+   "max_abs": 1.52587890625e-05,
+   "right_diff": 0
+  },
+  "res_i": {
+   "max_abs": 1.52587890625e-05,
+   "right_diff": 2
+  },
+  "res_i_fwdset": {
+   "max_abs": 7.62939453125e-06,
+   "right_diff": 0
+  },
+  "res_o": {
+   "max_abs": 1.52587890625e-05,
+   "right_diff": 1
+  },
+  "f_units": {
+   "max_abs": 1.52587890625e-05,
+   "right_diff": 0
+  },
+  "c_units": {
+   "max_abs": 1.52587890625e-05,
+   "right_diff": 2
+  },
+  "clamp_u50": {
+   "max_abs": 1.52587890625e-05,
+   "right_diff": 0
+  },
+  "tr_joint_vs_fac": 1.1504449129451366e-09,
+  "tr_joint_rel": 7.792365339346487e-08,
+  "tr_r0_vs_fac": 1.412367327258135e-09,
+  "tr_r1_vs_fac": 2.3436727072945196e-09,
+  "tot_vs_fac": 3.628832847546448e-07,
+  "tot_max": 2.267485240483841,
+  "dvar_vs_fac_rel": 1.1774253683149993e-07,
+  "tau_ref_vs_ck_rel": 5.8686349002634586e-08,
+  "mu_chk": 2.2099316127066615e-07,
+  "joint5_residual": 4.153698682785034e-07,
+  "keep20_residual": 1.6391277313232422e-07,
+  "joint5_step1_logq": 1.430511474609375e-06,
+  "keep20_step1_logq": 1.9073486328125e-06,
+  "joint5_readout_orth": 4.711942641622002e-16,
+  "self_repeat": {
+   "max_abs": 0.0,
+   "right_diff": 0
+  }
+ }
+}

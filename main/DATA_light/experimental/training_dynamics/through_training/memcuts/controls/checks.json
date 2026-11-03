@@ -1,0 +1,47 @@
+{
+ "validation_mismatches": {
+  "start": 0,
+  "same_cell": 0,
+  "random": 0,
+  "intact": 1
+ },
+ "n_checkpoints": 46,
+ "bayes_shuffle_vs_intact": {
+  "shuffle_20261231": 3.268496584496461e-13,
+  "shuffle_20261232": 3.268496584496461e-13,
+  "shuffle_20261233": 3.268496584496461e-13
+ },
+ "lam_counts_vs_lam": 2.2737367544323206e-13,
+ "pool_z": {
+  "n": 75000,
+  "max_abs": 4.086644349895541,
+  "share_gt3": 0.002853333333333333,
+  "mean": -0.004152434312397686,
+  "sd": 0.9985397864121065
+ },
+ "probe_z": {
+  "n": 25000,
+  "max_abs": 5.315100045657264,
+  "share_gt3": 0.00336,
+  "mean": -0.0062241165064100415,
+  "sd": 0.9945959482831936
+ },
+ "rederived_bm_net_20261241_answers_differ": 0,
+ "rederived_flat_20261241_answers_differ": 0,
+ "rederived_tv_max_abs_diff": 0.0,
+ "donor_same_cell": {
+  "bm": {},
+  "fl": {
+   "a1": 1
+  }
+ },
+ "donor_same_history": {
+  "bm": {},
+  "fl": {
+   "a1": 36
+  }
+ },
+ "donor_counts_mismatch": 0,
+ "bayes_pool_bruteforce_max_abs": 2.984279490192421e-13,
+ "seconds": 52.27517032623291
+}

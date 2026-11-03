@@ -47,8 +47,9 @@ small_widths  N = 10, 20, 50 for every family of ff_deep_frozen_widths: FF depth
        nets left the analysis, John 2026-10-16); batch 8000, MAIN_EPISODES, seed 0; `small_widths <gpus> <budget MB>`.
 tff_series  time-injected FF (one layer per time step, layer k fed the mean of the first 31 - k observations; 29 frozen
        layers = default draws x sqrt(6)), power 1, batch 8000, MAIN_EPISODES, seed 0; `tff_series <gpus> <budget MB> <N,...>
-       [tff | tffs | tff1] [free floor MB, default 3000]`: tffs one shared readin; tff1 the control without time injection (input at layer 1 only: the
-       standard depth-30 FF with the same frozen layers, 2026-10-16).
+       [tff | tffs | tff1 | tffsg] [free floor MB, default 3000] [episodes] [checkpoint every k episodes]`: tffs one shared readin; tff1 the control without time injection (input at layer 1 only: the
+       standard depth-30 FF with the same frozen layers, 2026-10-16); tffsg the shared readin with one learned gain per
+       layer's input (ff_layer_gains, 30 more trainable parameters; John 2026-10-25: can a per-layer scaling rescue it?).
 reservoirs_wide  reservoirs at loss power 1 on the wide path (fp16 frozen weights, deduplicating frozen LSTM, micro-batches
        with accumulated gradients; same model and batch-8000 updates), batch 8000, MAIN_EPISODES, seed 0;
        `reservoirs_wide <gpus> <budget MB> <N:micro,...> [lr, default FIXED_LR]`.
@@ -155,7 +156,7 @@ BASE = dict(
 
 def run_name(depth, power, lr, seed, hid = 1000, frozen = (), residual = False, reservoir = False):
     """depth "lstm" is the LSTM control (mode SANITY) rather than an FF depth; hid and frozen appear only when not default."""
-    return ((depth if depth in ("lstm", "tff", "tffs", "tff1") else f"d{depth}") + (f"_N{hid}" if hid != 1000 else "") + f"_p{power:g}_lr{lr:g}"
+    return ((depth if depth in ("lstm", "tff", "tffs", "tff1", "tffsg") else f"d{depth}") + (f"_N{hid}" if hid != 1000 else "") + f"_p{power:g}_lr{lr:g}"
             + (frozen_tag(frozen) if frozen else "") + ("_res" if residual else "") + ("_reservoir" if reservoir else "") + f"_rep{seed}")
 
 
@@ -178,11 +179,30 @@ def write_atomic(path, save):
 
 
 def train(depth, power, lr, seed, episodes, checkpoint_every, folder, save, batch_num = None, hid = 1000, frozen = (), residual = False,
-          reservoir = False, micro_batch = None):
+          reservoir = False, micro_batch = None, load_from = None, warmup = 0, ep_offset = 0, rng_seed = None, ramp = 0, save_every = 0):
     """One run, in its own process. Writes the summary json whatever happens. micro_batch (reservoirs): the wide path,
     i.e. fp16-only frozen weights, the deduplicating frozen LSTM and batches run in slices of micro_batch episodes with
     gradients accumulated (main/model/frozen_lstm.py, model_forward.py forward_pass_micro): the same model and the same
-    batch-8000 updates (fp64-tested 2026-10-13), so the run name does not change."""
+    batch-8000 updates (fp64-tested 2026-10-13), so the run name does not change.
+
+    Continuation (John 2026-10-21: continue the width-20000 runs rather than replay them):
+    - load_from is a saved run's path relative to main/DATA. Its _net.pth gives the weights and the world. Training goes on
+      from there on fresh data, drawn from rng_seed.
+    - Adam's moments come from <load_from>_optim.pth if that run saved them. Runs before 2026-10-21 saved only weights.
+      For those, the moments are re-estimated at the loaded weights by `warmup` episodes of updates at lr 0. After that the
+      run uses its own lr: the weights never move at any other rate.
+    - The curve's ep is ep_offset plus the episodes trained since loading, so it continues the source run's axis. The
+      warm-up rows re-test the loaded weights and map to ep_offset.
+    - With save, Adam's state is written to <name>_optim.pth at the end, so any run can later be continued exactly.
+    - ramp > 0: after the warm-up the lr rises linearly to the run's own over `ramp` updates. Without it the width-20000
+      depth-30 net overshot on resuming (its read-out's coherent first steps pinned logits: KL to joint .8 -> 8; 2026-10-21).
+      It only slows the first `ramp` of the continuation's updates. A fresh run (no load_from) with ramp > 0 starts at
+      lr / ramp (2026-10-29: the shared readin at width 10000 overshot from scratch in its first ~6 updates, at 1e-3 and 5e-4).
+    - save_every > 0 (with save; John 2026-10-27, for long runs): every save_every episodes the weights and world
+      (<name>_ckpt_net.pth), Adam's state (<name>_ckpt_optim.pth) and the episode reached (<name>_ckpt.json) are written,
+      each via a temp file, so a crash or a kill loses at most save_every episodes. Resume = a continuation with
+      load_from = <folder>/<name>_ckpt (Adam is loaded, so no warm-up), ep_offset = the json's episode, a new rng_seed and
+      the remaining episodes, into another folder."""
     import torch
     from main.CognitiveGridworld import CognitiveGridworld
     from main.model.model_backward import Model_backward
@@ -201,6 +221,31 @@ def train(depth, power, lr, seed, episodes, checkpoint_every, folder, save, batc
     os.makedirs(folder, exist_ok = True)
     rows = []
     frozen_init, info = {}, {}
+    data_root = os.path.join(root, 'main', 'DATA')
+    if load_from and os.path.exists(os.path.join(data_root, load_from + "_optim.pth")):
+        warmup = 0                                  # Adam's saved moments are used as they are: nothing to re-estimate
+
+    def start(model):
+        """Continuation, at the first logger call (after episode 0, a test episode, before any update): check that the
+        saved weights are the ones in use, then set Adam's moments (see the docstring)."""
+        saved = torch.load(os.path.join(data_root, load_from + "_net.pth"), map_location = "cpu", weights_only = False)["weights"]
+        key = next(k for k in saved if k.startswith("classifier_readout") and k.endswith("weight"))
+        if not torch.equal(model.state_dict()[key].detach().cpu(), saved[key].cpu()):
+            raise RuntimeError(f"continuation: {key} differs from {load_from}_net.pth, so the saved net did not load")
+        del saved
+        info["loaded"] = key
+        optim = model.classifier_optim
+        path = os.path.join(data_root, load_from + "_optim.pth")
+        if os.path.exists(path):
+            optim.load_state_dict(torch.load(path, map_location = "cpu"))
+            info["adam"] = "loaded"
+        elif warmup:
+            info["lrs"] = [g["lr"] for g in optim.param_groups]
+            for g in optim.param_groups:
+                g["lr"] = 0.0
+            info["adam"] = f"re-estimated by {warmup - 1} updates at lr 0"
+        else:
+            info["adam"] = "fresh"
 
     def freeze(model):
         """Keep the chosen readin layers at their initial weights and biases: no gradient, so Adam never updates them."""
@@ -217,6 +262,28 @@ def train(depth, power, lr, seed, episodes, checkpoint_every, folder, save, batc
         """Called after every episode; logs only at test checkpoints and must return {}."""
         if not info:
             freeze(self.model)                      # first call: after episode 0, a test episode, before any update
+            if load_from:
+                start(self.model)
+            elif ramp:                              # a fresh run with a warm-up (2026-10-29): lr / ramp at the first update,
+                info["lrs"] = [g["lr"] for g in self.model.classifier_optim.param_groups]   # its own lr from update `ramp`
+        if "lrs" in info and self.e >= warmup:      # warm-up over (episode `warmup` is a test): the run's own lr from here,
+            frac = min(1., (self.e - warmup + 1) / ramp) if ramp else 1.   # reached linearly over `ramp` updates if ramp > 0
+            for g, lr0 in zip(self.model.classifier_optim.param_groups, info["lrs"]):
+                g["lr"] = lr0 * frac
+            if frac >= 1.:
+                info.pop("lrs")
+        if save and self.e == self.episodes - 1:   # after the last update: Adam's state, for an exact continuation later
+            torch.save(self.model.classifier_optim.state_dict(), os.path.join(folder, f"{name}_optim.pth"))
+        if save and save_every and 0 < self.e < self.episodes - 1 and self.e % save_every == 0:   # rolling checkpoint
+            ckpt = os.path.join(folder, f"{name}_ckpt")
+            stem, self.save_env = self.save_env, os.path.relpath(ckpt + "_tmp", data_root)
+            self.save()                                 # the env's own save (weights + world), loadable by load_env
+            self.save_env = stem
+            os.replace(ckpt + "_tmp_net.pth", ckpt + "_net.pth")
+            torch.save(self.model.classifier_optim.state_dict(), ckpt + "_optim.tmp")
+            os.replace(ckpt + "_optim.tmp", ckpt + "_optim.pth")
+            write_atomic(ckpt + ".json", lambda fh: json.dump(dict(name = name, e = int(self.e), episode = int(ep_offset + max(self.e - warmup, 0)),
+                                                                   time = time.strftime("%Y-%m-%d %H:%M:%S")), fh))
         if not self.test_set:
             return {}
         q = np.asarray(self.model_goal_belief, float)[:, -1]                       # (B, R), final step
@@ -227,7 +294,7 @@ def train(depth, power, lr, seed, episodes, checkpoint_every, folder, save, batc
                  for c in range(self.ctx_num)]                                      # per goal context: an input-blind net answers one value per context
         first, last = first_and_last_linear(self.model)
         rows.append(dict(
-            ep = self.e, acc = self.test_accs[self.test_e - 1, -1],
+            ep = ep_offset + max(self.e - warmup, 0), acc = self.test_accs[self.test_e - 1, -1],
             joint = self.joint_acc.mean(0)[-1], naive = self.naive_acc.mean(0)[-1],
             loss = float(np.ravel(getattr(self, "classifier_loss", np.nan))[0]),     # last training episode
             maxprob = q.max(-1).mean(), top_share = max(share),
@@ -241,12 +308,14 @@ def train(depth, power, lr, seed, episodes, checkpoint_every, folder, save, batc
         sys.stdout.flush(); sys.stderr.flush()
         return {}
 
-    torch.manual_seed(seed); np.random.seed(seed)
+    s = seed if rng_seed is None else rng_seed     # a continuation draws fresh data; the loaded weights replace the init
+    torch.manual_seed(s); np.random.seed(s)
     status = "ok"
     with open(os.path.join(folder, f"log_{name}.txt"), "w", buffering = 1) as f, \
          contextlib.redirect_stdout(f), contextlib.redirect_stderr(f):
         print(json.dumps(dict(name = name, depth = depth, power = power, lr = lr, seed = seed, episodes = episodes,
                               hid = hid, frozen = list(frozen), residual = residual, reservoir = reservoir, micro_batch = micro_batch,
+                              load_from = load_from, warmup = warmup, ep_offset = ep_offset, rng_seed = rng_seed, ramp = ramp,
                               gpu = os.environ.get("CUDA_VISIBLE_DEVICES"))), flush = True)
         try:
             CognitiveGridworld(**dict(BASE, batch_num = batch_num or BASE["batch_num"], hid_dim = hid, readin_residual = residual,
@@ -254,14 +323,15 @@ def train(depth, power, lr, seed, episodes, checkpoint_every, folder, save, batc
                                       **(dict(micro_batch = micro_batch, reservoir_dedup = True, reservoir_fp16 = True) if micro_batch else {}),
                                       **(dict(mode = "SANITY", readin_depth = 1) if depth == "lstm" else
                                          dict(readin_depth = 1, ff_time_inject = True, ff_frozen_gain = TFF_GAIN,
-                                              ff_regenerate = hid >= TFF_REGENERATE_FROM, ff_shared_readin = depth == "tffs",
-                                              ff_inject_first_only = depth == "tff1")
-                                         if depth in ("tff", "tffs", "tff1") else
+                                              ff_regenerate = hid >= TFF_REGENERATE_FROM, ff_shared_readin = depth in ("tffs", "tffsg"),
+                                              ff_inject_first_only = depth == "tff1", ff_layer_gains = depth == "tffsg")
+                                         if depth in ("tff", "tffs", "tff1", "tffsg") else
                                          dict(readin_depth = depth))),
                                classifier_LR = lr, episodes = episodes,
                                checkpoint_every = checkpoint_every, external_logger = record,
                                save_env = os.path.relpath(os.path.join(folder, name), os.path.join(root, 'main', 'DATA'))
-                                          if save else None)
+                                          if save else None,
+                               **(dict(load_env = load_from) if load_from else {}))
         except Exception:
             traceback.print_exc()
             status = "crashed"
@@ -277,6 +347,11 @@ def train(depth, power, lr, seed, episodes, checkpoint_every, folder, save, batc
                    top_share_last3 = float(np.mean([r["top_share"] for r in last3])) if last3 else None,
                    naive = float(np.mean([r["naive"] for r in rows])) if rows else None,
                    joint = float(np.mean([r["joint"] for r in rows])) if rows else None)
+    if load_from:
+        summary.update(load_from = load_from, warmup = warmup, ep_offset = ep_offset, rng_seed = rng_seed, ramp = ramp,
+                       loaded = info.get("loaded"), adam = info.get("adam"))
+    elif ramp:
+        summary.update(ramp = ramp)
     write_atomic(os.path.join(folder, f"{name}_summary.json"), lambda fh: json.dump(summary, fh, indent = 1))
     return summary
 
@@ -344,10 +419,11 @@ def mem_mb(job):
     depth, hid, frozen = job[0], (job[9] if len(job) > 9 else 1000), (job[10] if len(job) > 10 else [])
     batch = job[8] or BASE["batch_num"]
     micro = job[13] if len(job) > 13 else None
-    if depth in ("tff", "tffs", "tff1"):   # frozen layers: 29 stored (fp32 + the fp16 copy kept for backward) or one rebuilt at a time
-        L = BASE["step_num"] - 1                   # (fp16 + an fp32 draw chunk); plus every layer's fp16 ReLU output
-        weights = 2 * hid * hid + 4 * 4096 * hid if hid >= TFF_REGENERATE_FROM else L * 6 * hid * hid
-        return 1.15 * (1150 + (weights + BASE["step_num"] * 2 * batch * hid) / 2 ** 20)
+    if depth in ("tff", "tffs", "tff1", "tffsg"):   # frozen layers: 29 stored (fp32 + the fp16 copy kept for backward) or one rebuilt
+        L = BASE["step_num"] - 1                   # at a time (fp16 + an fp32 draw chunk); plus every layer's fp16 ReLU output, and
+        weights = 2 * hid * hid + 4 * 4096 * hid if hid >= TFF_REGENERATE_FROM else L * 6 * hid * hid   # with layer gains every
+        saved = BASE["step_num"] * 2 * batch * hid * (2 if depth == "tffsg" else 1)                     # layer's input as well
+        return 1.15 * (1150 + (weights + saved) / 2 ** 20)
     if depth == "lstm" and micro:                  # wide path: fp16 weights + one slice's activations; measured 3356 MB at N=2000,
         return 1.15 * (1000 + (16 * hid * hid + 1300 * hid * min(micro, batch)) / 2 ** 20)   # slices of 1000 (2026-10-13)
     if depth == "lstm":                           # at most widths; small ones peak at ~2 GB whatever the width (N=100: 2024 MB,
@@ -359,7 +435,7 @@ def mem_mb(job):
 def gpu_cost(job):
     """Relative GPU work of a job (episodes x batch-width^2 units), to start the heaviest jobs first."""
     depth, hid, frozen = job[0], (job[9] if len(job) > 9 else 1000), (job[10] if len(job) > 10 else [])
-    if depth in ("tff", "tffs", "tff1"):
+    if depth in ("tff", "tffs", "tff1", "tffsg"):
         return job[4] * hid * hid * 4 * (BASE["step_num"] - 1)
     if depth == "lstm":
         return job[4] * 1440 * hid * hid                 # 30 steps x (2n x 4n) per step, forward and backward
@@ -537,14 +613,146 @@ if __name__ == "__main__":
         run_scheduled(jobs, "small_widths: N 10/20/50 for every family", gpus = tuple(sys.argv[2].split(",")),
                       budget_mb = int(sys.argv[3]), free_floor_mb = 3000)
         sys.exit()
+    if what in ("continue_check", "continue_20k", "continue_tff1_ramp", "continue_10k", "continue_10k_reservoir",
+                "continue_minimal", "continue_lstm"):   # John, 2026-10-21: continue the 20K runs, don't replay
+        gpus = tuple(sys.argv[2].split(",")) if len(sys.argv) > 2 else ("0",)
+        CONT_WARMUP, CONT_RNG = 500, 20000              # warm-up episodes at lr 0 (Adam's moments); data seed of a continuation
+
+        def cont_job(src_folder, dst_folder, depth, n, frozen, done, extra, warmup = CONT_WARMUP):
+            """`extra` more training episodes for the saved run of this depth and width (power 1, FIXED_LR, seed 0)."""
+            src = os.path.relpath(os.path.join(src_folder, run_name(depth, 1, FIXED_LR, 0, n, frozen)), os.path.join(root, "main", "DATA"))
+            return (depth, 1, FIXED_LR, 0, warmup + extra + 1, MAIN_CKPT, dst_folder, True, None, n, list(frozen),
+                    False, False, None, src, warmup, done, CONT_RNG)
+
+        if what == "continue_check":
+            # Width 2000: depth 1, depth 2 with layer 1 frozen, and depth 30 on the regenerate path. Runs are deterministic
+            # given the seed, so a fresh 3000-episode run is the saved 20k run's first 3000 episodes. Continued for 2000
+            # more, it must track the saved run's 3500-5000 checkpoints within run-to-run noise. Depth 1 also without the
+            # warm-up (fresh Adam).
+            chk = os.path.join(OUT, "_continue_check")
+            specs = [("tff1", 2000, []), (2, 2000, [1]), (1, 2000, [])]
+            run_scheduled([(d, 1, FIXED_LR, 0, 3001, MAIN_CKPT, os.path.join(chk, "base"), True, None, n, fr) for d, n, fr in specs],
+                          "continue_check: base runs to 3000", gpus = gpus, free_floor_mb = 1500)
+            jobs = [cont_job(os.path.join(chk, "base"), os.path.join(chk, "warm500"), d, n, fr, 3000, 2000) for d, n, fr in specs]
+            jobs.append(cont_job(os.path.join(chk, "base"), os.path.join(chk, "nowarm"), 1, 2000, [], 3000, 2000, warmup = 0))
+            run_scheduled(jobs, "continue_check: +2000", gpus = gpus, free_floor_mb = 1500)
+            for d, n, fr in specs:
+                ref = np.load(os.path.join(WIDTHS_DIR, run_name(d, 1, FIXED_LR, 0, n, fr) + "_curve.npz"))
+                for arm in ("warm500", "nowarm"):
+                    p = os.path.join(chk, arm, run_name(d, 1, FIXED_LR, 0, n, fr) + "_curve.npz")
+                    if os.path.exists(p):
+                        c = np.load(p)
+                        print(d, arm, [(int(e), round(float(a), 4), round(float(ref["acc"][list(ref["ep"]).index(e)]), 4))
+                                       for e, a in zip(c["ep"], c["acc"]) if e in list(ref["ep"])])
+            sys.exit()
+        if what == "continue_tff1_ramp":
+            # the depth-30 width-20000 continuation again, from the same saved weights, now with a 1000-update lr ramp after
+            # the warm-up: the first attempt overshot (files *_resume_dip_* in widths/continued). `continue_tff1_ramp <gpus>`
+            job = cont_job(WIDTHS_DIR, os.path.join(WIDTHS_DIR, "continued"), "tff1", 20000, [], MAIN_EPISODES, MAIN_EPISODES) + (1000,)
+            run_scheduled([job], "continue_tff1_ramp: depth 30 at 20K +20k, lr ramp 1000", gpus = gpus, budget_mb = 22000, free_floor_mb = 1000)
+            sys.exit()
+        if what == "continue_10k":
+            # Width 10000 (John, 2026-10-22): +20000 episodes for depth 30 (tff1) and depths 4, 3, 2 (every N x N layer
+            # frozen) and 1, into widths/continued under the source run's name, all with the 1000-update lr ramp after the
+            # warm-up. `continue_10k <gpus> [budget MB] [depths, default tff1,4,3,2,1]`; the reservoir is
+            # continue_10k_reservoir. (10-25: the five were killed part way, John; then depth 30 alone beside the reservoir.)
+            depths = [d if d == "tff1" else int(d) for d in (sys.argv[4].split(",") if len(sys.argv) > 4 else ("tff1", 4, 3, 2, 1))]
+            jobs = [cont_job(WIDTHS_DIR, os.path.join(WIDTHS_DIR, "continued"), d, 10000, [] if d == "tff1" else list(range(1, d)),
+                             MAIN_EPISODES, MAIN_EPISODES) + (1000,) for d in depths]
+            run_scheduled(jobs, f"continue_10k: depths {'/'.join('30' if d == 'tff1' else str(d) for d in depths)} at 10K +20k, lr ramp 1000",
+                          gpus = gpus, budget_mb = int(sys.argv[3]) if len(sys.argv) > 3 else 22000, free_floor_mb = 1500)
+            sys.exit()
+        if what == "continue_minimal":
+            # John, 2026-11-01: everything in ff_deep_frozen_widths.png to 40k episodes (the fully trained LSTMs aside):
+            # +20000 episodes for depth 1 (N 10-10000), depth 30 (tff1, N 10-5000) and the reservoir (N 10-5000), the rest
+            # of each family being there already; warm-up, then the 1000-update lr ramp, a rolling checkpoint every 5000
+            # episodes; reservoirs on the micro-batches they trained with. Into widths/continued under the source run's
+            # name. `continue_minimal <gpus> <big|rest|all> [budget MB] [dry]`: big = the N=5000 reservoir (~28 h, alone on
+            # its GPU), rest = the other 27, heaviest first.
+            cont = os.path.join(WIDTHS_DIR, "continued")
+            jobs = [cont_job(OUT if n == 1000 else WIDTHS_DIR, cont, 1, n, [], MAIN_EPISODES, MAIN_EPISODES) + (1000, 5000)
+                    for n in (10, 20, 50, 100, 200, 500, 1000, 2000, 5000, 10000)]
+            jobs += [cont_job(WIDTHS_DIR, cont, "tff1", n, [], MAIN_EPISODES, MAIN_EPISODES) + (1000, 5000)
+                     for n in (10, 20, 50, 100, 200, 500, 1000, 2000, 5000)]
+            for n in (10, 20, 50, 100, 200, 500, 1000, 2000, 5000):
+                src = os.path.relpath(os.path.join(WIDTHS_DIR, run_name("lstm", 1, FIXED_LR, 0, n, [], False, True)), os.path.join(root, "main", "DATA"))
+                jobs.append(("lstm", 1, FIXED_LR, 0, CONT_WARMUP + MAIN_EPISODES + 1, MAIN_CKPT, cont, True, None, n, [], False, True,
+                             {1000: 2000, 2000: 1000, 5000: 500}.get(n), src, CONT_WARMUP, MAIN_EPISODES, CONT_RNG, 1000, 5000))
+            group = sys.argv[3] if len(sys.argv) > 3 else "all"
+            big = lambda j: j[0] == "lstm" and j[9] == 5000
+            jobs = sorted([j for j in jobs if group == "all" or big(j) == (group == "big")], key = gpu_cost, reverse = True)
+            budget = int(sys.argv[4]) if len(sys.argv) > 4 else 22000
+            if "dry" in sys.argv[5:]:
+                for j in jobs:
+                    src_net = os.path.join(root, "main", "DATA", j[14] + "_net.pth")
+                    done = os.path.exists(os.path.join(cont, f"{job_name(j)}_summary.json"))
+                    print(f"{job_name(j):42s} {round(mem_mb(j)):6d} MB  source net {os.path.exists(src_net)}  already done {done}")
+                sys.exit()
+            run_scheduled(jobs, f"continue_minimal {group}: the minimal figure's runs at 20K +20k, lr ramp 1000", gpus = gpus,
+                          budget_mb = budget, free_floor_mb = 1500)
+            sys.exit()
+        if what == "continue_lstm":
+            # John, 2026-11-02 ("It would be great to get the fully trained LSTMs up to a similar training episodes"): the
+            # fully trained power-1 LSTMs of ff_deep_frozen_widths.png (N 10-600 in widths/, N = 1000 in ff_deep/) +20000
+            # episodes as in continue_minimal (warm-up, 1000-update lr ramp, a rolling checkpoint every 5000 episodes), into
+            # widths/continued under the source run's name; its N = 100 is the 5-seed SANITY series, already at 40k. Smoke
+            # test 2026-11-02 (N = 10, and N = 1000 from its 10-08 save): both load and re-test at their 20k accuracy; N = 1000
+            # peaks at 9.7 GB. `continue_lstm <gpus> [budget MB] [dry]`
+            cont = os.path.join(WIDTHS_DIR, "continued")
+            jobs = [("lstm", 1, FIXED_LR, 0, CONT_WARMUP + MAIN_EPISODES + 1, MAIN_CKPT, cont, True, None, n, [], False, False, None,
+                     os.path.relpath(os.path.join(OUT if n == 1000 else WIDTHS_DIR, run_name("lstm", 1, FIXED_LR, 0, n)),
+                                     os.path.join(root, "main", "DATA")),
+                     CONT_WARMUP, MAIN_EPISODES, CONT_RNG, 1000, 5000) for n in (10, 20, 50, 200, 400, 600, 1000)]
+            jobs = sorted(jobs, key = gpu_cost, reverse = True)
+            budget = int(sys.argv[3]) if len(sys.argv) > 3 and sys.argv[3].isdigit() else 22000
+            if "dry" in sys.argv[3:]:
+                for j in jobs:
+                    src_net = os.path.join(root, "main", "DATA", j[14] + "_net.pth")
+                    done = os.path.exists(os.path.join(cont, f"{job_name(j)}_summary.json"))
+                    print(f"{job_name(j):32s} {round(mem_mb(j)):6d} MB  source net {os.path.exists(src_net)}  already done {done}")
+                sys.exit()
+            run_scheduled(jobs, "continue_lstm: the fully trained LSTMs at 20K +20k, lr ramp 1000", gpus = gpus, budget_mb = budget,
+                          free_floor_mb = 1500)
+            sys.exit()
+        if what == "continue_10k_reservoir":
+            # the width-10000 reservoir +20000 episodes as it trained (lr 5e-4, the wide path; see reservoir_stem in
+            # plot_ff_deep.py), with the same warm-up and lr ramp. Micro-batches of 500 (as trained) peak at ~15.3 GB, above
+            # mem_mb's estimate; of 250 at ~3.9 GB (probe 2026-10-25, ff_deep/_probe_reservoir_micro): the same updates, the
+            # batch's gradient accumulated over the slices. `continue_10k_reservoir <gpus> [micro, default 500]`
+            micro = int(sys.argv[3]) if len(sys.argv) > 3 else 500
+            src = os.path.relpath(os.path.join(WIDTHS_DIR, run_name("lstm", 1, 5e-4, 0, 10000, [], False, True)), os.path.join(root, "main", "DATA"))
+            job = ("lstm", 1, 5e-4, 0, CONT_WARMUP + MAIN_EPISODES + 1, MAIN_CKPT, os.path.join(WIDTHS_DIR, "continued"), True, None, 10000, [],
+                   False, True, micro, src, CONT_WARMUP, MAIN_EPISODES, CONT_RNG, 1000)
+            run_scheduled([job], f"continue_10k_reservoir: reservoir at 10K +20k, lr 5e-4, micro {micro}, lr ramp 1000", gpus = gpus,
+                          budget_mb = 22000, free_floor_mb = 1500)
+            sys.exit()
+        # Width 20000: +20000 episodes for depth 30 (tff1), depth 2 (layer 1 frozen) and depth 1, into widths/continued
+        # under the source run's name. `continue_20k <gpus> [budget MB]`
+        # Depth 1 at width 100000 (planned for 40000 episodes) is not run: at lr 1e-3 it dies by episode 500, as width
+        # 200000 does (input-blind one-hot answers, zero gradients; probes 2026-10-21, ff_deep/probes_2026-10-21).
+        jobs = [cont_job(WIDTHS_DIR, os.path.join(WIDTHS_DIR, "continued"), d, 20000, fr, MAIN_EPISODES, MAIN_EPISODES)
+                for d, fr in (("tff1", []), (2, [1]), (1, []))]
+        run_scheduled(jobs, "continue_20k: depth 30/2/1 at 20K +20k", gpus = gpus,
+                      budget_mb = int(sys.argv[3]) if len(sys.argv) > 3 else 22000, free_floor_mb = 1500)
+        sys.exit()
     if what == "tff_series":                            # John, 2026-10-15: time-injected FF (main/model/time_ff.py)
         # one layer per time step, layer k fed the mean of the first 31 - k observations through its own readin; the 29
         # frozen N x N layers are the default draws x TFF_GAIN; power 1, FIXED_LR, batch 8000, MAIN_EPISODES, seed 0, in
         # the order given: `tff_series <gpus> <budget MB> <N,...>`
-        depth = sys.argv[5] if len(sys.argv) > 5 else "tff"     # "tffs": one shared readin; "tff1": input at layer 1 only
-        jobs = [(depth, 1, FIXED_LR, 0, MAIN_EPISODES, MAIN_CKPT, WIDTHS_DIR, True, None, int(n), []) for n in sys.argv[4].split(",")]
+        # [episodes, default MAIN_EPISODES] [checkpoint every k episodes, default none] (John 2026-10-27: the shared readin at
+        # width 10000 for 60000 episodes, checkpointed every 5000) [lr, default FIXED_LR] [ramp: warm-up updates, default 0]
+        depth = sys.argv[5] if len(sys.argv) > 5 else "tff"     # "tffs": one shared readin; "tff1": input at layer 1 only; "tffsg": tffs + layer gains
+        episodes = int(sys.argv[7]) if len(sys.argv) > 7 else MAIN_EPISODES
+        save_every = int(sys.argv[8]) if len(sys.argv) > 8 else 0
+        lr = float(sys.argv[9]) if len(sys.argv) > 9 else FIXED_LR    # [lr] (2026-10-29): the shared readin at width 10000 at 1e-3
+        # overshot as the width-10000 reservoir did (its read-out's first Adam steps pinned 7 of 20 values near probability 0;
+        # at 5e-4 too, less: 60-update test 2026-10-29)
+        ramp = int(sys.argv[10]) if len(sys.argv) > 10 else 0          # [ramp]: warm-up, the lr rising linearly over this many updates
+        jobs = [(depth, 1, lr, 0, episodes, MAIN_CKPT, WIDTHS_DIR, True, None, int(n), [], False, False, None, None, 0, 0, None, ramp, save_every)
+                for n in sys.argv[4].split(",")]
         floor = int(sys.argv[6]) if len(sys.argv) > 6 else 3000      # [free floor MB]: lower to start beside a big run
-        run_scheduled(jobs, f"tff_series {sys.argv[4]} {depth}" + (f" floor {floor}" if floor != 3000 else ""),
+        run_scheduled(jobs, f"tff_series {sys.argv[4]} {depth}" + (f" floor {floor}" if floor != 3000 else "") + (f" lr {lr:g}" if lr != FIXED_LR else "")
+                      + (f" ramp {ramp}" if ramp else ""),
                       gpus = tuple(sys.argv[2].split(",")), budget_mb = int(sys.argv[3]), free_floor_mb = floor)
         sys.exit()
     if what == "reservoirs_wide":                       # John, 2026-10-13: matched reservoirs on the wide path

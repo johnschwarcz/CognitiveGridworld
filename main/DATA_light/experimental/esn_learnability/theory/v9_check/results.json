@@ -1,0 +1,1328 @@
+[
+ {
+  "lens": "fidelity-1",
+  "out": {
+   "checked": "Compared sentence by sentence: v8 abstract vs v9 abstract; label legend; v8 Section 1 (task paragraph, symbol table, three rules + In words, Sufficiency, Composite likelihoods + table, Proposition 1 + In words) vs v9 Sections 1-2; v8 Section 2 opening (decomposition, display, XL/regret, streaming, train/test 0.01, Q1/Q2) vs v9 Section 3 opening; v8 2.1 (per-step additive, Proposition 2 a/b + In words, class-levels paragraph, trained processing) vs v9 3.1 (including the new class table); v8 A1-A5 vs v9 A1-A5 (with the loss definition moved to v9 Section 1 'Outputs and losses'). Tracked every status label (26 in the part: known x5, elementary x6, measured x6, computed x8, A4 measured), every citation (Bottou-Bousquet eq. 2 and Section 3.1, Cesa-Bianchi-Lugosi, Berger-Liseo-Wolpert, Halmos-Savage, Cover-Thomas 2.9 for Bernoulli counts, Varin-Reid-Firth eq. 2.6, Berk, Kleijn-van der Vaart, Ng-Jordan, Yang, Jacobs, Jordan-Jacobs, Xu, Cybenko, Hornik, window theorem / counter construction project notes) and every number (ladder 0.77/0.61/0.45; XL 2.96/0.77/0.34/0.21/0.11/0.04; acc 0.45..0.77; asymptotes 0.53/0.77/1.00; 3.5 vs ln10=2.3 nats; 0.7/2.63 bits; 0.27/0.07 bits; within 0.01; 98-99%; 0.86, 0.48-0.50; 0.34, 0.68; 0.52-0.55; 0.67; 0.44; 0.69/0.61; 2.56/1.3/2.1 bits; 0.75 at w=5-6; 450/50; T=30; 10 values; 500 variables; 1000 units; depth 1-9; eight layers). Checked the qualifiers 'up to', 'not in general', 'finite-sample', 'in the width limit', 'measured, not forced', 'untested', 'project notes', 'per environment', 'about'. Verified the intended changes that touch this part (notes items 1, 12-15, 17, 18, 20, 22-24, 26-28) against the code and record: model_backward.py (DKL_sym = (forward+backward)/2 on soft_clip'd probabilities, DKL_loss subtracts the detached minimum and raises to the power, mean; SANITY_loss all steps, FF_loss last step), full_esn_entropy/run_variant_ent.py (_joint_loss = KL(P_opt||Q) over 100 cells, mean) and naive_null_check/code/harness.py (loss_fn 'joint' same; docstring of the memoryless nets), env/env_generators.py default_context (train = S[50:], test = S[:50]; training keeps <= 1 test variable per environment and forces the goal to a training variable; test batches draw both from the 50), model/model_forward.py (RNN_classification: relu read-in -> LSTM with STM/LTM start -> read-out -> cumsum; FF_classification: mean of observations + z), model/model_architecture.py (out_dims 20 vs 100; reservoir LSTM requires_grad False at default init), REPLICATION/trainings/train_ff_deep.py (layers 1-8 after the trained 15xN read-in; freeze keeps initial weights and biases), DATA/experimental/esn_mlp_rescue/README.txt (5-layer read-in, 5-layer read-out, marginal output, 8,046,020), compact note esn_theory_compact.tex line 73 (stronger read-in, 13-200x R1's outputs) and line 264 (time-invariant memoryless rule fitted per environment 0.687). Read the whole v8 digest (775 lines) and the v8 notes to confirm the labels and caveats the check had imposed are still in place. Not checked: the rendered PDFs (page breaks, floats); Sections 3.2-6 and the appendices except where content from my part moved into them (Proposition 1's output sentence from Table 2; the 'two compressions' gloss in the Conclusion); the numerical values themselves were not recomputed (they are unchanged from v8).",
+   "findings": [
+    {
+     "id": "F1",
+     "location": "v9 Section 3.1, paragraph 'How far the classes fall short': \"The table lists the classes from the smallest to the largest, each with its best known member fitted per environment.\"",
+     "problem": "v8 asserted only that the per-step additive class is larger than the count-affine class (true: count-affine logits are sums over steps). v9's new sentence asserts a nested chain over all four rows. The quadratic-in-the-counts class is not contained in the per-step additive class with marginal output: n_i n_j = sum_t sum_s o_{t,i} o_{s,j} has cross-step terms, which a sum over steps of per-step functions cannot produce (the window theorem's zero mixed second difference, Appendix B proof of Proposition 2a), and step-dependent per-step functions are not functions of the counts, so neither class contains the other. A careful reader would infer the per-step additive class contains the quadratic class and hence has E_app at most 0.34 nats, which the same paragraph leaves open ('no ceiling of the count-affine or of the per-step additive class is known'). The clause 'each with its best known member fitted per environment' also does not fit the last row (optimal Bayes is exact, not fitted) or the step-wise rule entry.",
+     "kind": "new_error",
+     "severity": "medium",
+     "fix": "The table lists the classes with their best known members (fitted per environment in the first three rows). The count-affine class lies inside the per-step additive class with marginal output, which lies inside the class with joint output; the quadratic class is not nested in these.",
+     "v8_text": "The per-step additive class is larger: its best known member, a memoryless rule fitted per environment, scores 0.69 (the step-wise rule 0.61; project notes), and no ceiling of it is known \\st{measured}. The expanded class has $\\Eapp=0$.",
+     "v9_text": "The table lists the classes from the smallest to the largest, each with its best known member fitted per environment.",
+     "evidence": "theory_v8.tex lines 179-181; theory_v9.tex lines 214-215 and 229-232; theory_v9.tex Appendix B lines 475-479 (zero mixed second difference of per-step sums); claims.json P3c_window ('zero interaction between observations w or more steps apart')."
+    },
+    {
+     "id": "F2",
+     "location": "v9 Section 3.1, after the class table: \"These numbers are not ceilings.\"",
+     "problem": "The new sentence covers the whole table, including the last row, where XL 0 and acc 0.77 are the exact optimum of every class (optimal Bayes is the ceiling), and the step-wise rule's 0.77 nats / 0.61, which is an exact value of a fixed rule, not a fit. v8 confined the no-ceiling statement to the count-affine and per-step additive classes. The following sentences narrow it again, but the bare sentence contradicts the last row.",
+     "kind": "imprecision",
+     "severity": "low",
+     "fix": "The fitted members' numbers (first three rows) are not ceilings of their classes.",
+     "v8_text": "no read-out shared across environments does better in log-loss, though accuracy fits reach 0.52--0.55 and no ceiling of the class is known. [...] and no ceiling of it is known \\st{measured}.",
+     "v9_text": "These numbers are not ceilings. The count-affine fit is finite-sample; no count-affine read-out shared across environments does better in log-loss, but fits per environment that target accuracy reach 0.52--0.55, and no ceiling of the count-affine or of the per-step additive class is known.",
+     "evidence": "theory_v8.tex lines 175-180; theory_v9.tex lines 229-232."
+    },
+    {
+     "id": "F3",
+     "location": "v9 Section 3.1: \"quadratic features cut the count-affine gap from 0.86 to 0.34 nats\" and the class table's XL cell 0.86",
+     "problem": "v8 hedged the count-affine gap with 'about' because the finite-sample fit overstates the class optimum by about 0.02 nats (digest N6/M10, the agreed fix). v9 keeps 'The count-affine fit is finite-sample' but the sentence that names the gap now gives 0.86 as 'the count-affine gap' with no hedge, and the table cell is bare.",
+     "kind": "imprecision",
+     "severity": "low",
+     "fix": "Within an environment the missing nonlinearity is of low degree: quadratic features cut the count-affine gap from about 0.86 to 0.34 nats.",
+     "v8_text": "Fitted per environment, the count-affine class's best cross-entropy member stays about 0.86 nats above optimal Bayes (a finite-sample fit) and scores 0.48--0.50 \\st{computed}",
+     "v9_text": "Within an environment the missing nonlinearity is of low degree: quadratic features cut the count-affine gap from 0.86 to 0.34 nats.",
+     "evidence": "theory_v8.tex lines 175-176; theory_v9.tex lines 229-230 and table line 222; theory_v8_check/digest.md N6 and M10 (0.86 overstates the class optimum by about 0.02 nats; 'about' adopted)."
+    },
+    {
+     "id": "F4",
+     "location": "v9 Section 3.1: \"of the 2.56 bits the observations carry about the goal at $T=30$; $\\Eapp$ is the shortfall \\st{elementary}.\" and the class table's 'bits used' column",
+     "problem": "In v8 the label \\st{computed} covered the 2.56 bits and the 1.3 / 2.1 usable bits, and \\st{elementary} covered only the identity. In v9 the 2.56 bits sits in a sentence whose only label is \\st{elementary}, and the table's bits column carries no label of its own (the rows' \\st{computed} is attached to 'cross-entropy fit'; the last row's 2.56 has none). A reader takes 2.56 bits as elementary rather than computed on the stored data.",
+     "kind": "label_change",
+     "severity": "low",
+     "fix": "Its last column is the information the class can use, its \\emph{$\\mathcal V$-information} (Xu et al.\\ 2020), of the 2.56 bits the observations carry about the goal at $T=30$ \\st{computed}; $\\Eapp$ is the shortfall \\st{elementary}. (And head the column 'bits used \\st{computed}'.)",
+     "v8_text": "In information units, $\\Eapp$ is the Shannon information minus the information usable by the class (\\emph{$\\mathcal V$-information}, Xu et al.\\ 2020) \\st{elementary}: of the 2.56 bits observations carry about the goal at $T=30$, the count-affine class uses 1.3 and the quadratic 2.1 \\st{computed}.",
+     "v9_text": "Its last column is the information the class can use, its \\emph{$\\mathcal V$-information} (Xu et al.\\ 2020), of the 2.56 bits the observations carry about the goal at $T=30$; $\\Eapp$ is the shortfall \\st{elementary}.",
+     "evidence": "theory_v8.tex lines 182-185; theory_v9.tex lines 214-217 and 221-226; theory_v8_notes.md Section 7.3 (2.56 bits = ln 10 minus the Bayes test cross-entropy 0.532 nats, a computed quantity)."
+    },
+    {
+     "id": "F5",
+     "location": "v9 Section 2, Sufficiency paragraph, which now ends \"Integrating the observations into counts thus loses nothing.\"",
+     "problem": "v8's closing sentence tied sufficiency to the project's term and claimed it exhausts 'compression of the observations'. v9 drops it from the Sufficiency paragraph; the mapping survives only as the Conclusion's gloss of the 'two compressions' (intended change 10), so a reader of Section 2 no longer meets the claim where the theorem is stated. Possibly deliberate; flagged for a decision.",
+     "kind": "lost_content",
+     "severity": "low",
+     "fix": "By the factorization theorem (Halmos and Savage 1949; for Bernoulli counts, Cover and Thomas 2006, \\S2.9), the counts together with $z$ are a sufficient statistic for $(g,c)$. Integrating the observations into counts thus loses nothing: this is the whole content of the project's earlier ``compression of the observations''.",
+     "v8_text": "integrating the observations into the counts loses nothing. This is the whole content of ``compression of the observations''.",
+     "v9_text": "Integrating the observations into counts thus loses nothing.",
+     "evidence": "theory_v8.tex lines 96-98; theory_v9.tex lines 127-128; theory_v9.tex Conclusion lines 435-437 ('two compressions (into counts: free, by sufficiency; ...)')."
+    },
+    {
+     "id": "F6",
+     "location": "v9 Section 1: \"one number for each of the ten profiles $u_1,\\dots,u_5,v_1,\\dots,v_5$ that set the observables' log-odds (table below)\"",
+     "problem": "v8's '(one number per profile, by construction)' told the reader this is how the generator is built (the v8 revision replaced a '[exact]' label with this phrase, notes 7.1 item 11). v9 keeps the fact but drops the provenance qualifier.",
+     "kind": "lost_caveat",
+     "severity": "low",
+     "fix": "Every network also receives a 10-number code $z$ of the environment, one number for each of the ten profiles $u_1,\\dots,u_5,v_1,\\dots,v_5$ that set the observables' log-odds (table below; one number per profile by construction).",
+     "v8_text": "Every network receives the observations and a 10-number environment code $z$, which fixes the profiles $u_i$ and $v_i$ below (one number per profile, by construction).",
+     "v9_text": "Every network also receives a 10-number code $z$ of the environment, one number for each of the ten profiles $u_1,\\dots,u_5,v_1,\\dots,v_5$ that set the observables' log-odds (table below).",
+     "evidence": "theory_v8.tex lines 64-65; theory_v9.tex lines 67-69; theory_v8_notes.md Section 7.1 item 11."
+    },
+    {
+     "id": "F7",
+     "location": "v9 Section 2, Composite likelihoods: \"Composite likelihoods recover the truth as independent episodes accumulate (they are consistent across independent replicates)\"",
+     "problem": "v8 stated the general property (consistency across independent replicates). v9's gloss 'as independent episodes accumulate' reads as a statement about the task's episodes, which redraw $(g,c)$ every episode, so there is no shared 'truth' to recover across them; the technical statement in the parenthesis concerns replicates with the same values. A careful reader would misread the gloss as a claim about this task.",
+     "kind": "ambiguity",
+     "severity": "low",
+     "fix": "Composite likelihoods recover the truth as independent replicates with the same values accumulate (they are consistent across replicates) but, as Varin et al.\\ note, not in general as the steps of a single episode accumulate ($T\\to\\infty$ in one environment), which is our case.",
+     "v8_text": "Composite likelihoods are consistent across independent replicates but, as Varin et al.\\ note, not in general when one replicate grows, the within-episode case ($T\\to\\infty$ in one environment)",
+     "v9_text": "Composite likelihoods recover the truth as independent episodes accumulate (they are consistent across independent replicates) but, as Varin et al.\\ note, not in general as the steps of a single episode accumulate ($T\\to\\infty$ in one environment), which is our case.",
+     "evidence": "theory_v8.tex lines 103-105; theory_v9.tex lines 145-147; theory_v8_notes.md Section 3 (Varin et al.: 'the case where n is fixed and m increases')."
+    },
+    {
+     "id": "F8",
+     "location": "v9 Section 1: \"450 of the 500 variables serve as goals in training; the other 50 are goals only in testing, where both active variables are held out.\"",
+     "problem": "New sentence (intended change 22). 'Held out' without 'as goals' can be read as 'never occur in training', but a test variable can be the contextual variable of a training environment: env_generators.py default_context draws training variables from all 500, keeps up to one test variable per environment and only forces the goal to a training variable. v8 avoided the reading with 'pairs of held-out variables, a pairing never seen in training' (kept in v9 Section 3) and the Caveats' 'never training goals'; the new Section 1 sentence stands alone.",
+     "kind": "ambiguity",
+     "severity": "low",
+     "fix": "450 of the 500 variables serve as goals in training; the other 50 are never training goals (they can be contextual variables in training) and are the goals in testing, where both active variables are test variables.",
+     "v8_text": "Training streams fresh episodes (new values, observations and environments at every update, the goal always one of the 450 training variables) [...] accuracy on pairs of held-out variables, a pairing never seen in training, matches the training stream's within 0.01 \\st{measured}.",
+     "v9_text": "450 of the 500 variables serve as goals in training; the other 50 are goals only in testing, where both active variables are held out.",
+     "evidence": "main/env/env_generators.py default_context (train = S[T:], test = S[:T]; 'keep <= 1 test-state per row'; 'train goal must be from train'; test batches draw both from test); theory_v8_check/digest.md C7; theory_v9.tex lines 69-70 and 178-180."
+    },
+    {
+     "id": "F9",
+     "location": "v9 abstract: \"Supervising it makes the read-out problem convex;\"",
+     "problem": "New in the abstract. The body states convexity 'for a given read-in' and A4 restricts convexity statements to the cross-entropy, while the trained loss (soft-clipped symmetric KL to the power 1/2) is not convex. The v8 check (M6) required that pointer wherever 'convex' appears unqualified in a table; the v9 abstract now carries the same unqualified reading. v8's abstract made no convexity claim.",
+     "kind": "imprecision",
+     "severity": "low",
+     "fix": "Supervising it makes the read-out problem convex (under cross-entropy, at a fixed read-in);",
+     "v8_text": "The second is decided by whether the loss supervises the contextual variable, marginalizes it (maximum marginal likelihood, whose gradient the model's own belief gates), or leaves it out of the goal's output.",
+     "v9_text": "The second turns on how the loss treats the contextual variable. Supervising it makes the read-out problem convex; summing it out of a joint output, which scores every pair of values, gives maximum marginal likelihood, whose gradient is gated by the network's own belief; separate marginal outputs have no gate.",
+     "evidence": "theory_v8.tex lines 48-50 and 196-198, A4 lines 271-272; theory_v9.tex lines 49-52, 244-246, A4 lines 342-343; theory_v8_check/digest.md M6."
+    },
+    {
+     "id": "F10",
+     "location": "v9 Section 1, The learners: \"a 1000-unit LSTM\" and \"ReLU networks of width 1000 and depth 1--9\"",
+     "problem": "The new definitions fix the width, but the note still uses width series: trained LSTMs of 1.3k to 8.0M parameters (widths 10-1000) and a 50-unit LSTM in Section 4, feedforward widths 10-20,000 (380 to 720,000 parameters) in Section 4, and width 2000 for the cliff shift in Section 3.3. v8 had no fixed-width definition, so no v8 claim changed; but the definition no longer matches its later use.",
+     "kind": "ambiguity",
+     "severity": "low",
+     "fix": "\\emph{Trained LSTM}: a ReLU read-in of $(o_t,z)$, a 1000-unit LSTM (other widths in Section~4) and a linear read-out, ... \\emph{Feedforward networks on the counts}: ReLU networks of width 1000 (other widths in Sections~3.3 and~4) and depth 1--9 ...",
+     "v8_text": "cumulative regret [...] for trained LSTMs (power-1 runs) of 1.3k to 8.0M parameters and from 32k to 12.5k for one-hidden-layer feedforward networks of 380 to 720,000 [...] measured as $0.6\\pm0.3$ (width 2000, one seed)",
+     "v9_text": "\\emph{Trained LSTM}: a ReLU read-in of $(o_t,z)$, a 1000-unit LSTM and a linear read-out, all trained [...] \\emph{Feedforward networks on the counts}: ReLU networks of width 1000 and depth 1--9 that read $z$ and the counts at $T=30$",
+     "evidence": "theory_v9.tex lines 97-106, 332-333, 384-386, 391-393; theory_v8.tex lines 303-305, 263."
+    }
+   ]
+  },
+  "verdicts": {
+   "verdicts": [
+    {
+     "id": "F1",
+     "verdict": "confirmed",
+     "reason": "theory_v9.tex lines 214-215 assert a chain over all four rows; v8 lines 179-181 only said the per-step additive class is larger than the count-affine one. The chain fails at the quadratic row: by the window theorem (esn_theory_compact.tex Thm window (g): Delta_a Delta_b (n_i n_i') = eps_a eps_b at every lag; v9 Appendix B lines 475-479: per-step sums have zero mixed second difference; claims.json P3c_window) the quadratic class is not inside the per-step additive class with marginal output, and step-dependent per-step functions are not functions of the counts, so the per-step class is not inside the quadratic class either. I checked numerically (eureka python, CPU): a random step-dependent per-step additive rule has mixed second difference 0 over steps 3 and 17, n_1*n_2 has -1, and swapping two steps keeps the counts but changes the per-step rule's value. What does hold: count-affine is inside the quadratic class and inside the per-step additive class with marginal output (alpha_g + sum_i beta_gi n_i = sum_t [alpha_g/T + sum_i beta_gi o_ti]), which is inside the joint-output class (take h_gc,t = h_g,t). The second clause is also wrong for the last row and for the step-wise rule, which are exact, not fitted; the column header 'best known member, fitted per environment' (line 221) has the same conflict with 'optimal Bayes'. The reviewer's fix is right in substance but its 'the quadratic class is not nested in these' overlooks that the quadratic class contains the count-affine class; corrected below.",
+     "corrected_fix": "Replace v9 lines 214-215 ('The table lists the classes from the smallest to the largest, each with its best known member fitted per environment.') with: 'The table lists the classes with their best known members (fitted per environment in the first three rows; optimal Bayes and the step-wise rule are exact). The count-affine class lies inside the quadratic class and inside the per-step additive class with marginal output, which lies inside the class with joint output; the quadratic class and the per-step additive class with marginal output are not nested in each other (Appendix~B; window theorem, project note).' In the table (line 221) head the second column 'best known member'."
+    },
+    {
+     "id": "F2",
+     "verdict": "partly",
+     "reason": "The problem is smaller than claimed. v9 line 230 'These numbers are not ceilings.' directly follows 'quadratic features cut the count-affine gap from 0.86 to 0.34 nats' (line 229-230), so its natural antecedent is those two fitted values, for which the statement is right (digest N6: both overstate their class optima by about 0.02 nats), and the next sentence restricts the no-ceiling statement to the count-affine and per-step additive classes exactly as v8 lines 175-180 did. Only a table-wide reading of 'these numbers' contradicts the last row (optimal Bayes, XL 0, 0.77) and the exact step-wise entry; that reading is possible because the paragraph sits under the table, so the reviewer's sentence is a harmless improvement. It is accurate: the first three rows' best known members are all per-environment fits (the 0.69 is the compact note's fitted rule, line 264), and none is its class's optimum.",
+     "corrected_fix": "Replace 'These numbers are not ceilings.' (v9 line 230) with 'The fitted members' numbers (first three rows) are not ceilings of their classes.'"
+    },
+    {
+     "id": "F3",
+     "verdict": "partly",
+     "reason": "Real but overstated. v8 lines 175-176 hedged with 'about 0.86 nats ... (a finite-sample fit)', the form agreed in digest N6/M10. v9 lines 229-230 drop 'about', but the substantive hedge survives in the very next sentence, 'The count-affine fit is finite-sample' (line 230), so 'with no hedge' is inaccurate. The bare table cell 0.86 (v9 line 222) is not a v9 change: v8's Table 2 (v8 line 322, 'count-affine 1.3 (E_app 0.86 nats)') was equally bare, and v8 never hedged the quadratic 0.34 either (v8 line 181). Restoring 'about' is right and costs nothing.",
+     "corrected_fix": "Replace 'quadratic features cut the count-affine gap from 0.86 to\n0.34 nats.' (v9 lines 229-230) with 'quadratic features cut the count-affine gap from about 0.86 to 0.34 nats.'"
+    },
+    {
+     "id": "F4",
+     "verdict": "confirmed",
+     "reason": "v8 lines 182-185 put [elementary] on the identity and [computed] on 'of the 2.56 bits ..., the count-affine class uses 1.3 and the quadratic 2.1'. In v9 lines 215-217 the 2.56 bits sits in a sentence whose only label is [elementary]; in the class table (lines 221-226) the rows' [computed] is attached to 'cross-entropy fit' in the member column (covering 1.3 and 2.1 in rows 1-2), and the last row's 2.56 carries no label. The 2.56 bits is a computed quantity (ln 10 minus the Bayes test cross-entropy 0.532 nats, v8 notes 7.3 and digest M9). Appendix A (v9 line 456, column 'value here [computed]') still labels it, but the main text no longer does, which violates the standing rule that labels stay on the claims they qualify. The fix restores the v8 labelling exactly.",
+     "corrected_fix": "Replace v9 lines 215-217 with: 'Its last column is the information the class can use, its \\emph{$\\mathcal V$-information} (Xu et al.\\ 2020), of the 2.56 bits the observations carry about the goal at $T=30$ \\st{computed}; $\\Eapp$ is the shortfall \\st{elementary}.' Optionally head the last table column (line 221) 'bits used \\st{computed}'."
+    },
+    {
+     "id": "F5",
+     "verdict": "refuted",
+     "reason": "The meaning is unchanged: the mapping is kept in the Conclusion, v9 lines 435-437 ('the project's earlier two compressions (into counts: free, by sufficiency; over blocks of steps: costly ...)'), which says the same as v8 lines 97-98 (compression of the observations = sufficiency, nothing more). The move is an order change within the revision's remit and is recorded in theory_v9_notes.md item 10 (the earlier terms 'are glossed in place' in the Conclusion). It was readability-driven: both cold readers flagged the Section 2 sentence (work/reader_ml.md line 59 'unexplained correction of an earlier claim', line 46 'references to a framing the reader has not seen'; work/reader_neuro.md line 61 'adds nothing for a newcomer', line 43), and the v8 check's reader lens made the same point about earlier terms (digest lines 689-692). The proposed fix would reintroduce, in Section 2, a project term that the note defines only in the Conclusion."
+    },
+    {
+     "id": "F6",
+     "verdict": "refuted",
+     "reason": "'By construction' was not a caveat but a provenance marker: v8 notes 7.1 item 11 records that it replaced the '[exact]' label to say the z-to-profile map is how the generator is built (env/bayes_likelihood.py get_V/soft_roll). v9 lines 67-69 keep the fact itself ('one number for each of the ten profiles u_1..u_5, v_1..v_5 that set the observables' log-odds') and place it in Section 1, 'The task and the learners', where every sentence describes the task's construction and none carries a status label (lines 63-70: 500 variables, 10 values, uniform draws, T=30), so the provenance is given by the section rather than by the phrase; nothing is qualified more weakly than in v8. Both cold readers flagged the v8 parenthetical as opaque (reader_ml.md item 4 '\"one number per profile\" opaque'; reader_neuro.md item 2), which is why it was rewritten. Restoring '(one number per profile by construction)' would be harmless but is not needed."
+    },
+    {
+     "id": "F7",
+     "verdict": "confirmed",
+     "reason": "v9 lines 145-147 gloss Varin et al.'s consistency as 'recover the truth as independent episodes accumulate'. The note defines an episode as a fresh uniform draw of (g,c) with T=30 steps (line 67), so under the note's own definition the gloss describes the training stream, in which there is no fixed truth to recover; Varin et al.'s consistency (v8 notes Section 3: 'the case where n is fixed and m increases') is over independent replicates of the same parameter, which is what v8 lines 103-105 said without the gloss. The parenthesis gives the technical statement and the contrast assigns 'our case' to the other branch, so a careful reader is more likely to be confused than misled, but the gloss is wrong as worded. The reviewer's replacement is accurate and keeps the v9 structure.",
+     "corrected_fix": "Replace v9 lines 145-147 ('Composite likelihoods recover the truth as independent episodes accumulate (they are consistent across independent replicates) but, as Varin et al.\\ note, not in general as the steps of a single episode accumulate ($T\\to\\infty$ in one environment), which is our case.') with: 'Composite likelihoods recover the truth as independent replicates with the same values accumulate (they are consistent across replicates) but, as Varin et al.\\ note, not in general as the steps of a single episode accumulate ($T\\to\\infty$ in one environment), which is our case.'"
+    },
+    {
+     "id": "F8",
+     "verdict": "confirmed",
+     "reason": "Code check: main/env/env_generators.py default_context lines 42-50 draw both training variables from all 500 (np.random.choice(S)), keep at most one test state per row and replace extras from train; lines 54-57 (rng[invalid]=0) only force the goal off test states; test batches (line 40) draw both from the 50 test states (test_states = state_num // 10, main/CognitiveGridworld.py line 33). So a test variable occurs in about a fifth of training environments, as the contextual variable. v9 lines 69-70 'where both active variables are held out' invites the reading that the 50 never occur in training; the v8 check's final review removed exactly that wording ('two held-out variables, never seen in training' -> 'a pairing never seen in training', v8 notes 8.5; digest C7), and the v9 cold reader asked precisely 'whether the variables are unseen or only the pairing' (work/reader_ml.md line 48). The new Section 1 sentence stands alone, before the careful wording at lines 178-180 and 416. The reviewer's fix is accurate and also introduces 'test variables', which the Caveats (line 416) use.",
+     "corrected_fix": "Replace v9 lines 69-70 ('450 of the 500 variables serve as goals in training; the other 50 are goals only in testing, where both active variables are held out.') with: '450 of the 500 variables serve as goals in training; the other 50 are never training goals (they can be contextual variables in training) and are the goals in testing, where both active variables are test variables.'"
+    },
+    {
+     "id": "F9",
+     "verdict": "confirmed",
+     "reason": "v9 line 50 is new (v8 abstract lines 48-50 made no convexity claim). The body qualifies it twice: lines 246-247 'for a given read-in the read-out problem is convex' and A4 lines 342-343 'Convexity statements concern the cross-entropy to the same target', while the trained loss (lines 89-92: soft-clipped symmetric KL to the power 1/2 or 1) is not convex; Table 1's glossary (line 370, 'Convex: the read-out problem under cross-entropy') exists because digest M6 required the pointer wherever 'convex' stands alone. The abstract now carries the unqualified reading in the most-read place. Mitigation, not refutation: v8 Section 5 line 331-332 (v9 line 399, 'supervising the latent variable makes the read-out convex') already stated it unqualified and passed the check, so the abstract compresses an existing sentence; under the standing rule that every caveat stays, the seven-word qualifier is still right. The fix is accurate.",
+     "corrected_fix": "Replace 'Supervising it makes the read-out problem convex;' (v9 line 50) with 'Supervising it makes the read-out problem convex (under cross-entropy, at a fixed read-in);'. Optionally apply the same qualifier at line 399 for consistency."
+    },
+    {
+     "id": "F10",
+     "verdict": "partly",
+     "reason": "The definitions (v9 lines 97-98, 104-106) describe Table 1's configurations, and every later use of another width states it explicitly: line 332-333 '(width 2000, one seed)'; lines 383-386 'Within a family (one architecture at different widths or depths) ... trained LSTMs of 1.3k to 8.0M parameters ... feedforward networks of 380 to 720,000'; lines 391-393 'a 10,000-unit reservoir', 'a trained 50-unit LSTM with 22,320'. So no number or claim is misread and v8 (lines 303-305, 263) had the same series without a fixed-width definition, as the finding concedes; the mismatch is a mild presentational one. The proposed pointers are accurate and harmless, so adopt them if a line is free.",
+     "corrected_fix": "v9 line 97: '\\emph{Trained LSTM}: a ReLU read-in of $(o_t,z)$, a 1000-unit LSTM (other widths in Section~4) and a linear read-out, all trained,'; line 104: '\\emph{Feedforward networks on the counts}: ReLU networks of width 1000 (other widths in Sections~3.3 and~4) and depth 1--9 that read $z$ and the counts at'."
+    }
+   ]
+  }
+ },
+ {
+  "lens": "fidelity-2",
+  "out": {
+   "checked": "Went through, sentence by sentence, v8 Section 2.2 items (i)-(iv) plus the Assumptions block, Section 3 (intro sentence, Table 1 rows/caption/footnotes, the parameter-count paragraph, Table 2), Section 4 (what is general, surprising (1)-(4), caveats, speculation), Section 5 (four bullets and the tests), Appendix A (four proofs) and Appendix B (37 references + project notes), against v9 Sections 3.2, 3.3 (and its Assumptions), 4 (Table 1 with glossary/footnotes, the parameter count), 5, 6, Appendix A (Table 2), B (proofs), C (references). Also read the rendered v9 PDF pages 4-8 (pdftotext) to confirm the tex is what is typeset. Mechanical diffs: references identical except the added closing line about theory_v9_notes.md; proofs identical except the intended move of the Prop 2(a) numerical check (v9 notes item 29). Numbers compared one by one: Table 1 (all cells and footnotes), Table 2, Section 3.2 (0.93, 0.57-0.58, 0.68, 0.95/1.00, 5%, 30,000, 52/70/37/3, 0.69, 0.71, 0.47, 70, 15 nats, 73, 3k-20k, 0.68/0.63/0.65/0.58-0.60, 0.44, R^2 0.92/0.95, 0.57/0.61), 3.3 (1/3, 1/6, cosine series, 6x from k~4, 3.3 layers, 4 layers, 0.4, 0.6+-0.3), parameter count (all), surprising (0.47/0.45, 0.07-0.27 bits, 2.96 nats = 4.27 bits checked), tests: all identical to v8. Intended changes touching my part verified: items 6 (Table 1 groups/glossary: 'shallow gaps' and 'slow release' checked against esn_learnability/writeup/answer.md lines 124, 318, 716), 7 (Table 2 compaction: the dropped intermediate ladder values 0.77/0.34/0.11 and the 0.86/0.34 nats remain in Section 2 and the Section 3.1 table), 8, 9 ('What is surprising (4)' content survives in the abstract and Section 4 'Within a family ... falls monotonically with width' / 'Across families the count orders nothing'), 10, 16 (trapped network, exclusion, start 0, cliff, depth scale, family, complete-data objective, missing-information glosses), 19 (checked against run_variant_ent.py line 66 and model_forward.py lines 93-95; claims.json R3_trap 'trained start'), 21 (1/(3N) -> sigma_w^2 = 1/3), 23, 25 ([computed]/[measured] split on the bounds-note sentence), 28 (A3), 29. Labels: every v8 label in the part found in v9 on the same claim except the [elementary] in 3.3 (finding F2). Citations: every v8 citation in the part present in v9 on the same claim except Poole et al. in Table 2 (F10) and Bottou and Bousquet in Table 2 (F11). Not checked: Sections 1, 2, 3.1 of v9 and the v8 Section 2.1 (other agents' parts), except where v9 pointers from my part rely on them (A4 -> Section 1; frozen-series definition -> Section 1).",
+   "findings": [
+    {
+     "id": "F1",
+     "location": "v9 Section 3.2, Exclusion paragraph: \"Adam's $\\epsilon$ (Kingma and Ba 2015) or fp16 underflow then makes the updates to those read-out rows exactly zero.\"",
+     "problem": "v9 reintroduces 'then', which the v8 check removed deliberately (theory_v8_notes.md 8.1 item 9: \"'then' removed, since fp16 underflow stops rows earlier (about 8 nats, compact note)\"). With 'then' the sentence says the freeze follows the deepening to about 15 nats; the project record says the stored network's rows freeze by fp16 underflow at about 7.7 nats (answer.md line 323; digest C2), and the 15-nat gaps are the final network's. A sequence claim that the check rejected is back.",
+     "kind": "new_error",
+     "severity": "medium",
+     "v8_text": "In the joint ESN a start state shared by all episodes deepens the exclusions at the first step (about 15 nats in the final network, beyond any escape time of order $1/q$); Adam's $\\epsilon$ (Kingma and Ba 2015) or fp16 underflow stops those read-out rows exactly, and a read-out retrained on its states by plain SGD on the goal cross-entropy, without $\\epsilon$, still holds 73 pairs from 3k to 20k updates (project notes).",
+     "v9_text": "Its reservoir starts every episode from the same trained state, and this shared start deepens the exclusions at the first step, to gaps of about 15 nats in the final network: beyond any escape time of order $1/q$, with $q$ the belief in the excluded pair. Adam's $\\epsilon$ (Kingma and Ba 2015) or fp16 underflow then makes the updates to those read-out rows exactly zero.",
+     "evidence": "theory_v8.tex lines 232-235; theory_v9.tex lines 288-291; theory_v8_notes.md Section 8.1 item 9; theory_v8_check/digest.md C2 (answer.md line 323: 'In fp16 the gradient underflows to exactly 0 at ~7.7 nats'; TF32 rows stop at 5.6-8 nats); main/DATA/experimental/esn_learnability/writeup/answer.md lines 316, 323.",
+     "fix": "Adam's $\\epsilon$ (Kingma and Ba 2015) or fp16 underflow makes the updates to those read-out rows exactly zero."
+    },
+    {
+     "id": "F2",
+     "location": "v9 Section 3.3, first two sentences: \"A stack of frozen layers pulls the representations of different inputs together until all inputs map to nearly one point: the ordered phase of signal propagation (...) \\st{elementary}.\"",
+     "problem": "v8 made the convergence of inputs conditional on PyTorch's default initialization (chi = sigma_w^2/2 = 1/6 < 1, the ordered phase) and put [elementary] on that conditional computation. v9 opens with an unconditional claim about 'a stack of frozen layers' (signal propagation also has a chaotic phase, chi > 1, where inputs decorrelate), states the initialization only in the next sentence, and moves the [elementary] label onto the general claim while the computation sentence (1/3, 1/6, floor) is now unlabelled. Qualifier dropped and label moved.",
+     "kind": "meaning_change",
+     "severity": "medium",
+     "v8_text": "At PyTorch's default initialization a frozen ReLU layer multiplies the input-dependent power by $\\sigma_w^2/2=\\tfrac16$ while the default bias adds a fixed floor; at the floor $\\tfrac16$ is also the slope $\\chi$ of the correlation map at unit correlation: the ordered phase of signal propagation, where all inputs converge to one point (Poole et al.\\ 2016; Schoenholz et al.\\ 2017) \\st{elementary}.",
+     "v9_text": "A stack of frozen layers pulls the representations of different inputs together until all inputs map to nearly one point: the ordered phase of signal propagation (Poole et al.\\ 2016; Schoenholz et al.\\ 2017) \\st{elementary}. At PyTorch's default initialization (weight variance $1/(3N)$, so $\\sigma_w^2=\\tfrac13$) a frozen ReLU layer multiplies the input-dependent part of the activations' second moment by $\\sigma_w^2/2=\\tfrac16$, while the default bias adds a fixed, input-independent floor. Once the floor dominates, $\\tfrac16$ is also $\\chi$, the slope at unit correlation of the map that takes the correlation between two inputs' activations from one layer to the next.",
+     "evidence": "theory_v8.tex lines 252-255; theory_v9.tex lines 315-321; digest.md M3 and L13 (chi = 1/6 holds at the bias floor; the ordered phase is the chi < 1 case of Poole et al.).",
+     "fix": "At PyTorch's default initialization (weight variance $1/(3N)$, so $\\sigma_w^2=\\tfrac13$) a frozen ReLU layer multiplies the input-dependent part of the activations' second moment by $\\sigma_w^2/2=\\tfrac16$, while the default bias adds a fixed, input-independent floor. Once the floor dominates, $\\tfrac16$ is also $\\chi$, the slope at unit correlation of the map that takes the correlation between two inputs' pre-activations from one layer to the next; with $\\chi<1$ the stack is in the ordered phase of signal propagation, where it pulls the representations of different inputs together until all inputs map to nearly one point (Poole et al.\\ 2016; Schoenholz et al.\\ 2017) \\st{elementary}."
+    },
+    {
+     "id": "F3",
+     "location": "v9 Appendix A, Table 2, row 'optimization error', value cell: \"convex joint read-out; gate $<10^{-3}$ ...\"",
+     "problem": "The v8 cell said the joint cross-entropy is convex in the read-out; the check (digest M6, confirmed) required 'cross-entropy' in both tables because the trained loss (soft-clipped symmetric KL to a power, A4) is not convex in the logits. v9's 'convex joint read-out' drops the qualifier and is also ungrammatical as a claim (a read-out is not convex). Table 1's glossary keeps the qualifier, Table 2 does not.",
+     "kind": "lost_caveat",
+     "severity": "medium",
+     "v8_text": "joint cross-entropy convex in the read-out; 44 of 70 excluded pairs get $<10^{-3}$ of their row's signal; 0.95 ($T=30$), 1.00 ($T=1$)",
+     "v9_text": "convex joint read-out; gate $<10^{-3}$ of the row's signal for 44 of 70 excluded pairs; 0.95 ($T=30$), 1.00 ($T=1$)",
+     "evidence": "theory_v8.tex line 323; theory_v9.tex line 457; digest.md M6 ('Table 2 line 305 \"joint cross-entropy convex in the read-out\"'); theory_v8_notes.md 8.1 item 13 ('\"convex\" in Table 1 means the read-out problem under cross-entropy').",
+     "fix": "joint cross-entropy convex in the read-out; gate $<10^{-3}$ of the row's signal for 44 of 70 excluded pairs; 0.95 ($T=30$), 1.00 ($T=1$)"
+    },
+    {
+     "id": "F4",
+     "location": "v9 Section 3.2, 'Joint output, joint loss': \"This is the complete-data objective, the log-likelihood as if $c$ were observed.\"",
+     "problem": "New gloss. The joint loss is $\\KL(p\\,\\|\\,q)$ to optimal Bayes's joint posterior (v9 Section 1: a soft target, not a label), i.e. the expected complete-data log-likelihood under the true posterior over $(g,c)$, not the log-likelihood with $c$ observed. The gloss slightly misdescribes the objective that v8 named only as 'the complete-data objective'.",
+     "kind": "imprecision",
+     "severity": "low",
+     "v8_text": "This is the complete-data objective.",
+     "v9_text": "This is the complete-data objective, the log-likelihood as if $c$ were observed.",
+     "evidence": "theory_v8.tex line 196; theory_v9.tex lines 86-93 (joint loss = KL(p||q) between joint posteriors) and 244; v9 notes item 18.",
+     "fix": "This is the complete-data objective: the loss supervises the pair $(g,c)$ through optimal Bayes's joint posterior, so no sum over $c$ precedes it."
+    },
+    {
+     "id": "F5",
+     "location": "v9 Section 3.2, 'Joint output, joint loss': \"The level is then set by the read-in's features.\"",
+     "problem": "v8 attributed the level to 'the features', i.e. the frozen reservoir state the read-out sees given the read-in. v9's 'the read-in's features' reads as the output of the trained read-in, whereas the ridge fit in the next sentence and the following 'The frozen features thus give ...' concern the frozen reservoir state. Two names for one object, one of them pointing at the trained stage.",
+     "kind": "ambiguity",
+     "severity": "low",
+     "v8_text": "The level is then set by the features: a per-step ridge read-out of the frozen state, fitted on one pool of environments and tested on others, predicts the per-step joint log-likelihood with $R^2=0.93$",
+     "v9_text": "The level is then set by the read-in's features. A ridge regression from the joint ESN's frozen state to the per-step joint log-likelihood, fitted on one pool of environments and tested on others, reaches $R^2=0.93$",
+     "evidence": "theory_v8.tex lines 198-200; theory_v9.tex lines 246-249.",
+     "fix": "The level is then set by the features the read-out sees, the reservoir's frozen state. A ridge regression from the joint ESN's frozen state to the per-step joint log-likelihood, fitted on one pool of environments and tested on others, reaches $R^2=0.93$"
+    },
+    {
+     "id": "F6",
+     "location": "v9 Section 3.2, 'Fraction of missing information': \"the factor by which EM's error shrinks per iteration near the solution\"",
+     "problem": "New gloss (v9 notes item 16). With the largest eigenvalue 0.95, EM's error is multiplied by 0.95 per iteration; but v9 itself uses 'shrinks $6\\times$ per layer' (Section 3.3) to mean division by 6, so 'the factor by which the error shrinks' can be read as 1/0.95. The direction of the factor is ambiguous within the note's own usage.",
+     "kind": "ambiguity",
+     "severity": "low",
+     "v8_text": "its largest eigenvalue is EM's rate of convergence, and an eigenvalue of one marks a ridge of the likelihood",
+     "v9_text": "Its largest eigenvalue is EM's rate of convergence, the factor by which EM's error shrinks per iteration near the solution; an eigenvalue of one marks a ridge of the likelihood",
+     "evidence": "theory_v8.tex line 223; theory_v9.tex lines 275-277 and 323 ('shrinks $6\\times$ per layer'); theory_v8_notes.md Section 3 (DLR: 'the largest such eigenvalue gives the rate of convergence').",
+     "fix": "Its largest eigenvalue is EM's rate of convergence: near the solution, EM's error is multiplied by it at every iteration; an eigenvalue of one marks a ridge of the likelihood"
+    },
+    {
+     "id": "F7",
+     "location": "v9 Section 3.2, 'Marginal output after trained processing of the counts': \"Prediction: success, with accuracy rising with depth, at levels that are not predicted.\"",
+     "problem": "v8 predicted 'a depth ladder'; v9 'accuracy rising with depth' is a monotone statement. The measured series rises to depth 4 and is flat after (Table 1: 0.73-0.75 for depths 4-9; claims.json ff_depth_ladder d7 0.742/0.746, d9 0.727/0.741). Slight strengthening of the prediction.",
+     "kind": "meaning_change",
+     "severity": "low",
+     "v8_text": "Prediction: success, with a depth ladder whose levels are not predicted; whether the ladder is the precision of products or slow shallow optimization is open \\st{conjecture}.",
+     "v9_text": "Prediction: success, with accuracy rising with depth, at levels that are not predicted. Whether this depth ladder reflects how precisely the products are computed, or slow optimization of shallow networks, is open \\st{conjecture}.",
+     "evidence": "theory_v8.tex line 249; theory_v9.tex lines 310-312; claims.json ff_depth_ladder; Table 1 row 'feedforward on counts'.",
+     "fix": "Prediction: success, with a depth ladder (accuracy rising with depth, then flat) whose levels are not predicted."
+    },
+    {
+     "id": "F8",
+     "location": "v9 Section 3.2, Exclusion paragraph: \"The optimizer is not the whole cause: a read-out retrained ...\"",
+     "problem": "New interpretive sentence not in v8, which only juxtaposed the plain-SGD result. It is consistent with the project record (answer.md line 339: 'The gate alone holds them'), but the plain-SGD run is a read-out-only control at 20k updates, so the sentence asserts a cause without naming what it is the cause of (the exclusion's persistence, not its permanence).",
+     "kind": "meaning_change",
+     "severity": "low",
+     "v8_text": "and a read-out retrained on its states by plain SGD on the goal cross-entropy, without $\\epsilon$, still holds 73 pairs from 3k to 20k updates (project notes).",
+     "v9_text": "The optimizer is not the whole cause: a read-out retrained on the trapped network's states by plain SGD on the goal cross-entropy, without $\\epsilon$, still holds 73 pairs excluded from 3k to 20k updates (project notes).",
+     "evidence": "theory_v8.tex lines 234-235; theory_v9.tex lines 291-292; main/DATA/experimental/esn_learnability/writeup/answer.md line 339; digest.md C3.",
+     "fix": "The optimizer is not the whole cause of the exclusion's persistence: a read-out retrained on the trapped network's states by plain SGD on the goal cross-entropy, without $\\epsilon$, still holds 73 pairs excluded from 3k to 20k updates (project notes)."
+    },
+    {
+     "id": "F9",
+     "location": "v9 Appendix B, after the proof of Proposition 2: \"the mean magnitude of optimal Bayes's mixed second difference is 0.04--0.09 nats\"",
+     "problem": "The intended move (v9 notes item 29) lost the referent: the computed quantity is the mixed second difference of optimal Bayes's log-odds (digest M1 explains why the log-odds, not the posterior, are what the proof needs). v8 stated it inside the log-odds sentence; v9's free-standing sentence says only 'optimal Bayes's mixed second difference'.",
+     "kind": "imprecision",
+     "severity": "low",
+     "v8_text": "(zero for a factorizable likelihood; on 300 stored environments at $T=30$ the mean magnitude is 0.04--0.09 nats \\st{computed})",
+     "v9_text": "Numerical check of (a): on 300 stored environments at $T=30$, the mean magnitude of optimal Bayes's mixed second difference is 0.04--0.09 nats \\st{computed}.",
+     "evidence": "theory_v8.tex lines 389-391; theory_v9.tex lines 487-488; digest.md M1 (mean |mixed second difference of the log-odds vs goal value 0| 0.044-0.088 nats).",
+     "fix": "Numerical check of (a): on 300 stored environments at $T=30$, the mean magnitude of the mixed second difference of optimal Bayes's log-odds is 0.04--0.09 nats \\st{computed}."
+    },
+    {
+     "id": "F10",
+     "location": "v9 Appendix A, Table 2, row 'frozen layers between trained ones', source cell: \"gain $\\chi$, cosine $\\rho_k$ (Poole et al.\\ 2016)\"",
+     "problem": "v8 cited Poole et al. for the gain $\\chi$ only; v9 attaches the citation to the cosine $\\rho_k$ as well. $\\rho_k$ is the project's post-activation cosine, a monotone transform of Poole's pre-activation correlation map, not a quantity of theirs (digest math lens MISSED N1).",
+     "kind": "citation_change",
+     "severity": "low",
+     "v8_text": "gain $\\chi$ (Poole et al.\\ 2016), cosine $\\rho_k$; mutual information is blind to them (Goldfeld et al.\\ 2019)",
+     "v9_text": "gain $\\chi$, cosine $\\rho_k$ (Poole et al.\\ 2016); invisible to mutual information (Goldfeld et al.\\ 2019)",
+     "evidence": "theory_v8.tex line 319; theory_v9.tex line 458; digest.md 'MISSED N1' under LENS math.",
+     "fix": "gain $\\chi$ (Poole et al.\\ 2016), cosine $\\rho_k$; invisible to mutual information (Goldfeld et al.\\ 2019)"
+    },
+    {
+     "id": "F11",
+     "location": "v9 Appendix A, Table 2, row 'what a class can use': \"$\\mathcal V$-information (Xu et al.\\ 2020); $\\Eapp$ is the shortfall & of 2.56 bits: count-affine 1.3, quadratic 2.1, joint all\"",
+     "problem": "Two drops in one row: the Bottou and Bousquet 2008 citation for $\\Eapp$ (the 'source' column's purpose), and the qualifier 'about the goal' on 2.56 bits, which the v8 check added to keep $I(o;g)=2.56$ bits apart from $I(c;o|g)=2.63$ bits (digest M9). The nats values moved to the Section 3.1 table, which is fine.",
+     "kind": "citation_change",
+     "severity": "low",
+     "v8_text": "what a class can use & $\\Eapp$ (Bottou and Bousquet 2008) $=$ Shannon minus $\\mathcal V$-information (Xu et al.\\ 2020) & of 2.56 bits about the goal: count-affine 1.3 ($\\Eapp$ 0.86 nats), quadratic 2.1 (0.34), expanded all",
+     "v9_text": "what a class can use & $\\mathcal V$-information (Xu et al.\\ 2020); $\\Eapp$ is the shortfall & of 2.56 bits: count-affine 1.3, quadratic 2.1, joint all",
+     "evidence": "theory_v8.tex line 322; theory_v9.tex line 456; digest.md M9 (2.56 vs 2.63 bits kept apart).",
+     "fix": "what a class can use & $\\mathcal V$-information (Xu et al.\\ 2020); $\\Eapp$ (Bottou and Bousquet 2008) is the shortfall & of 2.56 bits about the goal: count-affine 1.3, quadratic 2.1, joint all"
+    },
+    {
+     "id": "F12",
+     "location": "v9 Appendix A, Table 2, row 'cost of learning', value cell: \"LSTM (power 1, 0.75) 3.6k; ... 4 / 8 frozen layers 16.8k / 30.3k\"",
+     "problem": "'trained LSTM' became 'LSTM' (the note's ESNs are also LSTMs, frozen) and 'depth 9 with 4 / 8 frozen layers' became '4 / 8 frozen layers' (the network is unnamed). Both qualifiers were in v8; the '(power 1, 0.75)' qualifier the check required (digest N5) is kept.",
+     "kind": "imprecision",
+     "severity": "low",
+     "v8_text": "nats$\\times$updates over 20k updates (seed 0): trained LSTM (power 1, 0.75) 3.6k; feedforward depth 4 4.3k, depth 1 17.6k; depth 9 with 4 / 8 frozen layers 16.8k / 30.3k",
+     "v9_text": "nats$\\times$updates, 20k updates, seed 0: LSTM (power 1, 0.75) 3.6k; feedforward depth 4 4.3k, depth 1 17.6k; 4 / 8 frozen layers 16.8k / 30.3k",
+     "evidence": "theory_v8.tex line 324; theory_v9.tex line 459; digest.md N5.",
+     "fix": "nats$\\times$updates, 20k updates, seed 0: trained LSTM (power 1, 0.75) 3.6k; feedforward depth 4 4.3k, depth 1 17.6k; depth 9 with 4 / 8 frozen layers 16.8k / 30.3k"
+    },
+    {
+     "id": "F13",
+     "location": "v9 Section 4, Table 1, last row label: \"frozen series: depth 9, $k$ frozen layers\"",
+     "problem": "v8's row said which layers are frozen ('$k$ layers frozen after the read-in'); v9's row does not, and v9 Section 1 says only 'k of the eight layers after the depth-9 network's trained read-in are frozen', not that they are the first k. The project record has a second series with k layers frozen at the output end and different numbers (claims.json ff_frozen_output_end: 0.738 ... 0.502), so the row alone no longer identifies the series; only Section 3.3 ('a trained read-in feeds $k$ frozen layers, followed by the remaining trained layers') and footnote c do.",
+     "kind": "imprecision",
+     "severity": "low",
+     "v8_text": "feedforward depth 9, $k$ layers frozen after the read-in & 7.0M ($k=1$) to 36k",
+     "v9_text": "frozen series: depth 9, $k$ frozen layers & 7.0M ($k=1$) to 36k ($k=8$)",
+     "evidence": "theory_v8.tex line 289; theory_v9.tex lines 105-106 and 368; claims.json ff_frozen_input_end and ff_frozen_output_end.",
+     "fix": "frozen series: depth 9, first $k$ layers after the read-in frozen & 7.0M ($k=1$) to 36k ($k=8$)"
+    },
+    {
+     "id": "F14",
+     "location": "v9 Section 3.3: \"the map that takes the correlation between two inputs' activations from one layer to the next\" and \"a depth scale being the number of layers over which $1-\\rho$ shrinks by a factor $e$\"",
+     "problem": "New glosses (v9 notes item 16). Poole et al.'s correlation map and Schoenholz et al.'s $\\xi_c$ are defined on pre-activation correlations; the note's $\\rho_k$ is the measured post-activation cosine (digest MISSED N1). Writing 'activations' and using $\\rho$ in the definition of the depth scale ties the cited theory to the project's proxy, which v8 avoided by leaving the map unglossed.",
+     "kind": "imprecision",
+     "severity": "low",
+     "v8_text": "at the floor $\\tfrac16$ is also the slope $\\chi$ of the correlation map at unit correlation [...] Schoenholz et al.\\ found networks trainable up to about six depth scales $\\xi_c=-1/\\ln\\chi$, here $6/\\ln6\\approx3.3$ layers from the floor",
+     "v9_text": "Once the floor dominates, $\\tfrac16$ is also $\\chi$, the slope at unit correlation of the map that takes the correlation between two inputs' activations from one layer to the next. [...] Schoenholz et al.\\ found networks trainable up to about six depth scales $\\xi_c=-1/\\ln\\chi$, a depth scale being the number of layers over which $1-\\rho$ shrinks by a factor $e$.",
+     "evidence": "theory_v8.tex lines 253-254, 259-260; theory_v9.tex lines 320-321, 327-328; digest.md LENS math 'MISSED N1' and M3.",
+     "fix": "...the slope at unit correlation of the map that takes the correlation between two inputs' pre-activations from one layer to the next. [...] a depth scale being the number of layers over which that correlation's distance from one shrinks by a factor $e$."
+    }
+   ]
+  },
+  "verdicts": {
+   "verdicts": [
+    {
+     "id": "F1",
+     "verdict": "confirmed",
+     "reason": "theory_v9.tex line 290 reads 'Adam's $\\epsilon$ ... or fp16 underflow then makes the updates ... exactly zero', right after 'deepens the exclusions ... to gaps of about 15 nats in the final network' (lines 288-290); theory_v8.tex line 234 has no 'then', and theory_v8_notes.md Section 8.1 item 9 records that the check removed it because the rows stop earlier. The record agrees: answer.md line 323 'In fp16 the gradient underflows to exactly 0 at ~7.7 nats' (TF32 rows stop at 5.6-8 nats), esn_theory_compact.tex line 88 'Rows freeze at a step-1 gap of about 7.7 nats', and Prop. freeze (d) (line 339) says the frozen rows' gaps deepen afterwards only through the favourites, the read-in and the start state, which is how the stored network's gaps reach 15 nats (v8 notes 8.1 item 9: median 15.2). So 'then' puts the freeze after a deepening that mostly happens after the freeze. theory_v9_notes.md does not list it as an intended change. Dropping the word is the right fix.",
+     "corrected_fix": "Adam's $\\epsilon$ (Kingma and Ba 2015) or fp16 underflow makes the updates to those read-out rows exactly zero."
+    },
+    {
+     "id": "F2",
+     "verdict": "partly",
+     "reason": "Real: theory_v9.tex lines 316-317 assert for 'a stack of frozen layers' in general that inputs converge to one point, and nowhere in lines 317-321 does v9 say that the computed $\\chi=1/6<1$ is what puts the stack in the ordered phase; theory_v8.tex lines 252-255 carried that link ('1/6 is also the slope $\\chi$ ...: the ordered phase') and put \\st{elementary} on the computation, which in v9 is unlabelled while the label sits on the cited general claim (digest M3 and L13 confirm $\\chi=1/6$ holds only at the bias floor). Smaller than claimed: the sentence sits between 'In the frozen series a trained read-in feeds $k$ frozen ... layers' (line 315) and the PyTorch-initialization sentence, so a reader takes it as this series; only the $\\chi<1$ link is missing. The proposed fix is not right as given: it collapses v9's intended order ('the mechanism in words first, then the symbols', theory_v9_notes.md item 4) back into v8's single sentence and bundles in F14's 'pre-activations' change. The replacement below keeps v9's order, restores the condition and returns the label to the computation.",
+     "corrected_fix": "Replace theory_v9.tex lines 316-321, from 'A stack of frozen layers pulls' to 'from one layer to the next.', with: In the ordered phase of signal propagation, the case $\\chi<1$ below, a stack of frozen layers pulls the representations of different inputs together until all inputs map to nearly one point (Poole et al.\\ 2016; Schoenholz et al.\\ 2017). At PyTorch's default initialization (weight variance $1/(3N)$, so $\\sigma_w^2=\\tfrac13$) a frozen ReLU layer multiplies the input-dependent part of the activations' second moment by $\\sigma_w^2/2=\\tfrac16$, while the default bias adds a fixed, input-independent floor. Once the floor dominates, $\\tfrac16$ is also $\\chi$, the slope at unit correlation of the map that takes the correlation between two inputs' activations from one layer to the next, so the stack is in the ordered phase \\st{elementary}."
+    },
+    {
+     "id": "F3",
+     "verdict": "confirmed",
+     "reason": "theory_v9.tex line 457 says 'convex joint read-out'; theory_v8.tex line 323 said 'joint cross-entropy convex in the read-out'. digest.md M6 (confirmed) required the cross-entropy qualifier in both tables because the trained loss (soft-clipped symmetric KL to a power, v9 A4 line 342-343) is not convex in the logits, and its fix named Table 2 explicitly. v9 keeps the qualifier in A4 and in Table 1's glossary (line 370-371, 'Convex: the read-out problem under cross-entropy') but Table 2 lost it, and 'convex joint read-out' predicates convexity of a read-out rather than of a problem. The proposed fix restores the checked wording and fits the 6.9 cm value column.",
+     "corrected_fix": "joint cross-entropy convex in the read-out; gate $<10^{-3}$ of the row's signal for 44 of 70 excluded pairs; 0.95 ($T=30$), 1.00 ($T=1$)"
+    },
+    {
+     "id": "F4",
+     "verdict": "refuted",
+     "reason": "theory_v9.tex lines 92-93 define the joint loss as $\\KL(p\\,\\|\\,q)$ to optimal Bayes's joint posterior; up to a constant that is the cross-entropy $-\\sum_{g,c}p(g,c\\mid o)\\log q(g,c\\mid o)$, whose expectation over $o$ equals $\\E_{(g,c,o)}[-\\log q(g,c\\mid o)]$, i.e. the expected log-loss with both $g$ and $c$ observed. The soft target replaces the pair label by its conditional expectation given $o$, which changes the per-sample estimator but not the risk $R$ that the decomposition of Section 3 (lines 168-175) is stated in. 'Complete-data objective' in the EM sense (Dempster et al.) means exactly the log-likelihood with the latent observed, so the gloss at line 244 says what v8's bare term (theory_v8.tex line 196) meant; the finding's own alternative, 'the expected complete-data log-likelihood under the true posterior', is the same quantity. The proposed fix would replace a correct gloss with a vaguer one; no change needed."
+    },
+    {
+     "id": "F5",
+     "verdict": "confirmed",
+     "reason": "theory_v9.tex line 246-247 'set by the read-in's features' names the output of the trained read-in, which the read-out never sees; the next two sentences (lines 247-250) speak of 'the joint ESN's frozen state' and 'the frozen features', and theory_v8.tex lines 198-200 said 'the features: a per-step ridge read-out of the frozen state'. The ridge fit (v8 notes Section 5, results_pool_ridge_jesn_1.json) is on the reservoir state. The proposed fix is right; the variant below also keeps the connective v9 wanted to the preceding 'training the read-in is not convex'.",
+     "corrected_fix": "The level is then set by the features the read-out sees: the reservoir's frozen state, which the read-in shapes. A ridge regression from the joint ESN's frozen state to the per-step joint log-likelihood, fitted on one pool of environments and tested on others, reaches $R^2=0.93$"
+    },
+    {
+     "id": "F6",
+     "verdict": "confirmed",
+     "reason": "Dempster et al.'s rate (theory_v8_notes.md Section 3: 'the largest such eigenvalue gives the rate of convergence') is the multiplier of the error per iteration, so with 0.95 the error is multiplied by 0.95. theory_v9.tex line 323 ('$1-\\rho_k$ shrinks $6\\times$ per layer') and line 328 ('shrinks by a factor $e$') use 'shrinks by a factor' for division, so 'the factor by which EM's error shrinks per iteration' at lines 275-276 invites reading 0.95 as a divisor. v8 line 223 made no such gloss. The proposed fix states the direction unambiguously and is correct.",
+     "corrected_fix": "Its largest eigenvalue is EM's rate of convergence: near the solution, EM's error is multiplied by it at every iteration; an eigenvalue of one marks a ridge of the likelihood"
+    },
+    {
+     "id": "F7",
+     "verdict": "partly",
+     "reason": "Real but slight: theory_v9.tex line 310 'accuracy rising with depth' is monotone, whereas theory_v8.tex line 249 said 'a depth ladder'; claims.json ff_depth_ladder gives 0.488/0.491, 0.623/0.624, 0.705/0.708, 0.733/0.739, 0.741/0.744, 0.739/0.746, 0.742/0.746, 0.740/0.742, 0.727/0.741 for depths 1-9 (two seeds), a rise to depth 4-5 and a plateau after, with depth 9 not above depth 4. v9's Table 1 predicted cell (line 364) still says 'success; depth ladder, levels not predicted' and the next sentence (line 311) keeps 'this depth ladder', so the strengthening is confined to one clause. The proposed fix is wrong in kind: '(accuracy rising with depth, then flat)' writes the measured shape into the prediction, which v8 did not do. Restore v8's wording in v9's sentence.",
+     "corrected_fix": "Prediction: success, with a depth ladder whose levels are not predicted. Whether this depth ladder reflects how precisely the products are computed, or slow optimization of shallow networks, is open \\st{conjecture}."
+    },
+    {
+     "id": "F8",
+     "verdict": "confirmed",
+     "reason": "theory_v9.tex line 291 adds 'The optimizer is not the whole cause:' before the plain-SGD result that theory_v8.tex lines 234-235 only juxtaposed. The inference is faithful to the record (answer.md line 339: 'The gate alone holds them'; digest C3: readout_only/E6_r3_gce_sgd_lr3e-2, 20,000 updates), but 'cause' has no object, and the paragraph's opening sentence (line 284-285) ties 'permanence' to the optimizer, so the new sentence can be read as contradicting it. The SGD control shows the exclusion lasting to 20k updates (persistence), not permanence, which is what the fix supplies. The proposed wording is right; 'of the exclusion's long life' would match the paragraph's own 'long-lived' equally well."
+    },
+    {
+     "id": "F9",
+     "verdict": "confirmed",
+     "reason": "theory_v8.tex lines 389-391 gave the 0.04-0.09 nats inside the sentence about optimal Bayes's log-odds; theory_v9.tex lines 487-488, after the intended move (theory_v9_notes.md item 29), says only 'optimal Bayes's mixed second difference', which does not name the function differenced. digest M1 (confirmed) is explicit that the quantity computed by mixed_diff.py is the mixed second difference of the log-odds (mean 0.044-0.088 nats on 300 environments), and that the log posterior would be the wrong object because of the common normalizer. The proposed fix restores the referent exactly.",
+     "corrected_fix": "Numerical check of (a): on 300 stored environments at $T=30$, the mean magnitude of the mixed second difference of optimal Bayes's log-odds is 0.04--0.09 nats \\st{computed}."
+    },
+    {
+     "id": "F10",
+     "verdict": "confirmed",
+     "reason": "theory_v8.tex line 319 placed '(Poole et al.\\ 2016)' after 'gain $\\chi$' and before 'cosine $\\rho_k$'; theory_v9.tex line 458 moves it after both. digest.md 'MISSED N1' (math lens) records that $\\rho_k$ is the project's mean post-activation cosine from frozen_stack_propagation.json, a proxy for and not a quantity of Poole et al.'s map (their correlation is on pre-activations). The compaction thus extends a citation to a measured project quantity. Low severity, since the two contract at the same rate (see F14), but the checked placement is the right one and the proposed fix restores it.",
+     "corrected_fix": "gain $\\chi$ (Poole et al.\\ 2016), cosine $\\rho_k$; invisible to mutual information (Goldfeld et al.\\ 2019)"
+    },
+    {
+     "id": "F11",
+     "verdict": "partly",
+     "reason": "Both drops are real (theory_v9.tex line 456 vs theory_v8.tex line 322), but the finding's account of 'about the goal' is wrong: the pre-check cell already read 'of 2.6 bits about the goal' (digest M9 quotes it), and M9 kept $I(o;g)$ and $I(c;o\\mid g)$ apart by writing 2.56 and 2.63, both of which v9 retains (lines 163, 216, 456). So the confusion risk is small; the qualifier still belongs in the cell because 'of 2.56 bits:' alone names no quantity. The Bottou and Bousquet citation for $\\Eapp$ remains at the definition (v9 line 170), so its loss from the source column is a minor compaction. The proposed fix is fine as written.",
+     "corrected_fix": "what a class can use & $\\mathcal V$-information (Xu et al.\\ 2020); $\\Eapp$ (Bottou and Bousquet 2008) is the shortfall & of 2.56 bits about the goal: count-affine 1.3, quadratic 2.1, joint all"
+    },
+    {
+     "id": "F12",
+     "verdict": "confirmed",
+     "reason": "theory_v9.tex line 459 vs theory_v8.tex line 324. v9 defines the learners by name (line 97 'Trained LSTM'; lines 99-100 the ESNs are 'the same network with the LSTM frozen'), so bare 'LSTM' is not the canonical learner name and could denote a frozen one; '4 / 8 frozen layers' names no network, while the frozen series is defined as depth 9 (lines 105-106, Table 1 line 368). Both qualifiers were in v8 after the check (digest N5 required the '(power 1, 0.75)' tag, which v9 keeps). The proposed fix restores them; the longer cell only wraps in the 6.9 cm p-column.",
+     "corrected_fix": "nats$\\times$updates, 20k updates, seed 0: trained LSTM (power 1, 0.75) 3.6k; feedforward depth 4 4.3k, depth 1 17.6k; depth 9 with 4 / 8 frozen layers 16.8k / 30.3k"
+    },
+    {
+     "id": "F13",
+     "verdict": "partly",
+     "reason": "Nothing v8 said was lost: v8's row (theory_v8.tex line 289) said '$k$ layers frozen after the read-in', and v9 moved that phrase into the definition of the term the row now uses (theory_v9.tex lines 105-106: '$k$ of the eight layers after the depth-9 network's trained read-in are frozen'). Neither version says 'the first $k$'; only Section 3.3 (v9 line 315, v8 line 251-252) does. The finding is right that the output-end series exists with different numbers (claims.json ff_frozen_output_end: 0.738 ... 0.502; train_ff_deep.py d9_frozen_sets, lines 142-148, builds both) so 'first $k$' is worth stating, but the place for it is the definition, not only a 3.2 cm row label.",
+     "corrected_fix": "theory_v9.tex lines 105-106: In the \\emph{frozen series}, the first $k$ of the eight layers after the depth-9 network's trained read-in are frozen at initialization. (Optionally, Table 1 line 368: frozen series: depth 9, first $k$ layers frozen)"
+    },
+    {
+     "id": "F14",
+     "verdict": "partly",
+     "reason": "The premise is right: Poole et al. define the correlation map on pre-activation correlations and Schoenholz et al. define $\\xi_c$ through $|c^l-c^*|\\sim e^{-l/\\xi_c}$ on that correlation, while $\\rho_k$ (theory_v9.tex line 322) is the measured post-activation cosine (digest MISSED N1). But the glosses are not wrong: the two maps are conjugate ($c^{k+1}=A(\\rho^k)$ with $A$ affine from the weight and bias variances, $\\rho^{k+1}=F(c^{k+1})$ with $F$ the ReLU arc-cosine kernel), so they have the same slope at the fixed point 1 and $1-\\rho$ and $1-c$ contract at the same rate. Checked: $(1-F(c))/(1-c)\\to1$ (0.997 at $1-c=10^{-4}$), and in a simulated 12-layer frozen ReLU stack at PyTorch's default initialization ($N=1000$, 20 draws) the per-layer ratios of $1-c_{\\rm pre}$ and of $1-\\rho_{\\rm post}$ both settle at 0.165-0.175, i.e. $\\chi=1/6$, from the sixth layer. So no number or claim depends on pre- versus post-activation, and 'activations' at line 320-321 even matches the $\\rho_k$ the next sentence reports. The second half of the proposed fix ('that correlation's distance from one', line 328) would point back across three sentences to a quantity the note never measures. For verbatim fidelity to the citation, change only the first gloss.",
+     "corrected_fix": "theory_v9.tex lines 320-321: Once the floor dominates, $\\tfrac16$ is also $\\chi$, the slope at unit correlation of the map that takes the correlation between two inputs' pre-activations from one layer to the next. Line 328 ('a depth scale being the number of layers over which $1-\\rho$ shrinks by a factor $e$') unchanged."
+    }
+   ]
+  }
+ },
+ {
+  "lens": "definitions",
+  "out": {
+   "findings": [
+    {
+     "id": "NS1",
+     "location": "v9 Table 1 group heading (tex line 357) and Section 3.2 run-in heading (tex line 300): \"Fixed per-step features: the reservoir, or none\"; \"Marginal output on fixed per-step features.\"",
+     "problem": "\"Fixed\" is used in two senses in the same table. The third group heading (\"Fixed random layers between trained layers\") means untrained, but the first group puts the memoryless networks, whose per-step features are trained ReLU layers (Section 1 itself says \"one (depth 1) or two (depth 2) trained layers\"), and the ESNs, whose read-in is trained, under \"fixed per-step features\". The intended sense is \"per-step additive, with no trained processing after the sum over steps\". v8 used \"fixed\" only once, inside a sentence ((iii): \"On a fixed per-step additive representation\"); v9 makes it a heading and a table group, so a reader will take the memoryless networks' features for untrained ones.",
+     "kind": "ambiguity",
+     "severity": "medium",
+     "fix": "Table 1 line 357: \\textit{Per-step features summed over steps (no trained processing after the sum): the reservoir, or none}. Section 3.2 line 300: \\textbf{Marginal output on per-step additive features.} Line 302: \"On a per-step additive representation $\\Eapp$ binds\".",
+     "evidence": "main/DATA/experimental/esn_learnability/naive_null_check/code/harness.py lines 14-16 (\"depth-d ReLU MLP on [o_t; z] ... d = 1 is Linear(15 -> w) + ReLU + Linear(w -> out)\") and lines 327-338 (class MemNet: depth hidden ReLU layers, trained); main/model/model_architecture.py lines 50-52 (classifier_readin = mlp_stack, in the optimizer for the ESN too; only the LSTM is frozen, lines 57-61); v9 tex lines 102-103, 300, 302, 357, 367.",
+     "v8_text": "(iii) Compressed output. ... On a fixed per-step additive representation E_app binds (Proposition 2a) and the level inside the class is not derived: the marginal ESN ends near count-affine and scores 0.44. The memoryless per-step networks settle on composite likelihoods",
+     "v9_text": "\\multicolumn{6}{@{}l}{\\textit{Fixed per-step features: the reservoir, or none}} ... \\textbf{Marginal output on fixed per-step features.} The output holds a separate marginal for each variable ... On a fixed per-step additive representation $\\Eapp$ binds"
+    },
+    {
+     "id": "NS2",
+     "location": "v9 Section 1, \"The learners\" (tex lines 102-103): \"each step's $(o_t,z)$ passes through one (depth 1) or two (depth 2) trained layers, and the per-step logits are summed\"",
+     "problem": "The layer count omits the linear read-out. In the harness, depth d means d hidden ReLU layers followed by a linear output layer: depth 1 is Linear(15->1000)+ReLU+Linear(1000->20) (36,020 parameters), depth 2 adds one 1000x1000 ReLU layer (about 1.0M). Read literally, \"one trained layer\" describes the harness's depth-0 net, Linear(15->out), a linear per-step rule, which is a different and weaker class (it cannot form the products of o_t and z that naive Bayes's per-step update needs). The v9 notes (item 20) describe it correctly as \"ESN read-in, linear read-out, summed\".",
+     "kind": "imprecision",
+     "severity": "medium",
+     "fix": "\\item \\emph{Memoryless networks}: the ESN without its reservoir or start state; each step's $(o_t,z)$ passes through one (depth 1) or two (depth 2) trained ReLU layers and a linear read-out, and the per-step logits are summed. Marginal or joint output.",
+     "evidence": "main/DATA/experimental/esn_learnability/naive_null_check/code/harness.py lines 14-17 (docstring: \"d = 1 is Linear(15 -> w) + ReLU + Linear(w -> out), i.e. the plain ESN's read-in followed by a linear read-out with nothing in between; d = 0 is Linear(15 -> out)\") and lines 327-338 (MemNet.__init__); no_reservoir/e2e_d1_s0/m1.json n_params 36020 = 15*1000+1000+1000*20+20; j1.json/j2.json n_params 116100; writeup/results.json run_marginal.m1_m2_rules param_ratio_d2_d1 = 29; claims.json memoryless_nets (\"ESN read-in, linear read-out, summed, no reservoir\").",
+     "v8_text": "memoryless net, compressed, depth 1 / 2 & 36k / 1.0M (Table 1 row; no definition in the v8 text)",
+     "v9_text": "\\item \\emph{Memoryless networks}: the ESN without its reservoir; each step's $(o_t,z)$ passes through one (depth 1) or two (depth 2) trained layers, and the per-step logits are summed. Marginal or joint output."
+    },
+    {
+     "id": "NS3",
+     "location": "v9 Section 1, task paragraph (tex lines 69-70): \"450 of the 500 variables serve as goals in training; the other 50 are goals only in testing, where both active variables are held out.\"",
+     "problem": "\"Held out\" reads as \"never seen in training\", but a test variable can appear in a training environment as the contextual variable: default_context draws both variables from all 500, keeps at most one test state per training row (replacing extras from the training set) and only forces the goal off the test states. v8 notes 8.5 corrected exactly this reading in the Section 3 sentence (\"a held-out variable can be a contextual variable in training\"); v9's Section 3 keeps that qualification (\"a pairing never seen in training\") but the new Section 1 sentence does not. The split itself (450/50, test batches draw both variables from the 50 test states) is correct.",
+     "kind": "ambiguity",
+     "severity": "low",
+     "fix": "450 of the 500 variables serve as goals in training; the other 50 are goals only in testing, where both active variables are test variables (in training a test variable can be the contextual variable, never the goal).",
+     "evidence": "main/env/env_generators.py lines 29-57 (default_context: train = S[T:], test = S[:T]; training rows: ctx from all S, \"keep <= 1 test-state per row\", extras replaced from train; lines 54-56 rng[invalid] = 0 so \"train goal must be from train\"; test_set: ctx = choice(test)); main/CognitiveGridworld.py line 33 (test_states = state_num // 10) with state_num = 500 in REPLICATION/trainings/train_sanity_networks.py line 16 and train_ff_deep.py line 153; theory_v8_notes.md Section 8.5 and 7.1 item 1.",
+     "v8_text": "Training streams fresh episodes (new values, observations and environments at every update, the goal always one of the 450 training variables) ... accuracy on pairs of held-out variables, a pairing never seen in training",
+     "v9_text": "450 of the 500 variables serve as goals in training; the other 50 are goals only in testing, where both active variables are held out."
+    },
+    {
+     "id": "NS4",
+     "location": "v9 Section 1, \"Outputs and losses\" (tex lines 86-92): \"Every network is trained with Adam (fp16; memoryless networks fp32) ... each term is raised to the power $\\tfrac12$ (recurrent and memoryless networks) or 1 (feedforward networks)\"",
+     "problem": "Stated for every network, but the recurrent networks of Section 4's width series were trained at power 1: the trained LSTMs of 1.3k-8.0M parameters (said in Section 4), and also the 50-unit LSTM (0.44) and the 10,000-unit reservoir (0.43, 0.40), which Section 4 does not flag. The read-out-only retrainings quoted in Section 3.2 (entropy rescue 0.58-0.60; plain SGD, 73 pairs) ran in TF32, not fp16; they are read-outs rather than networks, so this only needs a parenthesis. The description of the loss itself (symmetric KL on soft-clipped probabilities, per goal value, minus the detached batch minimum, power 0.5 or 1, mean) matches model_backward.py; the joint loss matches run_variant.py and harness.py.",
+     "kind": "imprecision",
+     "severity": "low",
+     "fix": "... or 1 (feedforward networks; also the width series of Section~\\ref{s:measures}, reservoirs included). The \\emph{joint loss} (joint outputs only) is $\\KL(p\\,\\|\\,q)$ between optimal Bayes's joint posterior $p$ and the network's, $q$, at every step. (The read-out-only retrainings of Section~\\ref{s:obj} ran in TF32.)",
+     "evidence": "main/DATA/experimental/ff_deep/widths/lstm_N10000_p1_lr0.0005_reservoir_rep0_summary.json (power 1, reservoir True, trainable 380020, acc_last3 0.427); widths/lstm_N50_p1_lr0.001_rep0_summary.json (power 1, trainable 22320, acc 0.4449); REPLICATION/trainings/train_ff_deep.py lines 43, 53, 208-209 (reservoirs \"at loss power 1\"; FF_loss/SANITY_loss defaults patched to the run's power); esn_learnability/readout_only/{A3_r3_own_ent0.03,A3_r3_own_ent0.1,E6_r3_gce_sgd_lr3e-2}/metrics.json config precision 'tf32'; model_backward.py lines 52-66, 107-122 (loss form); interaction_bounds/analyses/joint_esn_extension/run_variant.py docstring lines 9-16 (joint loss: KL(optimal joint || model joint) over the 100 cells at every step, power 1; fp16 autocast + GradScaler); naive_null_check/code/harness.py lines 20-24, 294-309 (loss_fn 'joint').",
+     "v8_text": "(A4) The loss: a soft-clipped symmetric KL to optimal Bayes's goal posterior, per goal value minus the batch minimum, each term to the power 1/2 (recurrent and memoryless networks) or 1 (feedforward), under Adam in fp16 (memoryless networks: fp32)",
+     "v9_text": "Every network is trained with Adam (fp16; memoryless networks fp32) to reproduce optimal Bayes's posterior ... each term is raised to the power $\\tfrac12$ (recurrent and memoryless networks) or 1 (feedforward networks)."
+    },
+    {
+     "id": "NS5",
+     "location": "v9 Section 1, task paragraph (tex lines 63-70) read together with the memoryless rows of Table 1 (tex lines 361-362) and its footnote \"One seed for the memoryless networks (25k updates)\" (line 374)",
+     "problem": "The task paragraph is stated for every network (\"In each environment two of the task's 500 variables are active ... 450 of the 500 variables serve as goals in training\"), but the memoryless networks were trained and tested by the harness on freshly drawn environments, one new (K, Q) pair per episode, with the goal uniform over the two variables, at batch 2,000; their Table 1 values are on 8,000 fresh held-out episodes, not on the 50 test variables. The environment statistics are the same generator (the harness reproduces naive 0.450, step-wise 0.615, optimal Bayes 0.775 on its held-out set), so the numbers are comparable, but the note nowhere says that these runs leave the 500-variable pool and its non-uniform goal draw (which the Caveats describe as a property of training).",
+     "kind": "imprecision",
+     "severity": "low",
+     "fix": "Table 1 footnote: \"One seed for the memoryless networks (25k updates, batch 2,000, trained and tested on freshly drawn environments rather than the 500-variable pool) and the frozen series; trained depth 9 has XL 0.07--0.10.\"",
+     "evidence": "main/DATA/experimental/esn_learnability/naive_null_check/code/harness.py lines 1-9 (\"fresh-environment episode generator ... one NEW environment per episode\"; \"goal uniform in {0, 1}\"), lines 95-122 (draw_z: one fresh pair of contexts per episode; goal = randint(0, 2)); no_reservoir/e2e_d1_s0/j2.json config batch 2000, updates 25000, heldout_refs bayes_acc_t30 0.7748, naive 0.4496, step 0.6149; writeup/answer.md line 506 (\"no reservoir, no start state, Adam, batch 2,000, fresh environments, 25k updates\"); v9 tex lines 416-417 (Caveats: goal not drawn uniformly in training).",
+     "v8_text": "memoryless net, compressed, depth 1 / 2 ... One seed for the memoryless nets (25k updates) and the frozen series",
+     "v9_text": "In each environment two of the task's 500 variables are active ... 450 of the 500 variables serve as goals in training ... One seed for the memoryless networks (25k updates) and the frozen series"
+    },
+    {
+     "id": "NS6",
+     "location": "v9 Section 1, \"The learners\" (tex lines 104-105): \"ReLU networks of width 1000 and depth 1--9 that read $z$ and the counts at $T=30$, that is, exactly integrated evidence\"",
+     "problem": "The feedforward input is the mean of the observations over the 30 steps, n_i/T, concatenated with z (FF_classification: obs_flat.mean(1)); at fixed T = 30 this carries the counts exactly, so the statement is right in content but not literally what the network reads. The v9 notes (item 20) say \"the mean of the observations\".",
+     "kind": "imprecision",
+     "severity": "low",
+     "fix": "that read $z$ and the counts at $T=30$ (as the observations' means $n_i/T$), that is, exactly integrated evidence",
+     "evidence": "main/model/model_forward.py lines 69-86 (FF_classification: O = self.obs_flat.mean(1, keepdims=True); hid = relu(classifier_to_hid(O, Z)); logits = classifier_readout(hid), expanded over steps, accumulate=False); model_backward.py lines 52-55 (FF_loss on the last step); train_ff_deep.py lines 5-7 (\"FF sees each trial's observation means over all T steps plus the true Z\").",
+     "v8_text": "The feedforward networks on the counts",
+     "v9_text": "\\emph{Feedforward networks on the counts}: ReLU networks of width 1000 and depth 1--9 that read $z$ and the counts at $T=30$, that is, exactly integrated evidence; marginal output, supervised at $T=30$."
+    },
+    {
+     "id": "NS7",
+     "location": "v9 Section 3.2, Exclusion paragraph (tex lines 290-291): \"Adam's $\\epsilon$ (Kingma and Ba 2015) or fp16 underflow then makes the updates to those read-out rows exactly zero.\"",
+     "problem": "The rewording attributes an exactly-zero update to Adam's epsilon as well. The project note says that under epsilon a frozen row's weights \"nearly stop\" (in fp32 the step-1 logit still moves about 1e-4 nats per update) and that the exact zero comes from fp16 underflow of the gradient. v8's \"stops those read-out rows exactly\" carried the same looseness, but v9's \"makes the updates ... exactly zero\" is the more literal claim.",
+     "kind": "imprecision",
+     "severity": "low",
+     "fix": "Adam's $\\epsilon$ (Kingma and Ba 2015) then nearly stops those read-out rows, and fp16 underflow stops them exactly.",
+     "evidence": "main/DATA/experimental/interaction_bounds/learning_theory/esn_theory_compact.tex line 88 (\"A row is frozen when Adam's running mean of its squared gradient falls below epsilon^2 ...; its weights then nearly stop. Rows freeze at a step-1 gap of about 7.7 nats ... in its fp16 training their gradients underflow to exactly zero, and in fp32 the measured force on nearly all would deepen them\") and the policy-view paragraph (\"in fp32 a frozen row's step-1 logit moves at most about 1e-4 nats per update, and in fp16 not at all\"); writeup/answer.md line 323 (\"In TF32 the rows effectively stop moving from 2-5k updates ... In fp16 the gradient underflows to exactly 0 at ~7.7 nats\").",
+     "v8_text": "Adam's $\\epsilon$ (Kingma and Ba 2015) or fp16 underflow stops those read-out rows exactly",
+     "v9_text": "Adam's $\\epsilon$ (Kingma and Ba 2015) or fp16 underflow then makes the updates to those read-out rows exactly zero."
+    },
+    {
+     "id": "NS8",
+     "location": "v9 Table 1 glossary (tex line 371): \"Shallow gaps: start 0 keeps the first-step gaps small. Slow release: excluded pairs return slowly.\" (the predicted cells of the row \"continued with joint loss / start 0\")",
+     "problem": "The two glosses are supported by the project record for the read-out-only start-0 run (step-1 gaps <= 2.2 nats, 50 of 100 pairs still excluded at 20k, \"still rising\") and for the from-scratch start-0 network R4 (61 excluded at 2k, 14 at 50k), but the start-0 continuation of the trapped network that the row reports (0.63 at 54k) logged accuracy only: its log.jsonl, eval files and summary.txt contain no excluded-pair counts or step-1 gaps. As the row's measured column gives only 0.63, the \"slow release\" reading of that run is inferred from its slowly rising accuracy (0.46 at 0 to 0.63 at 54k), not measured.",
+     "kind": "unsupported",
+     "severity": "low",
+     "fix": "Footnote $^b$: \"Joint loss and start 0 continue the trapped network for 54k updates (goal-only loss continued: 0.49); excluded-pair counts were not logged for the start-0 continuation, so its slow release is read from the from-scratch start-0 network (61 pairs excluded at 2k, 14 at 50k) and a read-out-only run; the entropy run is 50k updates from scratch.\"",
+     "evidence": "main/DATA/experimental/interaction_bounds/analyses/joint_esn_extension/runs/orig_zero/log.jsonl (keys: acc, acc_T, acc_t10, drift, goal_kl, joint_kl, ... no alive/excluded fields; acc_T 0.4605 at update 0, 0.5205 at 10k, 0.6085 at 40k, 0.627125 at 54k) and summary.txt (fixed-episode accuracy by update only); eval_*.json hold acc_by_step only; writeup/answer.md lines 124, 141 (\"full joint ESN, start 0 (R4) | 61 excluded (39 alive) at 2k | 14 excluded (86 alive) at 50k\"), 264, 318 (\"start 0 keeps the gaps at <= 2.2 nats (1.25 at 20k)\"), 716 (\"Start 0 escapes the trap | measured: partly and slowly\").",
+     "v8_text": "\\quad + joint loss / start 0 / entropy bonus & 118k & yes in form & convex / gated, shallow gaps / tempered & class optimum$^a$ / slow release / between & 0.68 / 0.63 / 0.65$^b$ (no glossary)",
+     "v9_text": "Shallow gaps: start 0 keeps the first-step gaps small. Slow release: excluded pairs return slowly. Between: between the trapped level and the class optimum."
+    },
+    {
+     "id": "NS9",
+     "location": "v9 Appendix B, after the proof of Proposition 2 (tex lines 487-488): \"Numerical check of (a): on 300 stored environments at $T=30$, the mean magnitude of optimal Bayes's mixed second difference is 0.04--0.09 nats [computed].\"",
+     "problem": "The sentence no longer says of what the mixed second difference is taken. The v8 check (M1) required the log-odds phrasing: the exclusion argument holds for the log-odds between goal values, where the normalizer cancels, and the 0.04-0.09 nats were computed for the log-odds against goal value 0. v8's version was attached to the log-odds clause; v9 moved the sentence out of the proof and dropped the object.",
+     "kind": "imprecision",
+     "severity": "low",
+     "fix": "Numerical check of (a): on 300 stored environments at $T=30$, the mean magnitude of the mixed second difference of optimal Bayes's log-odds is 0.04--0.09 nats \\st{computed}.",
+     "evidence": "theory_v8_check/digest.md, LENS math M1 (\"Mean |mixed second difference| of the log-odds vs goal value 0: 0.044-0.088 nats ... the proof needs the log-odds phrasing\") and theory_v8_notes.md Section 8.1 item 12 (mixed_diff.py: log-odds, mean 0.04-0.09 nats on 300 stored environments); v8 tex lines 388-391.",
+     "v8_text": "whereas optimal Bayes's log-odds $\\log\\sum_ce^{\\lambda(g,c)}-\\log\\sum_ce^{\\lambda(g',c)}$ have a non-zero one under A1 (zero for a factorizable likelihood; on 300 stored environments at $T=30$ the mean magnitude is 0.04--0.09 nats \\st{computed})",
+     "v9_text": "Numerical check of (a): on 300 stored environments at $T=30$, the mean magnitude of optimal Bayes's mixed second difference is 0.04--0.09 nats \\st{computed}."
+    },
+    {
+     "id": "NS10",
+     "location": "v9 Table 1 group heading (tex line 363): \"Trained processing after integration\", covering the MLP-rescued ESN row (line 365: \"no: 5--6-step window (window rule 0.75)\")",
+     "problem": "The MLP-rescued ESN's five trained read-out layers act per step on the reservoir state, before the sum over steps (README: \"5-layer read-out applied per step ... before the cumsum\"), and the reservoir holds only the last 5-6 inputs; so its trained processing follows a windowed integration, not the integration over the episode that the feedforward networks (counts at T = 30) and the trained LSTM have. The row's own class cell says so, but the heading groups it with learners whose class contains optimal Bayes. v8 listed the row without a heading.",
+     "kind": "ambiguity",
+     "severity": "low",
+     "fix": "\\multicolumn{6}{@{}l}{\\textit{Trained processing after integration (windowed, over 5--6 steps, for the MLP-rescued ESN)}}",
+     "evidence": "main/DATA/experimental/esn_mlp_rescue/README.txt lines 4-6 (5-layer ReLU read-in, 5-layer read-out applied per step before the cumsum, marginal output, trainable 8,046,020); claims.json mlp_rescued_esn (\"truncated to its last w inputs it tracks the window rule ... matches w = 5-6 intact; reset every step it scores 0.598\"); v9 tex lines 239-241, 363-366.",
+     "v8_text": "MLP-rescued ESN (5+5 trained layers) & 8.0M & no: 5--6-step window (window rule 0.75) & ungated, non-convex & about the window rule & 0.75 (no group heading)",
+     "v9_text": "\\multicolumn{6}{@{}l}{\\textit{Trained processing after integration}} ... MLP-rescued ESN & 8.0M & no: 5--6-step window (window rule 0.75) & ungated, non-convex & about the window rule & 0.75"
+    }
+   ],
+   "checked": "Read in full: theory_v9.tex, theory_v8.tex, theory_v9_notes.md, theory_v8_notes.md, claims.json, theory_v8_check/digest.md (all 775 lines), main/env/env_generators.py, env/env_model_data_manager.py, env/bayes_likelihood.py, env/env_preprocessing.py, model/model_backward.py, model/model_forward.py, model/model_architecture.py, CognitiveGridworld.py, esn_mlp_rescue/README.txt, interaction_bounds/bounds.tex; by section or grep: REPLICATION/trainings/train_ff_deep.py (docstring, d9_frozen_sets, BASE, freeze(), loss defaults, kl_joint), train_sanity_networks.py and train_sanity_update_joint.py (state_num 500, step_num 30, batch 8000, hid 1000, reservoir/output_joint flags, lr 1e-3), env_model_manager.py (torch.amp.autocast on CUDA), full_esn_entropy/run_variant_ent.py (docstring and the init/loss/entropy code), joint_esn_extension/run_variant.py and eval_run.py docstrings, naive_null_check/code/harness.py (docstring, MemNet, loss_fn, draw_episodes), esn_theory_compact.tex lines 60-100, 170-190, 210-225, 255-270 (lines 73, 88, 218, 264), writeup/answer.md (start-0, gap, release and memoryless-setup lines), writeup/results.json (m2 entries), no_reservoir/e2e_d1_s0/{m1,j1,j2}.json (spec, config, n_params, final, heldout_refs), readout_only/*/metrics.json configs, joint_esn_extension/runs/{orig_trained,orig_zero,joint_trained}/log.jsonl, summary.txt and eval files, full_esn_entropy/continued/joint_native_ent0.03/log.jsonl. Ran (CPU, 2 threads) a check of nn.Linear's default init in torch 2.5.1: weight variance 3.33e-4 = 1/(3N) at N = 1000, bound 1/sqrt(N), bias variance 3.4e-4, so sigma_w^2 = 1/3 and sigma_w^2/2 = 1/6; ln 10 = 2.3026, 2.96 nats = 4.27 bits, 6/ln 6 = 3.35, log_6 2 = 0.387. Verified as stated in v9: 500 variables, two active (ctx_num 2), 10 values drawn uniformly per episode (default_realizations), T = 30 and five observables, z = 10 numbers with one inner product per profile (get_V/soft_roll; outer product gives log-odds u_i(g) v_i(c)); the 450/50 split and the test batches drawing both variables from the 50 test states; marginal output = one softmax per variable, joint output = softmax over 100 pairs summed over the other variable (logits_to_belief); the goal-only loss form (DKL_sym on soft-clipped probabilities, per goal value, minus the detached minimum over the whole tensor, + 1e-8, power 0.5 or 1, mean; SANITY_loss over all steps, FF_loss at the last step; only the goal's marginal enters); the joint loss KL(p||q) over the 100 pairs at every step, power 1, in run_variant.py and harness.py; Adam everywhere (model_architecture.py line 65, harness line 513, README), fp16 autocast + GradScaler for the repository's networks, continuations and the entropy run, fp32 for the memoryless nets (amp false); RNN_classification = relu read-in, LSTM (frozen for the ESN), linear read-out, cumsum for both LSTM and ESN; start state STM/LTM = trained nn.Parameters expanded over the batch, shared by all episodes; start 0 = STM = LTM = 0 with requires_grad False (run_variant.py); MLP-rescued ESN = 5-layer read-in + 5-layer per-step read-out, 8,046,020 parameters, marginal output, SANITY loss power 0.5; memoryless nets have no reservoir and no start state; frozen series = depth 9's N x N layers 1-8 frozen from the input end at the standard PyTorch init (weights and biases), the 15 x N read-in always trained, FF loss power 1; the definitions of the fraction of missing information, EM's rate, depth scale, cliff (XL 0.18 at k = 3 to 0.56 at k = 4; bounds.tex k* = 4.2 at N = 1000), family, gated, tied gate; the class table against v8 and claims.json (0.86/0.48-0.50/1.3; 0.34/0.68/2.1; 0.69 = the time-invariant memoryless rule fitted per environment, compact note line 264; step-wise 0.77 nats/0.61; the joint ESN rightly in the per-step additive joint-output class, its state 99.4% count-affine and that class containing optimal Bayes, the marginal ESN 98.6% affine hence 'near' count-affine); Table 1 cells against v8 and claims.json; the label change on the bounds-note sentence (fit [computed], 0.60 +- 0.29 [measured], bounds.tex lines 116, 132, 152); A3 against compact note line 73; Proposition 2's 'In words' link to Proposition 1 (acceptable as stated); the 'unmarked numbers are accuracies at T = 30' convention in the main text (every non-accuracy number between 0 and 1 is marked by a noun or unit: cosines, eigenvalues, R^2, Spearman, bits, nats, layers); the 'gate', 'integrate/marginalize' and 'joint' conventions (one inherited third use of 'gates' in the Shazeer precedent, not flagged). Not checked: the rendered PDF layout and page count; the citations (outside this lens); the computed numbers of v8 beyond the unit conversions."
+  },
+  "verdicts": {
+   "verdicts": [
+    {
+     "id": "NS1",
+     "verdict": "partly",
+     "reason": "The problem is real. v9 line 300 heads a paragraph that covers the memoryless networks (lines 303-304) with 'fixed per-step features', yet their per-step features are trained ReLU layers (v9 lines 102-103; naive_null_check/code/harness.py lines 327-338, MemNet), and the ESN read-in is trained as well (model/model_architecture.py lines 50-52 put readin and readout in the optimizer; only the LSTM is frozen, lines 57-61). v9 uses 'fixed' as 'untrained' in the abstract (line 52), the Table (line 367) and Section 3.3; v8 line 242 used it once, inside a sentence, as 'given'. Both headings are v9 additions (v9 notes items 3 and 6). But the reviewer's Table fix is flawed: it keeps 'the reservoir, or none' after a colon that now lists what the per-step features are, which says the memoryless networks have no per-step features at all. The two Section 3.2 replacements are right and use the note's own defined term (line 193, 'per-step additive').",
+     "corrected_fix": "Table 1 line 357: \\multicolumn{6}{@{}l}{\\textit{Per-step logits summed over steps, nothing trained after the sum: a fixed reservoir, or no reservoir}}. Section 3.2 line 300: \\textbf{Marginal output on a per-step additive representation.} Line 302: \"On a per-step additive representation $\\Eapp$ binds (Proposition~\\ref{p:formats}a)\"."
+    },
+    {
+     "id": "NS2",
+     "verdict": "confirmed",
+     "reason": "harness.py lines 14-17 and MemNet (lines 327-338): depth d is d hidden ReLU layers followed by Linear(w -> out); depth 0 is Linear(15 -> out). no_reservoir/e2e_d1_s0/m1.json n_params 36020 = 15*1000+1000+1000*20+20; j1.json and j2.json 116100; writeup/results.json param_ratio_d2_d1 = 29. v9 lines 102-103 name only 'one (depth 1) or two (depth 2) trained layers' and then the summed logits, so read literally the depth-1 network is the harness's depth-0 linear rule, whereas the trained-LSTM bullet (lines 97-98) names its linear read-out explicitly; v8 had no definition (Table row only). The fix is right and keeps the depth convention of the feedforward series (36k at depth 1, read-out not counted). The added 'or start state' is accurate (answer.md line 506; v9 lines 285-286) but optional."
+    },
+    {
+     "id": "NS3",
+     "verdict": "confirmed",
+     "reason": "env/env_generators.py default_context lines 39-57: training rows draw both variables from all 500 (line 42), keep at most one test state per row (lines 43-50) and force only the goal off the test states (lines 54-57, rng[invalid] = 0); test batches draw both from the 50 (line 40). Env_Customization.py line 40 returns False, so default_context is what runs; CognitiveGridworld.py line 33 and train_sanity_networks.py line 16 give 500/50. So a test variable can be a training environment's contextual variable, which v8 notes Section 8.5 corrected explicitly ('a held-out variable can be a contextual variable in training'). The v9 sentence (lines 69-70) is new (v9 notes item 22) and its 'held out' carries no such qualification; lines 179 and 416 qualify only the pairing and the goal. Low severity; the fix is accurate to the code."
+    },
+    {
+     "id": "NS4",
+     "verdict": "partly",
+     "reason": "The facts hold: ff_deep/widths/lstm_N50_p1_lr0.001_rep0_summary.json (power 1, acc 0.4449, trainable 22320), lstm_N10000_p1_lr0.0005_reservoir (power 1, 0.427, 380020) and lstm_N10000_p1_lr0.001_reservoir (0.398); readout_only A3_r3_own_ent0.03, A3_r3_own_ent0.1 and E6_r3_gce_sgd_lr3e-2 metrics.json precision 'tf32'. But v9 line 385 already flags the LSTM width series as power-1 runs; only lines 391-393 (the 10,000-unit reservoir and the 50-unit LSTM) lack the flag, exactly as in v8 lines 304 and 309-310, which the v8 check read (digest lines 43-47 and 60-66 cite both summaries, including 'power 1') and passed with that one qualifier; the universal loss sentence itself is v8's A4 (lines 269-272) in words. The proposed fix over-generalizes: the width series also holds reservoirs trained at power 0.5 (widths/lstm_N100_p0.5_lr0.001_reservoir and lstm_N200_p0.5_...; train_ff_deep.py lines 39-41 and 56-57, reservoir_compare and reservoir_1000), so 'the width series ..., reservoirs included' would be false, and it drags a Section 4 cross-reference into the loss definition. The TF32 runs are read-outs retrained by a separate harness (E6 by plain SGD, not Adam), so a parenthesis belongs in Section 3.2 if anywhere.",
+     "corrected_fix": "Lines 391-393: \"a 10,000-unit reservoir with 380,020 parameters scores 0.43 (0.40 at another learning rate), below a trained 50-unit LSTM with 22,320 (0.44); both are power-1 runs, like the width series.\" Leave lines 86-92 unchanged. Optional, line 298: \"0.58--0.60 when it retrains the trapped network's read-out alone (the read-out retrainings ran in TF32).\""
+    },
+    {
+     "id": "NS5",
+     "verdict": "confirmed",
+     "reason": "harness.py lines 1-9 and 95-128: one fresh (K, Q) pair per episode (draw_z), goal = randint(0, 2); m1/j1/j2.json config batch 2000, updates 25000, amp false; n_heldout default 8000 (line 684); heldout_refs bayes 0.7748, naive 0.4496, step 0.6149; claims.json memoryless_nets episode_set '8,000 held-out episodes of the runs'; answer.md line 506 ('no reservoir, no start state, Adam, batch 2,000, fresh environments, 25k updates'). v9 lines 63-70 state the 500-variable pool and the 450/50 split for every learner, and lines 416-417 present the non-uniform goal draw as a property of training; neither v9 nor v8 (lines 140-141) excepts the memoryless runs, and the v8 check flagged only fp32 and batch 2,000 (digest lines 364-368) while listing '500 variables' as not checked (line 67). The fix is right; naming the uniform goal makes it complete, since the Caveats call the non-uniform draw a property of training.",
+     "corrected_fix": "Table 1 footnote, lines 374-375: \"One seed for the memoryless networks (25k updates, batch 2,000, trained and tested on freshly drawn environments with the goal uniform over the two variables, not on the 500-variable pool) and the frozen series; trained depth 9 has XL 0.07--0.10.\""
+    },
+    {
+     "id": "NS6",
+     "verdict": "partly",
+     "reason": "model/model_forward.py lines 78-86: O = self.obs_flat.mean(1, keepdims=True), concatenated with z; train_ff_deep.py lines 5-6 say 'observation means'. At fixed T = 30 the means are the counts divided by 30, a bijection, so 'read the counts' is accurate about what the input carries, is the phrase v8 used (line 187, 'The feedforward networks on the counts'; Table 1 'feedforward on counts') and the v8 check passed, and 'that is, exactly integrated evidence' is right. The reviewer concedes the content is right; this is a literal-reading nicety. The parenthesis is harmless but optional, and can be shorter.",
+     "corrected_fix": "Optional, lines 104-105: \"that read $z$ and the counts at $T=30$ (as means, $n_i/T$), that is, exactly integrated evidence\"."
+    },
+    {
+     "id": "NS7",
+     "verdict": "partly",
+     "reason": "The source does distinguish the two: interaction_bounds/learning_theory/esn_theory_compact.tex line 88 ('its weights then nearly stop ... in its fp16 training their gradients underflow to exactly zero') and line 99 ('in fp32 a frozen row's step-1 logit moves at most about 10^-4 nats per update, and in fp16 not at all'); answer.md line 323. So v9 lines 290-291 attribute the exact zero to Adam's epsilon as well. But v8 lines 234-235 ('Adam's epsilon or fp16 underflow stops those read-out rows exactly') say the same thing, and that wording was the v8 check's own corrected fix (digest line 342): v9 rephrased without changing the meaning, so this is an inherited looseness, not the regression the reviewer describes ('the more literal claim'). The proposed sentence matches the source and can be applied as written."
+    },
+    {
+     "id": "NS8",
+     "verdict": "refuted",
+     "reason": "The reviewer's facts hold: interaction_bounds/analyses/joint_esn_extension/runs/orig_zero/log.jsonl has keys acc, acc_T, acc_t10, drift, goal_kl, joint_kl, ... and no exclusion fields (acc_T 0.4605 at update 0, 0.5205 at 10k, 0.6085 at 40k, 0.627 at 54k); summary.txt gives accuracy by update only. But the gloss (v9 lines 370-372) defines the terms of the 'predicted' column, whose cell 'class optimum / slow release / between' (line 360) is unchanged from v8 line 285; the measured column gives only 0.63, and no sentence in v9 claims measured pair counts for that continuation (lines 294-296 say only that start 0 'lifts it to 0.63'). The prediction's support (R4 61 excluded at 2k, 14 at 50k; read-out-only start 0 with gaps <= 2.2 nats) is what it was in v8 (answer.md lines 141, 264, 716). The proposed footnote would add new measured numbers and a methods statement, a content change outside a readability revision, and would misstate a predicted cell as a measurement."
+    },
+    {
+     "id": "NS9",
+     "verdict": "confirmed",
+     "reason": "theory_v8_check/digest.md lines 73-76 (M1): 'the proof needs the log-odds phrasing'; theory_v8_work/final_check/mixed_diff.py computes lo = D - D[:, [0]], the mixed second difference of the log-odds against goal value 0, whose means are 0.044-0.088 nats, while the mixed second difference of log sum_c e^lambda(g,c) itself averages only 0.029-0.051 nats in the same output. So naming the object fixes the number, not just the wording. v8 lines 389-391 kept the figure inside the log-odds clause; v9 lines 487-488, after moving the sentence out of the proof (v9 notes item 29), name no object. The fix is right."
+    },
+    {
+     "id": "NS10",
+     "verdict": "partly",
+     "reason": "esn_mlp_rescue/README.txt lines 4-6 (5-layer read-out applied per step before the cumsum) and claims.json mlp_rescued_esn confirm that the trained read-out follows a windowed integration. But the heading (v9 line 363) is an architectural grouping, not a class claim: the Q1 column answers class membership per row, and this row says 'no: 5--6-step window (window rule 0.75)' (line 365); the text states the window (lines 239-241); and 'trained processing after integration' is the note's own phrase for this arm (v9 line 428; v8 lines 358-359, 'crossing fixed with trained processing after integration'), where the reservoir is the integrator. The heading is loose, not misleading; the qualifier is optional and can be shorter.",
+     "corrected_fix": "Optional, line 363: \\multicolumn{6}{@{}l}{\\textit{Trained processing after integration (windowed, for the MLP-rescued ESN)}}"
+    }
+   ]
+  }
+ },
+ {
+  "lens": "cold-reader",
+  "out": {
+   "hard_passages": [
+    {
+     "quote": "Supervising it makes the read-out problem convex; summing it out of a joint output, which scores every pair of values, gives maximum marginal likelihood, whose gradient is gated by the network's own belief; separate marginal outputs have no gate.",
+     "why": "Three output/loss configurations in one sentence, using 'joint output', 'marginal outputs' and 'gated' before any of them is defined (Section 1 and Proposition 3). I parsed it only after reading 3.2 and coming back.",
+     "fix": "Supervising it makes the read-out convex; summing it out of a joint output (one score per pair) gives maximum marginal likelihood, whose gradient is scaled ('gated') by the network's own belief; outputs with one marginal per variable have no gate.",
+     "severity": "medium"
+    },
+    {
+     "quote": "folding estimation into optimization because training streams fresh episodes.",
+     "why": "Why streaming removes the estimation term is only explained in Section 3; in the abstract it reads as an unexplained convention.",
+     "fix": "folding estimation into optimization because training streams fresh episodes, so no finite training set is ever fitted.",
+     "severity": "low"
+    },
+    {
+     "quote": "The same variable can be the goal in other environments, hence the name.",
+     "why": "Which name? I could not tell whether this justifies 'contextual' (as opposed to 'nuisance') or 'goal'.",
+     "fix": "The same variable can be the goal in other environments, hence 'contextual' rather than 'nuisance'.",
+     "severity": "low"
+    },
+    {
+     "quote": "Every network also receives a 10-number code z of the environment, one number for each of the ten profiles u1, ..., u5, v1, ..., v5 that set the observables' log-odds (table below).",
+     "why": "'Profile' is never defined and I could not tell what the number is (an index into a fixed set of profiles? a scalar parameter?) or whether z lets a network reconstruct x_i(g,c). Sections 3.1-3.2 lean on this when the feedforward networks 'read z and the counts' and the target is 'a log-sum-exp of products of the counts with the log-odds tables'.",
+     "fix": "Every network also receives a 10-number code z of the environment: one number per profile [state what the number is, e.g. the index of the profile in a fixed library], a profile u_i (v_i) being the ten log-odds factors over the values of g (of c), with x_i(g,c) = u_i(g) v_i(c) (table below).",
+     "severity": "high"
+    },
+    {
+     "quote": "on soft-clipped probabilities and term by term over goal values; the smallest term in the batch is subtracted, and each term is raised to the power 1/2 (recurrent and memoryless networks) or 1 (feedforward networks).",
+     "why": "I did not know what a 'term' is (one summand of the symmetric KL per goal value?) or what the smallest term is subtracted from. Low severity because A4 says the clip and optimizer matter only for trap permanence.",
+     "fix": "computed on soft-clipped probabilities as one term per goal value; the batch's smallest term is subtracted from each [author: confirm], and each term is then raised to the power 1/2 (recurrent and memoryless networks) or 1 (feedforward networks).",
+     "severity": "low"
+    },
+    {
+     "quote": "Composite likelihoods recover the truth as independent episodes accumulate (they are consistent across independent replicates) but, as Varin et al. note, not in general as the steps of a single episode accumulate (T \u2192 \u221e in one environment)",
+     "why": "Not knowing the composite-likelihood literature, I could not see what 'recover the truth' means when every episode draws a new (g, c). I needed to be told that the guarantee is consistency over independent repeats of the same (g, c), and that within one episode all steps share c, so it does not apply. The claim itself I only got from the table's last row.",
+     "fix": "Their guarantee is consistency across independent replicates (repeated episodes with the same (g, c)); as Varin et al. note, it need not hold as the steps of one episode accumulate (T \u2192 \u221e in one environment), which is our case.",
+     "severity": "medium"
+    },
+    {
+     "quote": "Each rule's posterior then concentrates on the goal value closest to the truth in KL divergence (Berk 1966; Kleijn and van der Vaart 2006)",
+     "why": "'Closest to the truth' is applied to a goal value; what is close in KL is the rule's model of the observations under that value. One reread.",
+     "fix": "Each rule's posterior then concentrates on the goal value whose model of the observations is closest in KL divergence to the true one (Berk 1966; Kleijn and van der Vaart 2006)",
+     "severity": "low"
+    },
+    {
+     "quote": "An output is different: reporting the two marginals instead of the joint posterior loses I(g; c | o\u2264t) (0.27 bits at t = 1, 0.07 at t = 30), none needed to report g [computed].",
+     "why": "'An output is different' is too terse for the distinction the whole note rests on: discarding c in the state carried between steps is costly, discarding it at the output is harmless. I had to reread to see that 'state' versus 'output' is the contrast.",
+     "fix": "Discarding c at the output is different: reporting the two marginals instead of the joint posterior loses I(g; c | o\u2264t) (0.27 bits at t = 1, 0.07 at t = 30), none of it needed to report g [computed].",
+     "severity": "medium"
+    },
+    {
+     "quote": "The table lists the classes from the smallest to the largest, each with its best known member fitted per environment. [row:] one per-step rule for all steps [measured]; the step-wise rule | \u2013; 0.77 | 0.69; 0.61",
+     "why": "Two members packed into one row with semicolon-separated cells and a '\u2013' took three readings. I also tried to verify the nesting 'smallest to largest' and could not: quadratic in the counts is not inside the per-step additive marginal class (a product n_i n_j is not a sum over steps), and its best member (0.68) sits below a per-step rule (0.69).",
+     "fix": "The table lists four classes in order of what they can use (quadratic in the counts is not nested in the per-step additive class), each with its best known member fitted per environment. Give the third class's two members their own rows: 'one per-step rule for all steps [measured] | \u2013 | 0.69 | \u2013' and 'the step-wise rule | 0.77 | 0.61 | \u2013'.",
+     "severity": "medium"
+    },
+    {
+     "quote": "The ESNs end close to this regime (A3): within an environment, 98\u201399% of the variance of their state summed over steps is affine in the counts [measured].",
+     "why": "'(A3)' points to an assumption listed two pages later (end of 3.3) without saying so; I searched backwards for it.",
+     "fix": "The ESNs end close to this regime (assumption A3, end of Section 3.3): within an environment, 98\u201399% of the variance of their state summed over steps is affine in the counts [measured].",
+     "severity": "low"
+    },
+    {
+     "quote": "The count-affine fit is finite-sample; no count-affine read-out shared across environments does better in log-loss, but fits per environment that target accuracy reach 0.52\u20130.55, and no ceiling of the count-affine or of the per-step additive class is known.",
+     "why": "Three different fits (per-environment cross-entropy, shared across environments, per-environment accuracy-targeted) in one sentence; I reread it to attach each number to its fit. All caveats are needed; they just need separating.",
+     "fix": "The count-affine entry is a finite-sample cross-entropy fit per environment. No count-affine read-out shared across environments beats it in log-loss; per-environment fits that target accuracy instead reach 0.52\u20130.55. No ceiling is known for the count-affine or the per-step additive class.",
+     "severity": "medium"
+    },
+    {
+     "quote": "That class excludes optimal Bayes but contains the window rule, Proposition 1's update within a sliding window of w steps, which scores 0.75 at w = 5\u20136 [computed].",
+     "why": "I could not tell what the window rule computes: optimal Bayes on the last w observations only, or Proposition 1's update with the belief about c formed from the last w steps. The term is invented and this is its only definition.",
+     "fix": "That class excludes optimal Bayes but contains the window rule, Proposition 1's update with the belief b_{t-1}(c|g) formed from the last w steps only [author: confirm this is the rule], which scores 0.75 at w = 5\u20136 [computed].",
+     "severity": "medium"
+    },
+    {
+     "quote": "A ridge regression from the joint ESN's frozen state to the per-step joint log-likelihood ... The frozen features thus give optimal Bayes's form (Proposition 2b) but not its precision",
+     "why": "I had to work out that 'the per-step joint log-likelihood' is optimal Bayes's per-step term h_{gc,t} named in Proposition 2b; and 'precision' first read in the Bayesian-observer sense (inverse variance), where it means accuracy of the logit values.",
+     "fix": "A ridge regression from the joint ESN's frozen state to optimal Bayes's per-step term h_{gc,t} (Proposition 2b) ... The frozen features thus give optimal Bayes's form but not its logit values accurately enough",
+     "severity": "low"
+    },
+    {
+     "quote": "The canonical difficulty measure of this objective is the matrix I_mis I_com^{-1}, with I_com the curvature of the complete-data (joint-loss) objective and I_mis the part of it that goal supervision does not see.",
+     "why": "Not knowing EM theory, I needed to be told that this matrix is the fraction of curvature that is missing, so that a largest eigenvalue of 0.95 means goal supervision sees 5% in that direction; the later sentence ('sees only 5% ... in the worst direction') assumes the reader made that step. 'Part of it' was also ambiguous (part of the objective or of its curvature?).",
+     "fix": "The canonical difficulty measure is the fraction of curvature that goal supervision misses, the matrix I_mis I_com^{-1}: I_com is the curvature of the complete-data (joint-loss) objective and I_mis the part of that curvature the goal-only loss does not see.",
+     "severity": "high"
+    },
+    {
+     "quote": "a pair is excluded when its mean summed logit at T = 30 lies more than 10 nats below the best of its row and of its column.",
+     "why": "'Mean summed logit': summed over steps, I assume, but mean over what (episodes?) is not stated.",
+     "fix": "a pair is excluded when its logit summed over steps, averaged over episodes [confirm], at T = 30 lies more than 10 nats below the best of its row and of its column.",
+     "severity": "low"
+    },
+    {
+     "quote": "this shared start deepens the exclusions at the first step, to gaps of about 15 nats in the final network: beyond any escape time of order 1/q, with q the belief in the excluded pair.",
+     "why": "Two missing links: why a shared trained start state deepens the first-step gaps (the mechanism is not stated), and that a 15-nat gap means q is about e^-15, so 1/q is astronomically long. I had to supply both.",
+     "fix": "Its reservoir starts every episode from the same trained state, which deepens the first-step exclusions [one clause on why] to gaps of about 15 nats in the final network, that is q \u2248 e^-15 for the belief in an excluded pair: beyond any escape time of order 1/q.",
+     "severity": "medium"
+    },
+    {
+     "quote": "On a fixed per-step additive representation E_app binds (Proposition 2a), and the level inside the class is not derived.",
+     "why": "'Binds' (a binding constraint) read as 'bounds' on first pass; the jargon is never defined.",
+     "fix": "On a fixed per-step additive representation, E_app is the limiting term (Proposition 2a), and the level inside the class is not derived.",
+     "severity": "low"
+    },
+    {
+     "quote": "Trained features beat random ones on targets that depend on few input directions (two-layer results: Yehudai and Shamir 2019; Damian et al. 2022), and depth makes products cheap (Yarotsky 2017); both are analogies here.",
+     "why": "I could not see which 'few input directions' the target depends on in this task, so the analogy did not land.",
+     "fix": "Trained features beat random ones on targets that depend on few input directions (here [name them, e.g. the five counts]; two-layer results: Yehudai and Shamir 2019; Damian et al. 2022), and depth makes products cheap (Yarotsky 2017); both are analogies here.",
+     "severity": "low"
+    },
+    {
+     "quote": "Once the floor dominates, 1/6 is also \u03c7, the slope at unit correlation of the map that takes the correlation between two inputs' activations from one layer to the next.",
+     "why": "Not knowing signal propagation, I could not see why the second-moment factor becomes the slope of a correlation map, or what 'unit correlation' has to do with trainability. It only clicked from the measured 6x shrinkage of 1 \u2212 \u03c1_k two sentences later.",
+     "fix": "Once the floor dominates, 1/6 is also \u03c7, the slope near \u03c1 = 1 of the map taking two inputs' correlation \u03c1 from one layer to the next: 1 \u2212 \u03c1 shrinks by 1/6 per layer.",
+     "severity": "high"
+    },
+    {
+     "quote": "a depth scale being the number of layers over which 1 \u2212 \u03c1 shrinks by a factor e. Here that is 6/ln 6 \u2248 3.3 layers, counted from where the floor dominates.",
+     "why": "I first read 6/ln 6 as the depth scale itself rather than six depth scales.",
+     "fix": "a depth scale being the number of layers over which 1 \u2212 \u03c1 shrinks by a factor e. Here one depth scale is 1/ln 6 \u2248 0.56 layers, so six are 6/ln 6 \u2248 3.3 layers, counted from where the floor dominates.",
+     "severity": "low"
+    },
+    {
+     "quote": "class optimum^a / slow release / between",
+     "why": "Table 1's 'predicted' column is in shorthand decoded only in the footnote, which I found after puzzling over the column.",
+     "fix": "Head the column 'predicted (terms: footnote)' or decode the shorthand in the caption's first line.",
+     "severity": "low"
+    },
+    {
+     "quote": "Its canonical cost, the d/2 log n of a two-part code for d parameters and n samples (...), is the regret of a regular model whose class contains the truth, and would charge larger learners more.",
+     "why": "'Two-part code' and 'regular model' are undefined MDL/statistics terms; all I needed was the conclusion that standard theory would charge d/2 log n per learner, so larger learners should lose.",
+     "fix": "Its canonical cost is (d/2) log n for d parameters and n samples (the two-part code length of Rissanen 1978; Bayesian asymptotics, Schwarz 1978): the regret of a well-behaved ('regular') model whose class contains the truth, which would charge larger learners more.",
+     "severity": "low"
+    },
+    {
+     "quote": "At 36,020 parameters the learners span 0.25\u20130.49 in accuracy and 17.5k\u201330.3k in regret",
+     "why": "No learner in Table 1 scores 0.25 (below naive Bayes 0.45), so I could not tell which learners are being compared.",
+     "fix": "At 36,020 parameters the learners [name them] span 0.25\u20130.49 in accuracy and 17.5k\u201330.3k in regret",
+     "severity": "low"
+    },
+    {
+     "quote": "Proposition 1's behavioural relative is backward blocking, explained as explaining away in weight space (Dayan and Kakade 2001).",
+     "why": "I know backward blocking but had to construct the link myself: Proposition 1 revises the belief about g through the belief about c, as backward blocking revises one cue's association after learning about the other.",
+     "fix": "Proposition 1's behavioural relative is backward blocking (belief about one cause revised by evidence about the other), explained as explaining away in weight space (Dayan and Kakade 2001).",
+     "severity": "low"
+    }
+   ],
+   "undefined_terms": [
+    "profile (u_i, v_i) \u2014 Section 1; never defined (what it is, and what the number in z encodes)",
+    "code z \u2014 Section 1; its numbers are never explained, so whether a network can reconstruct x_i(g,c) from z is left to the reader",
+    "composite likelihood \u2014 abstract; defined only in Section 2",
+    "gate / gated \u2014 abstract ('gated'), then Proposition 2b 'tied gate' in the mixture-of-experts sense (mixing weights), then Proposition 3 defines 'gated' in the gradient sense; the two senses are never linked",
+    "marginal output / joint output \u2014 abstract; defined in Section 1 'Outputs and losses'",
+    "excess risk \u2014 abstract; defined in Section 3",
+    "signal propagation \u2014 abstract and Section 5 ('signal propagation explains it'); never defined as a term, only approached via 'the ordered phase' gloss in 3.3",
+    "integrating / integrated (the note's special sense: multiplying likelihoods) \u2014 abstract and Section 1 ('exactly integrated evidence'); defined in Section 2 'In words'",
+    "term, soft-clipped, 'smallest term in the batch is subtracted' \u2014 Section 1 loss definition; never defined",
+    "goal-only state \u2014 used in Proposition 1's title before the 'In words' definition after it (minor)",
+    "window theorem (project note) \u2014 3.1; unpublished and only hinted at ('by superposition')",
+    "A3 \u2014 3.1; refers to the assumption list at the end of 3.3 without a pointer",
+    "V-information \u2014 3.1; glossed as 'the information the class can use'; formal definition only in Appendix B",
+    "count-affine \u2014 3.1 table and text; inferable from 'affine in the counts' but never introduced",
+    "window rule \u2014 3.1; invented, defined inline but ambiguously (see hard passages)",
+    "the per-step joint log-likelihood \u2014 3.2; equals h_{gc,t} of Proposition 2b but not said",
+    "fraction of missing information, I_mis, I_com \u2014 3.2; glossed as curvatures, the 'fraction' reading must be inferred",
+    "mean summed logit \u2014 3.2 Exclusion; mean over what is not stated",
+    "binds \u2014 3.2; economics jargon, never defined",
+    "depth ladder \u2014 3.2; coined in passing, defined only by the preceding sentence",
+    "precision \u2014 3.2 ('not its precision') and Section 5 ('precision edge'); used for logit accuracy, clashing with the Bayesian-observer sense (inverse variance); never defined",
+    "ordered phase, \u03c7, depth scale, floor \u2014 3.3; glossed inline but densely (\u03c7 needs one plain sentence)",
+    "two-part code, regular model \u2014 Section 4; never defined",
+    "'two compressions', 'maximal compression subject to learnability' \u2014 Section 6; project-internal terms, glossed in parentheses only",
+    "Defined adequately on first use (no action): nuisance parameter, per-step additive, excluded, trapped network, start 0, tempering, complete-data objective, Fisher's identity, cliff, cumulative regret"
+   ],
+   "argument_in_three_sentences": "Reporting the goal variable from 30 steps of observations that all share an unobserved contextual variable requires multiplying all the likelihoods first and summing over the contextual variable once at the end, and whether a network's trainable class can express this (Q1, approximation error) depends only on where its architecture places that sum: outputs that are sums of per-step terms with one logit per goal value can express only composite likelihoods (naive Bayes 0.45 up to the step-wise rule 0.61), whereas a joint output over (g, c) pairs, or trained processing after the counts (a sufficient statistic), contains optimal Bayes (0.77). When the class does contain optimal Bayes, what remains is optimization error (Q2), set by how the loss treats the contextual variable and by fixed random processing: supervising c (joint loss) makes the read-out convex; training a joint output on the goal alone is maximum marginal likelihood, whose gradient is gated by the network's own belief q(c|g), so pairs ruled out early stay excluded (the trapped ESN at 0.47 with 70 of 100 pairs excluded, lifted to 0.63-0.68 by the textbook EM remedies); and frozen random layers between trained layers lose no information yet collapse the input geometry (correlations approach 1 at 1/6 per layer) and multiply the regret beyond about four layers. Hence the parameter count orders learners within a family but not across families, and the note's contribution is not a new principle but the mapping of each architecture-and-loss combination onto known objects (sufficiency, composite likelihoods, mixtures of softmaxes and maximum marginal likelihood, EM's missing information, signal propagation), three elementary propositions, and tests that could refute the account.",
+   "overall": "Clear enough for a newcomer in its skeleton: the three-rules display with the accuracies next to it, the Q1/Q2 split, the 'In words' sentence after each proposition, and Table 1 carry the argument, and I could state it after one reading. It is not yet clear in the imported-theory paragraphs: wherever a result from statistics or deep-learning theory is stated in that literature's own terms (composite-likelihood consistency, the fraction of missing information, the \u03c7/correlation-map passage, the d/2 log n cost), I lost the thread and recovered it only from the measured numbers that follow. The setup also leaves one hole a newcomer cannot fill from the note (what the code z and the profiles are). The single change that would help most: extend the note's own best device, the 'In words:' sentence, to the three imported results (composite consistency, missing information, \u03c7), one plain sentence each saying what the quantity means for this task before the numbers; pay for it by cutting the road-map sentences that appear twice (the end of the Section 3 preamble and the opening of Section 4 both say that Table 1 answers Q1 and Q2) and by moving the 3.1 fit caveats, unchanged, into that table's footnote."
+  },
+  "verdicts": null
+ },
+ {
+  "lens": "reader-points",
+  "out": {
+   "points": [
+    {
+     "reader": "ml",
+     "point": "1.(1) Sec 2.1 opening: 70 words between subject and verb; two architectures and a measurement in one sentence; 'summed state' unexplained",
+     "status": "addressed",
+     "comment": "v9 defines the trained LSTM and the ESN ('the same network with the LSTM frozen at its random initialization (the reservoir)'), the marginal and joint ESN and the MLP-rescued ESN in the Section 1 learner list; the measurement stands alone in 3.1 as 'the ESNs end close to this regime (A3): within an environment, 98-99% of the variance of their state summed over steps is affine in the counts [measured]'. 'Summed state' became 'state summed over steps'."
+    },
+    {
+     "reader": "ml",
+     "point": "1.(2) 'integrate' means marginalize (Berger) in one sentence and accumulate in the next",
+     "status": "addressed",
+     "comment": "Section 1 now says 'removes by marginalizing it (the integrated likelihood of Berger, Liseo and Wolpert 1999)', and the In-words after the three rules states 'multiplying likelihoods over observations integrates evidence; summing over c marginalizes the contextual variable (we use the two verbs only in these senses)'. The abstract's 'integrating the observations into counts' and the conclusion's 'integrate to a sufficient statistic' follow the convention."
+    },
+    {
+     "reader": "ml",
+     "point": "1.(3) A4: the teacher posterior and the clipped, powered loss arrive last, in a five-modifier sentence; 'power-1 runs' refers back to it",
+     "status": "addressed",
+     "comment": "Section 1 'Outputs and losses' states on page 1 that every network reproduces optimal Bayes's posterior, 'a soft target rather than the goal's label', and spells out the symmetric KL on soft-clipped probabilities term by term, the batch-minimum subtraction (matching DKL_loss in model_backward.py: DKL - DKL.detach().min()), the power 1/2 or 1, Adam and fp16/fp32. A4 is now a pointer ('The losses and optimizer of Section 1') keeping the convexity caveat. Section 4's 'power-1 runs, like the feedforward networks' now links back."
+    },
+    {
+     "reader": "ml",
+     "point": "1.(4) Sec 1 opening: task, environment, episode, active, profile undefined; what the network outputs and when never said; 'one number per profile' opaque",
+     "status": "addressed",
+     "comment": "Section 1 now gives variables (500, 10 values each), environment (two active variables), episode (values drawn uniformly; T=30 steps of five binary observables), z ('one number for each of the ten profiles u_1..u_5, v_1..v_5 that set the observables' log-odds'), the 450/50 split, and the convention 'Unmarked numbers between 0 and 1 are accuracies at T=30'; the learner list says when each is supervised (every step / T=30)."
+    },
+    {
+     "reader": "ml",
+     "point": "1.(5) Exclusion used before its definition; 'then' after a sentence predicting no trap; verb-less number string; unlabeled '(0.69)'",
+     "status": "addressed",
+     "comment": "The 'Exclusion [measured]' run-in opens with the definition ('In the 10x10 table of pair logits (rows g, columns c), a pair is excluded when ...'), the 'then' is gone, and the time course has verbs: 'excludes 52 of the 100 pairs at update 10, peaks at 70, still excludes 37 at 10k updates and 3 at 25k, and ends at 0.69'. The Section 1 convention labels the 0.69."
+    },
+    {
+     "reader": "ml",
+     "point": "1.(6) three mechanisms (shared start state, Adam eps/fp16, plain SGD) in one sentence; '1/q' undefined",
+     "status": "addressed",
+     "comment": "Split into three sentences as suggested: the shared trained start state deepening the first-step gaps 'to gaps of about 15 nats ... beyond any escape time of order 1/q, with q the belief in the excluded pair'; 'Adam's eps ... or fp16 underflow then makes the updates to those read-out rows exactly zero'; 'The optimizer is not the whole cause: a read-out retrained ... by plain SGD ... still holds 73 pairs excluded from 3k to 20k updates'."
+    },
+    {
+     "reader": "ml",
+     "point": "1.(7) composite-likelihood consistency sentence: 70 words, point last, 'environment-pair combinations' unexplained",
+     "status": "addressed",
+     "comment": "Now: 'This cost does not vanish in longer episodes. Composite likelihoods recover the truth as independent episodes accumulate (they are consistent across independent replicates) but ... not in general as the steps of a single episode accumulate (T->inf in one environment), which is our case' and 'a wrong one for naive Bayes in nearly half of the combinations of environment and true values (g,c) (the table's last row)'."
+    },
+    {
+     "reader": "ml",
+     "point": "1.(8) class-level paragraph: four classes, three units, 'count-affine' unnamed, 'finite-sample fit', 'accuracy fits', 'ceiling' undefined; suggests a table",
+     "status": "addressed",
+     "comment": "3.1 'How far the classes fall short' is a four-row table (class with the learners near it | best known member | XL | acc | bits used) with the caveats gathered after it; 'accuracy fits' became 'fits per environment that target accuracy'. 'The count-affine fit is finite-sample' is still a bare phrase (see 2., undefined terms), and the table's 'from the smallest to the largest' and its column header are new problems listed separately."
+    },
+    {
+     "reader": "ml",
+     "point": "1.(9) frozen ReLU paragraph: origin of 1/6 unstated; 'input-dependent power', 'floor', 'correlation map' undefined; conclusion after derivation",
+     "status": "addressed",
+     "comment": "3.3 leads with the mechanism ('pulls the representations of different inputs together until all inputs map to nearly one point: the ordered phase'), then gives the origin ('weight variance 1/(3N), so sigma_w^2 = 1/3'), 'input-dependent part of the activations' second moment', 'a fixed, input-independent floor', and chi as 'the slope at unit correlation of the map that takes the correlation between two inputs' activations from one layer to the next'."
+    },
+    {
+     "reader": "ml",
+     "point": "1.(10) I_mis, I_com undefined; computed object is a chain of five modifiers",
+     "status": "addressed",
+     "comment": "'Fraction of missing information' defines the matrix ('I_com the curvature of the complete-data (joint-loss) objective and I_mis the part of it that goal supervision does not see'), explains the eigenvalue as 'the factor by which EM's error shrinks per iteration', and names the block: 'the joint output's 100 bias parameters (one per pair, shared by all environments)'."
+    },
+    {
+     "reader": "ml",
+     "point": "1.(11) 'The level is then set by the features': the inference from convexity is implicit; 'level' and 'score' unqualified",
+     "status": "partly",
+     "comment": "v9 now reads 'training the read-in is not convex. The level is then set by the read-in's features' and adds the conclusion 'The frozen features thus give optimal Bayes's form ... but not its precision'. The convexity-to-features inference is now adjacent, but 'level' is still unqualified and why an R^2 of 0.93 per step yields only 0.57-0.58 after summing is left to the reader.",
+     "fix": "Write 'The accuracy level is then set by the read-in's features' and, after '0.57-0.58', add '(a 7% per-step residual compounds over 30 steps)' if that is the intended reading; about half a line."
+    },
+    {
+     "reader": "ml",
+     "point": "1.(12) Prop 2 'In words' harder than the formula",
+     "status": "addressed",
+     "comment": "Replaced by 'with one logit per goal value, any sum over c must sit inside each step's term (naive Bayes's family); with one logit per pair, the sum over c is taken once, outside the sum over steps (optimal Bayes's form)', plus the link to Proposition 1."
+    },
+    {
+     "reader": "ml",
+     "point": "1.(13) Parameter count: 90-word sentence; 'charge', 'power-1 runs'",
+     "status": "addressed",
+     "comment": "Split into 'The parameter count', 'Within a family (one architecture at different widths or depths) we see no such charge' and 'Across families the count orders nothing'; the LSTM range, the feedforward range, the depth clause and the three explanations are separate sentences; 'charge' is set up by 'would charge larger learners more' in the preceding sentence; 'power-1 runs, like the feedforward networks' points to Section 1."
+    },
+    {
+     "reader": "ml",
+     "point": "1.(14) Conclusion 'Data' bullet telegraphic; 'Tests: ... (no release)'",
+     "status": "addressed",
+     "comment": "'Data: learners that vary fixed or trained processing after integration, marginal or joint output, and goal-only or joint loss; ...' and 'Proposed tests: ... (predicted: no release)'. 'Frozen-layer series' stays short but is now defined in Section 1 ('frozen series')."
+    },
+    {
+     "reader": "ml",
+     "point": "1.(15) 'hence our name for it' does not explain the name; three names in two sentences",
+     "status": "partly",
+     "comment": "The three names are now ordered (contextual variable; statistically a nuisance parameter; in learning terms a latent variable), but the sentence 'The same variable can be the goal in other environments, hence the name' still does not say why that makes it 'contextual'.",
+     "fix": "Replace 'hence the name' with ': it is context for the goal here, not noise' (same line)."
+    },
+    {
+     "reader": "ml",
+     "point": "2. 'joint' means output format and loss; pick compressed/expanded for the output",
+     "status": "declined_reasonably",
+     "comment": "v9 keeps marginal/joint output to match marginal/joint ESN and states once that 'Joint always refers to the pair (g, c)'. Every use now carries its noun (joint output, joint loss, joint ESN, joint posterior, joint cross-entropy), and Table 1 writes 'memoryless, joint output, goal-only / joint loss', so the two senses no longer collide; the one bare 'joint' left is Table 2's 'joint all' (bits used), readable from the row."
+    },
+    {
+     "reader": "ml",
+     "point": "2. 'memoryless network/rule' never defined",
+     "status": "addressed",
+     "comment": "Section 1: 'Memoryless networks: the ESN without its reservoir; each step's (o_t,z) passes through one (depth 1) or two (depth 2) trained layers, and the per-step logits are summed' (matches claims.json memoryless_nets). The 0.69 member is now 'one per-step rule for all steps [measured]' in the class table; its new short name 'the per-step rule' collides with 'the step-wise rule' (listed under new problems)."
+    },
+    {
+     "reader": "ml",
+     "point": "2. 'feedforward networks on the counts', 'trained LSTM' appear mid-2.1 as if known; roster only in Table 1",
+     "status": "addressed",
+     "comment": "All eight learners are defined in Section 1 'The learners' before any use, with the names Table 1 uses (trained LSTM, ESN/marginal/joint, MLP-rescued ESN, memoryless, feedforward on the counts, frozen series)."
+    },
+    {
+     "reader": "ml",
+     "point": "2. 'window theorem (project note)' cited three times, never stated",
+     "status": "addressed",
+     "comment": "3.1 gives the one-line argument: 'A reservoir that responds linearly, read out linearly and summed over steps, computes a sum over steps of per-step functions of (o_t,z), whatever its memory: by superposition, each step's input contributes separately (window theorem, project note) [elementary]'."
+    },
+    {
+     "reader": "ml",
+     "point": "2. 'count-affine' used before 'affine in the counts' is named",
+     "status": "addressed",
+     "comment": "'Affine in the counts' now appears first (3.1 opening paragraph and Prop 2a), the class table's first row is 'affine in the counts (marginal ESN)', and 'count-affine' follows as its compound form."
+    },
+    {
+     "reader": "ml",
+     "point": "2. 'gated/ungated' define once",
+     "status": "addressed",
+     "comment": "Prop 3's In-words ends 'We call such an objective gated'; the marginal-output paragraph says 'No pair logit is summed over, so there is no gate'; Table 1's glossary line repeats 'Gated: the gradient carries q(c|g) (Proposition 3)'."
+    },
+    {
+     "reader": "ml",
+     "point": "2. 'tied gate': say the gate is computed from the same logits",
+     "status": "addressed",
+     "comment": "Prop 2b: 'a mixture of softmaxes (Yang et al. 2018) whose mixing weights q(c) come from the same logits (a tied gate)'."
+    },
+    {
+     "reader": "ml",
+     "point": "2. undefined: exclusion, trap/trapped network, cliff, frozen series, the trained rest, shared start state/start 0, MLP-rescued, depth ladder, wrong corner, complete-data objective, the level, ceiling of the class, a finite-sample fit",
+     "status": "partly",
+     "comment": "Defined at first use in v9: exclusion, trapped network ('the joint ESN trained on the goal-only loss, the trapped network, ends at 0.47 with 70 pairs excluded'), cliff, frozen series, 'the remaining trained layers', shared start and start 0, MLP-rescued ESN, depth ladder (by apposition), complete-data objective; 'wrong corner' is gone; 'ceiling' is used only to deny one ('These numbers are not ceilings'). Still bare: 'The level is then set by the read-in's features' and 'The count-affine fit is finite-sample'.",
+     "fix": "'The accuracy level is then set ...' and 'The count-affine fit is a finite-sample estimate' (zero extra lines)."
+    },
+    {
+     "reader": "ml",
+     "point": "2. 'compression of the observations', 'the earlier two compressions', 'maximal compression subject to learnability' refer to an unseen framing",
+     "status": "addressed",
+     "comment": "The 'whole content of compression of the observations' sentence is removed; the Conclusion glosses in place: 'the project's earlier \"two compressions\" (into counts: free, by sufficiency; over blocks of steps: costly, the more so the shorter the blocks) and, as a corollary, its \"maximal compression subject to learnability\": integrate to a sufficient statistic; ...'."
+    },
+    {
+     "reader": "ml",
+     "point": "2. 'goal-only state' / 'marginal state' / 'goal marginal': three names for one thing",
+     "status": "addressed",
+     "comment": "Prop 1's title and In-words use 'goal-only state' only ('A goal-only state, which carries only the goal's posterior from step to step'); the body says 'The goal's posterior is therefore not a sufficient statistic'."
+    },
+    {
+     "reader": "ml",
+     "point": "2. 'pairs of held-out variables, a pairing never seen in training': unclear whether the variables are unseen or only the pairing",
+     "status": "partly",
+     "comment": "Section 1 now says '450 of the 500 variables serve as goals in training; the other 50 are goals only in testing, where both active variables are held out', and Section 3 'environments whose two variables are both held out, a pairing never seen in training'. That the 50 can still occur as contextual variables in training (v8 notes, Section 8: 'a held-out variable can be a contextual variable in training') is not said, so 'held out' still invites the 'never seen' reading.",
+     "fix": "In Section 1: 'the other 50 are goals only in testing (they can be contextual variables in training), where both active variables are held out' (about one line)."
+    },
+    {
+     "reader": "ml",
+     "point": "2. 'profiles', 'acc' (at T=30? of argmax?), bare numbers like 'scores 0.67'",
+     "status": "addressed",
+     "comment": "Profiles are named as u_1..u_5, v_1..v_5 in Section 1; the symbol table keeps 'acc, XL'; 'Unmarked numbers between 0 and 1 are accuracies at T=30' is stated once, and the block table and Table 1 caption say 'at T=30'."
+    },
+    {
+     "reader": "ml",
+     "point": "2. 'ESN' for a frozen LSTM is nonstandard; say so",
+     "status": "partly",
+     "comment": "Section 1 defines the ESN exactly ('the same network with the LSTM frozen at its random initialization (the reservoir)'), which prevents a reader from assuming a tanh reservoir, but it does not flag the usage as loose.",
+     "fix": "'Echo state networks (ESN; the term is used loosely): ...' (zero extra lines)."
+    },
+    {
+     "reader": "ml",
+     "point": "3. Prop 1 (state) vs Prop 2a (output): say when Prop 1 binds",
+     "status": "addressed",
+     "comment": "Prop 2's In-words now ends 'In Proposition 1's terms, a marginal output's goal logits are a goal-only state, while a joint output's pair logits carry the joint posterior.' The sentence sits under Prop 2's per-step additive hypothesis but omits the qualifier that the v9 notes (item 24) include; see new problems."
+    },
+    {
+     "reader": "ml",
+     "point": "3. 'This local measure predicts slow learning, not a trap' -> 'Exclusion is then long-lived' reads as a non sequitur",
+     "status": "addressed",
+     "comment": "The 'then' is removed; 'Exclusion [measured]' is a run-in heading that opens with the definition, so the measured fact is no longer presented as a consequence of the local measure."
+    },
+    {
+     "reader": "ml",
+     "point": "3. 'The level is then set by the features' jump",
+     "status": "partly",
+     "comment": "Same passage as 1.(11): the convexity sentence now precedes it and a conclusion follows, but 'level' is unqualified and the per-step-to-summed gap is unexplained.",
+     "fix": "As for 1.(11)."
+    },
+    {
+     "reader": "ml",
+     "point": "3. Folding E_est, then 'accuracy on pairs of held-out variables': the 450/50 split must come first",
+     "status": "addressed",
+     "comment": "The split is in Section 1, two pages before the E_est paragraph, which now says 'environments whose two variables are both held out'."
+    },
+    {
+     "reader": "ml",
+     "point": "3. Item (iv) is about conditioning, not 'what the objective does'; needs its own heading",
+     "status": "addressed",
+     "comment": "It is now Section 3.3 'Optimization error from fixed random layers', and the Section 3 map sentence says 3.2 and 3.3 answer Q2 ('how the loss treats c; fixed random layers')."
+    },
+    {
+     "reader": "ml",
+     "point": "3. 'What is surprising (3)' mixes 0.07-0.27 bits with 2.96 nats",
+     "status": "addressed",
+     "comment": "Now 'at the output it discards 0.07-0.27 bits about the pair, none needed to report g; before integrating it costs up to 2.96 nats (4.3 bits) of log-loss' (2.96/ln 2 = 4.27)."
+    },
+    {
+     "reader": "ml",
+     "point": "3. 'This is the whole content of compression of the observations': unexplained correction",
+     "status": "addressed",
+     "comment": "Sentence removed; the Sufficiency paragraph ends 'Integrating the observations into counts thus loses nothing'."
+    },
+    {
+     "reader": "ml",
+     "point": "3. The [computed] 0.04-0.09 nats inside Prop 2a's proof reads as a measurement in a proof; move to the main text",
+     "status": "addressed",
+     "comment": "Moved out of the proof into a separate sentence after it ('Numerical check of (a): on 300 stored environments at T=30 ...'); it stays in Appendix B rather than the main text, which resolves the proof/measurement mix and costs no main-text lines."
+    },
+    {
+     "reader": "ml",
+     "point": "3. 'was measured as 0.6+-0.3 ... [computed]' stumbles",
+     "status": "addressed",
+     "comment": "The fit carries [computed] and the measurement its own label: 'was measured as 0.6+-0.3 (width 2000, one seed) [measured]'."
+    },
+    {
+     "reader": "ml",
+     "point": "4. Setup block before Sec 1 (generative model, 450/50, training signal, scoring, learner roster); move A1-A2 there and A3-A5 to the start of Sec 2",
+     "status": "partly",
+     "comment": "The Setup block exists as Section 1 with everything listed. A1-A5 stay as one block at the end of Section 3 (page 5); that is where 'each with the case in which it fails' belongs, and the proofs and 'What is general' come after it. But 3.1 now cites '(A3)' on page 3, two pages before A3 is stated, a forward reference v8 did not have.",
+     "fix": "In 3.1 write '(assumption A3 below)' or '(A3, end of Section 3)' (zero extra lines)."
+    },
+    {
+     "reader": "ml",
+     "point": "4. One vocabulary: compressed/expanded output; goal-only/joint loss; fixed/trained processing; integrate/marginalize",
+     "status": "declined_reasonably",
+     "comment": "Three of the four pairs are now used consistently (goal-only/joint loss; fixed/trained processing after integration; integrate/marginalize as defined). The output pair is marginal/joint with the stated convention instead of compressed/expanded; the concern (one name per thing) is met, except that 'fixed per-step features' is now also applied to the memoryless networks, whose per-step layers are trained (new problem)."
+    },
+    {
+     "reader": "ml",
+     "point": "4. Point to Table 1 when Q1/Q2 are posed",
+     "status": "addressed",
+     "comment": "Q1 and Q2 are displayed as a list, followed by the map sentence and 'Table 1 collects the answers.'"
+    },
+    {
+     "reader": "ml",
+     "point": "4. Replace the 2.2 itemize by run-in headings so Prop 3 sits inside (ii)",
+     "status": "addressed",
+     "comment": "3.2 has bold run-in headings (Joint output, joint loss / Joint output, goal-only loss / Marginal output on fixed per-step features / Marginal output after trained processing of the counts); Prop 3 and the Known consequences, Fraction of missing information, Exclusion and Remedies paragraphs sit under the second."
+    },
+    {
+     "reader": "ml",
+     "point": "4. Replace the 2.1 class paragraph with a table",
+     "status": "addressed",
+     "comment": "Done (see 1.(8)); 'ceiling known?' is handled in the prose after the table ('no ceiling of the count-affine or of the per-step additive class is known')."
+    },
+    {
+     "reader": "ml",
+     "point": "4. Put the two information quantities side by side once",
+     "status": "addressed",
+     "comment": "Prop 1's In-words: the state 'discards up to I(c;o_{<=t}|g), 0.7 bits at t=1 and 2.63 bits at t=30', then 'An output is different: reporting the two marginals instead of the joint posterior loses I(g;c|o_{<=t}) (0.27 bits at t=1, 0.07 at t=30), none needed to report g'."
+    },
+    {
+     "reader": "ml",
+     "point": "4. Table 1 'measured' column mixes accuracy and XL; label units per cell; give 'Parameter count' its own heading",
+     "status": "addressed",
+     "comment": "Caption: 'Measured: accuracy at T=30 (...), or XL where marked'; the frozen row's cell starts 'XL 0.10-0.18 ...'; 'The parameter count.' is a bold run-in heading, and Table 2's move to the appendix removes the between-tables position."
+    },
+    {
+     "reader": "ml",
+     "point": "5. Table 2 repeats the block-size table, the rho_k list, the V-information numbers and the eigenvalues; keep Table 2 and shorten the prose lists",
+     "status": "declined_reasonably",
+     "comment": "v9 made the opposite choice: Table 2 is compacted and moved to Appendix A, the prose keeps its lists (all six rho_k, the block-size table). The main text no longer states anything twice, which was the concern; the reader may still prefer the shorter rho_k list in 3.3."
+    },
+    {
+     "reader": "ml",
+     "point": "5. Remedies sentence (0.68/0.63/0.65) and exclusion counts repeat Table 1 rows; keep the time course and point to the table for levels",
+     "status": "not_addressed",
+     "comment": "'Remedies [measured]' still gives 0.68, 0.63, 0.65 and 0.58-0.60, and 'Exclusion' the 52/70/37/3 course with 0.69 and 0.71, all also in Table 1. Harmless, but it is the cheapest place to recover lines.",
+     "fix": "Drop the three levels from Remedies ('lifts the trapped network (levels in Table 1)') to free about one line, if the other fixes need it."
+    },
+    {
+     "reader": "ml",
+     "point": "5. Conclusion bullets Setting / Data / Formal theory restate the abstract and 'What is general'; a two-line pointer suffices",
+     "status": "not_addressed",
+     "comment": "The three bullets remain (six lines on page 6); Conceptualization and Proposed tests carry the new content.",
+     "fix": "Merge Setting, Data and Formal theory into one two-line bullet ('Setting and data: a task with exact references ...; learners that vary ...; Propositions 1-3 place them in known families'), freeing three to four lines for the fixes above."
+    },
+    {
+     "reader": "ml",
+     "point": "5. 'What is surprising (2)' repeats the 0.47 vs 0.45 row; fine as a highlight if 2.2 is shortened",
+     "status": "declined_reasonably",
+     "comment": "Kept as the highlight; 3.2 was reorganized rather than shortened, and the reader allowed this."
+    },
+    {
+     "reader": "neuro",
+     "point": "1.(1) A4: teacher posterior and non-cross-entropy loss revealed on page 4; 'per goal value minus the batch minimum' unparsable",
+     "status": "addressed",
+     "comment": "On page 1 now: 'to reproduce optimal Bayes's posterior, a soft target rather than the goal's label', the loss 'term by term over goal values; the smallest term in the batch is subtracted, and each term is raised to the power 1/2 (recurrent and memoryless networks) or 1 (feedforward networks)' (the code subtracts the detached minimum of the batch tensor), Adam fp16/fp32; A4 is a pointer with the convexity caveat."
+    },
+    {
+     "reader": "neuro",
+     "point": "1.(2) variable, environment, episode, z, profiles, 450 training goals undefined at the start",
+     "status": "addressed",
+     "comment": "Section 1 gives all of these before the symbol table (see ml 1.(4)); z is 'a 10-number code of the environment, one number for each of the ten profiles', and because the values are 'drawn ... per episode' while z is 'of the environment', it is clear z does not carry the values. The one residue is the held-out ambiguity (ml 2.)."
+    },
+    {
+     "reader": "neuro",
+     "point": "1.(3) ESN sentence: 45 words between subject and verb; 'summed state' and 'window theorem' unexplained",
+     "status": "addressed",
+     "comment": "The ESN definition is in Section 1; the window theorem is stated in one line in 3.1 and 'per-step additive' defined right after it; the measurement reads 'their state summed over steps'."
+    },
+    {
+     "reader": "neuro",
+     "point": "1.(4) '(ii) Expanded output, goal-only loss.' is an empty item; Prop 3 and three paragraphs float outside the list",
+     "status": "addressed",
+     "comment": "Run-in headings replace the list; 'Joint output, goal-only loss' is followed by Prop 3 and four italic-headed paragraphs (Known consequences, Fraction of missing information, Exclusion, Remedies)."
+    },
+    {
+     "reader": "neuro",
+     "point": "1.(5) frozen-layer paragraph: 'power', 'floor', 'correlation map', 'ordered phase', 'depth scale' all new; put the mechanism in words first; say from which layer '3.3 layers from the floor' counts",
+     "status": "partly",
+     "comment": "Mechanism first, symbols second, as asked; depth scale defined ('the number of layers over which 1-rho shrinks by a factor e'); the count is 'counted from where the floor dominates'. But the text also says 1-rho shrinks 6x per layer 'from k\u22484' and the cliff is 'at about 4 frozen layers', so a reader who takes k\u22484 as the floor gets about 7 layers, not 4, and nothing says the Schoenholz count is only an order of magnitude while the fit below places the cliff.",
+     "fix": "After '3.3 layers, counted from where the floor dominates' add 'an order of magnitude, not a position' (half a line); the next sentences already give the fitted position."
+    },
+    {
+     "reader": "neuro",
+     "point": "1.(6) 0.7/2.63 bits versus 0.27/0.07 bits read as conflicting values of one quantity; in (3) write 'at the output'",
+     "status": "addressed",
+     "comment": "Prop 1's In-words names both quantities (state: I(c;o|g); output: I(g;c|o), 'none needed to report g'); 'What is surprising (3)' now says 'at the output it discards 0.07-0.27 bits'."
+    },
+    {
+     "reader": "neuro",
+     "point": "1.(7) Berger's 'integration' is the note's marginalization; fix the verbs",
+     "status": "addressed",
+     "comment": "'removes by marginalizing it (the integrated likelihood of Berger, Liseo and Wolpert 1999)' plus the stated convention after the three rules."
+    },
+    {
+     "reader": "neuro",
+     "point": "1.(8) exclusion: definition after use; row/column of what; shared start state and trapped network undefined; three claims in one sentence; name the trapped network at first use",
+     "status": "addressed",
+     "comment": "Order is now definition ('10x10 table of pair logits (rows g, columns c)'), fp32 memoryless time course, 'the joint ESN trained on the goal-only loss, the trapped network, ends at 0.47 with 70 pairs excluded', the shared trained start state and the 1/q link, then two sentences for Adam eps/fp16 and 'The optimizer is not the whole cause: ... plain SGD'. The phrase 'has no shared start state' still precedes the start-state sentence by one line (new problems)."
+    },
+    {
+     "reader": "neuro",
+     "point": "1.(9) twelve numbers for five classes in prose; 'cross-entropy member' vs 'accuracy fits'; why per-environment versus shared matters",
+     "status": "partly",
+     "comment": "The class table and 'fits per environment that target accuracy' answer the first two. The text says 'no count-affine read-out shared across environments does better in log-loss' but still not why shared read-outs matter (the networks' read-outs serve all environments through z).",
+     "fix": "'no count-affine read-out shared across environments, as the networks' are, does better in log-loss' (zero extra lines)."
+    },
+    {
+     "reader": "neuro",
+     "point": "1.(10) could not tell what the 0.93-versus-0.57 contrast shows; add the conclusion",
+     "status": "partly",
+     "comment": "v9 adds 'The frozen features thus give optimal Bayes's form (Proposition 2b) but not its precision', which is the conclusion, but the step from a 0.93 per-step fit to 0.57 after summing is still implicit, and 'training the read-in lifts the level to 0.68' is not stated as such.",
+     "fix": "As for ml 1.(11): '(a 7% per-step residual compounds over 30 steps)' after '0.57-0.58', if that is the intended reading."
+    },
+    {
+     "reader": "neuro",
+     "point": "1.(11) I_mis and I_com undefined; not said to be a matrix; 'rate' reads as if 0.95 were fast; '100 pair biases'",
+     "status": "addressed",
+     "comment": "'the matrix I_mis I_com^{-1}, with I_com the curvature of the complete-data (joint-loss) objective and I_mis the part of it that goal supervision does not see ... the factor by which EM's error shrinks per iteration near the solution; an eigenvalue of one marks a ridge'; 'the joint output's 100 bias parameters (one per pair, shared by all environments)'."
+    },
+    {
+     "reader": "neuro",
+     "point": "1.(12) Prop 2 'In words' harder than the formula",
+     "status": "addressed",
+     "comment": "Replaced by the suggested plain clause (one logit per goal value: sum over c inside each step's term; one logit per pair: sum over c once, outside the sum over steps)."
+    },
+    {
+     "reader": "neuro",
+     "point": "1.(13) 'consistent', 'replicate', 'environment-pair combination' need plain words",
+     "status": "addressed",
+     "comment": "'recover the truth as independent episodes accumulate (they are consistent across independent replicates) ... not in general as the steps of a single episode accumulate' and 'combinations of environment and true values (g,c)'."
+    },
+    {
+     "reader": "neuro",
+     "point": "1.(14) 'gate' has three meanings (tied mixing weights; LSTM gates; gated objectives)",
+     "status": "addressed",
+     "comment": "Tied gate defined at Prop 2b ('mixing weights q(c) come from the same logits'); the LSTM is 'whose units can be set to count'; 'We call such an objective gated' after Prop 3. 'Self-reinforcing gates (Shazeer et al.)' refers to the mixing-weight sense, now defined."
+    },
+    {
+     "reader": "neuro",
+     "point": "1.(15) Table 1: 'shallow gaps', 'slow release', 'between' appear nowhere else; 'trainable' -> 'trainable parameters'; frozen row reports XL under an accuracy caption",
+     "status": "addressed",
+     "comment": "Glossary line under Table 1 ('Shallow gaps: start 0 keeps the first-step gaps small. Slow release: excluded pairs return slowly. Between: between the trapped level and the class optimum.'), column header 'trainable parameters', caption 'or XL where marked' with 'XL' in the cell."
+    },
+    {
+     "reader": "neuro",
+     "point": "2. Task terms: variable, environment, episode, active, held-out, profiles, 'one number per profile', what z carries",
+     "status": "addressed",
+     "comment": "All in Section 1's first paragraph; 'one number per profile' is now 'one number for each of the ten profiles u_1,...,v_5 that set the observables' log-odds'. The held-out nuance is the one residue (ml 2.)."
+    },
+    {
+     "reader": "neuro",
+     "point": "2. Learner terms: read-in/read-out, memoryless network/rule, frozen series, feedforward on the counts, start state/start 0, power-1 runs and power 1/2, cliff, family",
+     "status": "addressed",
+     "comment": "Read-in/read-out are introduced by the trained-LSTM definition; memoryless networks, the frozen series and feedforward on the counts are defined in Section 1; start state/start 0 in 'Exclusion'/'Remedies'; the powers in 'Outputs and losses' with 'power-1 runs' pointing back; cliff in 3.3 ('the jump in excess log-loss at about 4 frozen layers at width 1000'); family in Section 4 ('one architecture at different widths or depths')."
+    },
+    {
+     "reader": "neuro",
+     "point": "2. 'joint' names an output format and a loss; use 'expanded' for the format",
+     "status": "declined_reasonably",
+     "comment": "Same as ml 2.: the stated convention and the consistent 'joint output / joint loss / joint ESN' pairing resolve the ambiguity without the invented terms."
+    },
+    {
+     "reader": "neuro",
+     "point": "2. Invented names to declare: step-wise rule, count-affine, window rule, window theorem, depth ladder, exclusion, trap/trapped, precision of products, 'tables'",
+     "status": "addressed",
+     "comment": "Step-wise rule is defined by its display; count-affine follows 'affine in the counts'; window rule and theorem are stated in 3.1; depth ladder by apposition; exclusion and trapped network defined; 'precision of products' became 'how precisely the products are computed'; 'tables' became 'the log-odds tables x_i(g,c)'."
+    },
+    {
+     "reader": "neuro",
+     "point": "2. Literature jargon without gloss: consistent, replicate, complete-data objective, Fisher's identity, I_mis/I_com, wrong corner, two-part code, regret, depth scale, correlation map, ordered phase, input-dependent power, floor",
+     "status": "partly",
+     "comment": "All glossed except two: 'the d/2 log n of a two-part code' is unchanged from v8, and 'which is Fisher's identity for this model' names the identity without saying what it asserts (the display above it is the identity, so this is minor). 'Wrong corner' is gone; regret is defined twice (per-episode XL; cumulative).",
+     "fix": "'a two-part code (parameters, then data given the parameters)' adds half a line; Fisher's identity can stay as is."
+    },
+    {
+     "reader": "neuro",
+     "point": "2. Project history a newcomer has not seen ('compression of the observations', 'the earlier two compressions', 'maximal compression subject to learnability')",
+     "status": "addressed",
+     "comment": "Removed or glossed in place in the Conclusion (see ml 2.)."
+    },
+    {
+     "reader": "neuro",
+     "point": "2. Conventions never stated: parenthesized numbers are accuracies at T=30; the three rules' values at T=30; 2.3 nats is ln 10",
+     "status": "addressed",
+     "comment": "'Unmarked numbers between 0 and 1 are accuracies at T=30' in Section 1; the block table's rows are labelled 'at T=30'; 'the uniform prior's (ln 10 = 2.3 nats)'."
+    },
+    {
+     "reader": "neuro",
+     "point": "2. Labels: '[new as a framing; no new principle]' is not in the label list; 'untested [measured]' reads as a contradiction; multi-claim sentences carry one label",
+     "status": "partly",
+     "comment": "'untested [measured]' is fixed ('reaches 0.67 [measured], and whether a single shared read-out can beat the ESN's 0.44 is untested'); the bounds-note sentence now carries [computed] and [measured] separately, and the run-in paragraph labels (Exclusion, Remedies) scope clearly. The compound label '[new as a framing; no new principle]' remains the only label outside the list.",
+     "fix": "'\\st{new} (as a framing; no new principle)' in the Conceptualization bullet (zero extra lines)."
+    },
+    {
+     "reader": "neuro",
+     "point": "3. The thesis is spread over the abstract, 'What is surprising (3)' and the italic rule; the teacher/loss surface on page 4; the 2.2 list breaks; numbers interleave densely; term collisions",
+     "status": "partly",
+     "comment": "Loss on page 1, list fixed, collisions (integrate, gate, joint, regret) fixed, numbers partly moved into the class table and Table 1. The thesis is still distributed: Section 3 opens with the decomposition, the Q1/Q2 list and a map sentence, and the italic rule stays in the Conclusion.",
+     "fix": "See 4. below (move the italic rule to the end of Section 3's decomposition paragraph; zero net lines)."
+    },
+    {
+     "reader": "neuro",
+     "point": "4. A 'Setup' block with a learner table (name | input | processing | output format | loss | trainable parameters) and a terms line",
+     "status": "declined_reasonably",
+     "comment": "Section 1 is the setup block; the learners are a prose list rather than a table (each entry gives input, processing, output format and supervision), parameter counts are in Table 1, and the terms are defined where first used instead of a terms line. The concern, that a reader meets every learner and term before it is used, is met."
+    },
+    {
+     "reader": "neuro",
+     "point": "4. Open Section 2 (now 3) with the thesis in one paragraph; the italic rule from the Conclusion serves",
+     "status": "not_addressed",
+     "comment": "Section 3 opens with the decomposition; the only orientation is the Q1/Q2 list and the map sentence; the italic rule remains in the Conclusion.",
+     "fix": "Move the italic rule (three lines) from the Conceptualization bullet to the end of the decomposition paragraph, after 'Table 1 collects the answers', and have the bullet say 'its corollary is the rule stated in Section 3' (zero net lines)."
+    },
+    {
+     "reader": "neuro",
+     "point": "4. Replace the class-levels prose with a table; give Table 1 the footnote glossary",
+     "status": "addressed",
+     "comment": "Both done (class table in 3.1; glossary line under Table 1)."
+    },
+    {
+     "reader": "neuro",
+     "point": "4. Fix the 2.2 list and give (i)-(iv) one internal order: objective -> known -> measured -> open",
+     "status": "addressed",
+     "comment": "Each run-in paragraph now follows that order: e.g. 'Joint output, joint loss' (convex [elementary] -> ridge and end-to-end numbers [measured] -> residual [conjecture]); the goal-only part is Known consequences -> Fraction of missing information -> Exclusion [measured] -> Remedies [measured]; the trained-processing paragraph ends with the open [conjecture]."
+    },
+    {
+     "reader": "neuro",
+     "point": "4. Split the exclusion paragraph into definition / time course / mechanism / remedies; put the mechanism sentence before the numbers in (iv)",
+     "status": "addressed",
+     "comment": "'Exclusion' (definition, time course, mechanism) and 'Remedies' are separate paragraphs; 3.3 opens with the mechanism in words before sigma_w, chi and the rho_k list."
+    },
+    {
+     "reader": "neuro",
+     "point": "4. Section 1's block-size table and Table 2's third row carry the same numbers; place together or point from one to the other",
+     "status": "addressed",
+     "comment": "Table 2 is in Appendix A and its row reads '2.96 nats (naive) to 0.04 (10-step blocks); Section 2'."
+    },
+    {
+     "reader": "neuro",
+     "point": "5. Table 2's value column repeats numbers from the text; keep it as the concept-to-literature map and point to where each value appears",
+     "status": "declined_reasonably",
+     "comment": "v9 moved and compacted Table 2 rather than stripping its values; only the composite-likelihood row points back. With the table in the appendix the main text has no duplicate, so the concern is met; several Table 2 values (44 of 70 pairs; the 4.3k/17.6k/16.8k regrets) in fact appear nowhere else."
+    },
+    {
+     "reader": "neuro",
+     "point": "5. 'This is the whole content of compression of the observations' adds nothing",
+     "status": "addressed",
+     "comment": "Removed."
+    },
+    {
+     "reader": "neuro",
+     "point": "5. 'precedents, not theorems here' appears three times; one global sentence would keep the caveat",
+     "status": "declined_reasonably",
+     "comment": "v9 keeps 'transfer as precedents, not as theorems here' (Known consequences), 'both are analogies here' (trained processing) and '(each has precedents)' (What is surprising). Each scopes a different set of claims, and the author's rule is that every caveat stays, so collapsing them would risk unscoping one."
+    },
+    {
+     "reader": "neuro",
+     "point": "5. The parameter-count finding is stated four times (abstract, Section 3, surprising (4), Conclusion)",
+     "status": "addressed",
+     "comment": "'What is surprising (4)' is removed and the Conclusion no longer mentions the count; it remains in the abstract and Section 4, as suggested."
+    },
+    {
+     "reader": "neuro",
+     "point": "5. Conclusion bullets Setting / Data / Formal theory restate the abstract",
+     "status": "not_addressed",
+     "comment": "Kept unchanged apart from wording; same as ml 5.",
+     "fix": "Merge the three into one two-line bullet (frees three to four lines)."
+    },
+    {
+     "reader": "neuro",
+     "point": "5. The 'In words' after Proposition 2 can go if (a)/(b) receive the plain clause",
+     "status": "declined_reasonably",
+     "comment": "The In-words is kept, but it now carries the plain clause and the link to Proposition 1 that the ML reader asked for, so it earns its two lines."
+    }
+   ],
+   "new_problems": [
+    "'Fixed per-step features' is used in two senses. The 3.2 heading 'Marginal output on fixed per-step features' and Table 1's group heading 'Fixed per-step features: the reservoir, or none' cover the memoryless networks, whose per-step layers are trained (Section 1: 'one (depth 1) or two (depth 2) trained layers'; Table 1: 'ungated, non-convex'); what is fixed for them is the per-step additive structure, not the features. Meanwhile 'Fixed random layers between trained layers' (3.3, Table 1 group 3) uses 'fixed' as frozen. v8's heading was '(iii) Compressed output' with 'fixed per-step additive representation' applied to the marginal ESN only. Fix: 'Marginal output on per-step additive features' and 'Per-step additive features: a reservoir, or none' (zero extra lines).",
+    "New near-collision 'per-step rule' vs 'step-wise rule'. The 0.69 member (v8: 'a memoryless rule fitted per environment'; v8 notes: a time-invariant memoryless rule fitted per environment) is now 'one per-step rule for all steps' in the class table and 'The per-step rule's 0.69' in the prose, while the 0.61 one-step composite likelihood is 'the step-wise rule' throughout. Fix: 'the fitted memoryless rule' (prose) and 'one memoryless rule for all steps, fitted per environment' (table cell).",
+    "Class table (3.1): 'The table lists the classes from the smallest to the largest' is not a nesting. Count-affine is inside per-step additive marginal, which is inside per-step additive joint, but 'quadratic in the counts' (row 2) is neither inside nor outside the per-step additive marginal class (row 3): n_i n_j is not a sum over steps of per-step functions, and step-dependent per-step functions are not quadratic in the counts. Fix: delete 'from the smallest to the largest' (frees a few words).",
+    "Class table header 'best known member, fitted per environment' while two entries are not fits: 'the step-wise rule' (a fixed rule) and 'optimal Bayes (Proposition 2b)'. Fix: header 'best known member (fits are per environment)'.",
+    "Prop 2's In-words sentence 'a marginal output's goal logits are a goal-only state, while a joint output's pair logits carry the joint posterior' drops the qualifier that the v9 notes (item 24) include, 'on per-step additive features'. Read out of the proposition's hypothesis it is false for the trained LSTM, which has a marginal output but a state that can carry the counts (3.1). Fix: 'a marginal output's goal logits on per-step additive features are a goal-only state' (four words, same line count).",
+    "Forward reference introduced: 3.1 says 'The ESNs end close to this regime (A3)' on page 3, but A3 is stated only in the Assumptions block on page 5; v8's corresponding sentence had no '(A3)'. Fix: '(assumption A3 below)'.",
+    "'Exclusion': 'The memoryless network with a joint output, trained on the goal-only loss, has no shared start state' uses 'shared start state' one sentence before it is explained ('Its reservoir starts every episode from the same trained state, and this shared start ...'). Same order as v8, but v9 otherwise defines terms at first use. Fix: 'which, having no reservoir, has no start state' in place of 'has no shared start state'.",
+    "The v9 notes (item 7) say 'Every canonical measure in Table 2 also appears in the main text where it is used'; this is not so for 'gate < 10^-3 of the row's signal for 44 of 70 excluded pairs' and for the cumulative regrets of feedforward depth 4 (4.3k), depth 1 (17.6k) and 4 frozen layers (16.8k), which appear only in Appendix A. The note itself is fine (an appendix may carry extra values); the notes' sentence should be softened.",
+    "Made more visible by the new definitions, though not new in substance: 3.3 now says 1-rho shrinks 6x per layer 'from k\u22484', that the Schoenholz count is '3.3 layers, counted from where the floor dominates', and that the cliff is 'at about 4 frozen layers'; a reader who adds 3.3 to k\u22484 gets about 7 layers, and nothing says the count is only an order of magnitude while the bounds-note fit sets the position (see the neuro 1.(5) fix)."
+   ]
+  },
+  "verdicts": null
+ }
+]

@@ -1,0 +1,16 @@
+{
+ "trained_5000": {
+  "self_clamp_max_abs": 0.0,
+  "empty_vs_intact": {
+   "max_abs": 0.0,
+   "right_diff": 0
+  }
+ },
+ "echo_5000": {
+  "self_clamp_max_abs": 0.0,
+  "empty_vs_intact": {
+   "max_abs": 0.0,
+   "right_diff": 0
+  }
+ }
+}

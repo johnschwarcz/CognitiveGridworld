@@ -19,6 +19,7 @@ ff_deep_relations.png        KL ratios: cost of freezing, what width buys, every
 ff_deep_disagreement.png     FF, LSTMs and reservoirs against joint and naive Bayes: whose answer where they disagree,
                              KL from each, accuracy against confidence
 ff_deep_frozen_widths.png    FF with only readin and readout trained (depths 1-4) against width, beside the reservoirs
+                             (ff_deep_frozen_widths_all_depths.png: every depth, with the shared-readin net)
                              (frozen_widths_figure; --collect-missing adds new nets to the disagreement data)
                              (disagreement_figure; data from --collect or --collect-disagreement, GPU 0, ~10 min)
 
@@ -927,12 +928,35 @@ LSTM_STEMS = {**{n: f"widths/lstm_N{n}_p1_lr0.001_rep0" for n in (10, 20, 50, 20
 def tff1_stem(n):
     """Depth 30 with all 29 N x N layers frozen at nn.Linear's default draws x sqrt(6) (train_ff_deep.py tff_series ...
     tff1: main/model/time_ff.py with input at layer 1 only, fp64-identical to the standard depth-30 FF with those weights).
-    The time-injected nets (tff, tffs) left the analysis (John, 2026-10-16)."""
+    The time-injected nets (tff, tffs) left the analysis (John, 2026-10-16); tffs is back in its own panel (tffs_stem)."""
     return f"widths/tff1{'' if n == 1000 else f'_N{n}'}_p1_lr0.001_rep0"
 
 
+def tffs_stem(n):
+    """The shared-readin net (train_ff_deep.py tff_series ... tffs, time_ff.py shared): tff1's 29 frozen layers (the same
+    seeds), with input at every layer through one shared readin, the n-th layer from the readout getting the mean of the
+    first n observations with Z; 36 N + 20 trainable parameters, as depth 1 and tff1. Widths 100-5000 (2026-10-15/16),
+    back in ff_deep_frozen_widths_all_depths.png (John, 2026-10-22; its own figure until 10-25). Width 10000, 60k episodes
+    (TRAINED_ON): at lr 1e-3 its read-out overshot (10-28 run killed at 33.5k: *_killed_ep33500; with a 100-update lr
+    warm-up, later: *_ramp100_*_killed_ep1000, 10-29), so lr 2.5e-4 with that warm-up (John 2026-10-29; TFFS_LR)."""
+    return f"widths/tffs{'' if n == 1000 else f'_N{n}'}_p1_lr{TFFS_LR.get(n, 1e-3):g}_rep0"
+
+
+TFFS_LR = {10000: 2.5e-4}       # the shared-readin widths not at lr 1e-3 (tffs_stem)
+
+
+def lr_text(lr):
+    """2.5e-4, not 0.00025 or 2.5e-04"""
+    return ("%.1e" % lr).replace("e-0", "e-").replace(".0e", "e")
+
+
+
 def reservoir_stem(n):
-    return f"widths/lstm{'' if n == 1000 else f'_N{n}'}_p1_lr0.001_reservoir_rep0"
+    """N=10000 trained at lr 5e-4 (John 2026-10-18): at 1e-3 its readout's Adam steps, ~lr x N on logits summed over 30
+    steps, overshot in the first ~500 updates and pinned some values' logits near -100 (final-step KL ~9; kept on disk as
+    lstm_N10000_p1_lr0.001_reservoir_rep0)."""
+    lr = "0.0005" if n == 10000 else "0.001"
+    return f"widths/lstm{'' if n == 1000 else f'_N{n}'}_p1_lr{lr}_reservoir_rep0"
 
 
 def frozen_width_stem(d, n):
@@ -1180,156 +1204,950 @@ def disagreement_figure():
     print(fig_path("ff_deep_disagreement.png"))
 
 
-def frozen_widths_figure(running = (), running_d30 = False):
-    """FF with only readin and readout trained (every N x N layer frozen) at depths 1-3, against width (train_ff_deep.py
-    frozen_widths, reservoir_compare, matched_a, d4_w20000; depth 1 has no N x N layer, so it is the ordinary depth 1),
-    beside the reservoirs (an LSTM with only readin and readout trained) at RESERVOIR_WIDTHS. Every net here, FF and
-    reservoir, used loss power 1 and saw the same data: 20k episodes x batch 8000, seed 0 (one world); finished runs only.
-    Reservoirs from N=1000 up ran on the wide path (fp16 frozen weights, deduplicating frozen LSTM, micro-batches with
-    accumulated gradients): the same model and updates, fp64-tested. The older sanity_default_reps reservoirs (power 0.5;
-    width 10000 at batch 2000) are left out. Top: (a) KL(joint || net) and (b) accuracy at 20k episodes (mean of the last
-    3 checkpoints). Bottom: final-step test accuracy through training, line thickness growing with width; (c-e) one panel
-    per depth (depth 4 dropped for simplicity, John 2026-10-18), (f) depth 30 with all 29 N x N layers frozen (purple,
-    tff1_stem): its frozen layers are the default draws
-    x sqrt(6), Kaiming-uniform, because at the default scale 29 layers erase the input (3e-11 of layer 30 depends on it at
-    init; the Oct 12 deep30 runs sat at chance), (g) the LSTMs: frozen (reservoirs, red) and fully trained (LSTM_STEMS,
-    orange, the best case). Widths 10-50 come from train_ff_deep.py small_widths. running: reservoir widths still
-    training to include anyway, at their latest 3 checkpoints (open markers, dotted link; their curve ends where training
-    has got to); running_d30: the same for every depth-30 width past its first 500 episodes."""
+CONTINUED = os.path.join(OUT, "widths", "continued")
+
+
+def continued_curve(stem):
+    """the run of `stem` continued from its saved weights past 20k episodes (train_ff_deep.py continue_20k,
+    continue_tff1_ramp; 2026-10-21/22): (episodes in thousands, accuracy, finished, joint Bayes's accuracy on the same test
+    batches) for its checkpoints past 20k, or None"""
+    base = os.path.join(CONTINUED, os.path.basename(stem))
+    c = load_curve(base + "_curve.npz")
+    if c is None or not (c["ep"] > 20000).any():
+        return None
+    m = c["ep"] > 20000
+    return c["ep"][m] / 1000, c["acc"][m], os.path.exists(base + "_summary.json"), c["joint"][m]
+
+
+TRAINED_ON = {tffs_stem(10000): 60000}   # runs trained past 20k in one go, with their planned episodes (John 2026-10-27:
+                                         # the shared readin at width 10000 for 60k episodes, checkpointed every 5000)
+
+
+def late_curve(stem):
+    """the run of `stem` past 20k episodes: its continuation (continued_curve) or, for a run trained past 20k in one go
+    (TRAINED_ON), its own checkpoints past 20k; (episodes in thousands, accuracy, finished, joint Bayes's accuracy), or None"""
+    cc = continued_curve(stem)
+    if cc is not None:
+        return cc
+    c = load_curve(os.path.join(OUT, stem + "_curve.npz"))
+    if c is None or not (c["ep"] > 20000).any():
+        return None
+    m = c["ep"] > 20000
+    return c["ep"][m] / 1000, c["acc"][m], os.path.exists(os.path.join(OUT, stem + "_summary.json")), c["joint"][m]
+
+
+SANITY_DIR = os.path.join(DATA, "sanity")
+ESN_RUNS = os.path.join(DATA, "experimental", "interaction_bounds", "analyses", "joint_esn_extension", "runs")
+ESN_ENTROPY = os.path.join(DATA, "experimental", "esn_learnability", "full_esn_entropy", "continued")
+ESN_MLP = os.path.join(DATA, "experimental", "esn_mlp_rescue")
+TD = os.path.join(DATA, "experimental", "training_dynamics")     # train_training_dynamics.py runs (another session, 10-29 - 11-01)
+
+
+def td_curve(run, every_n = 500):
+    """a training_dynamics run (a test every 5th episode, which trains nothing; 50,000 episodes = 40,000 training
+    episodes), sampled as every other curve in these figures is tested (John 2026-11-01: "different curves in the same
+    figure show the same test sampling"): one 8,000-episode test batch per `every_n` training episodes, the one nearest
+    each multiple (within 4); (thousands of training episodes before it, its final-step accuracy, joint Bayes's accuracy
+    on the same batch). Until 11-01 the tests were averaged in 500-episode blocks (smoother curves, plotted first at the
+    blocks' ends, a 2x shift of the first block on log axes, then at their means)."""
+    d = os.path.join(TD, run)
+    every = json.load(open(os.path.join(d, "run.json")))["cfg"]["checkpoint_every"]
+    z = [np.load(f) for f in sorted(glob.glob(os.path.join(d, "test_*.npz")))]
+    ep = np.concatenate([q["episode"] for q in z]).astype(int)
+    acc, J = (np.concatenate([q[k][:, -1] for q in z]).astype(float) for k in ("acc", "joint_acc"))
+    o = np.argsort(ep)
+    trained, acc, J = (ep - ep // every)[o], acc[o], J[o]                   # training episodes before each test
+    marks = np.arange(0, trained[-1] + every_n / 2, every_n)
+    i = np.clip(np.searchsorted(trained, marks), 1, len(trained) - 1)
+    i = np.where(np.abs(trained[i - 1] - marks) <= np.abs(trained[i] - marks), i - 1, i)   # the nearest test
+    ok = np.abs(trained[i] - marks) <= 4
+    return trained[i][ok] / 1000, acc[i][ok], J[i][ok]
+
+
+TD_N100 = [f"trained_N100_s{s}" for s in range(20261029, 20261034)]
+
+
+def lstm_n100():
+    """the fully trained LSTM at N = 100, the one width the ff_deep LSTMs lack (train_training_dynamics.py, another
+    session, 10-31 - 11-01): 5 seeds, SANITY loss (power 0.5), each seed in its own world, 40k updates (a test every 5th
+    episode). Per 500-update block, the seeds' mean accuracy and mean joint Bayes accuracy (td_curve); None unless all
+    five are DONE. Same-protocol runs at the figure's widths sit +.024 (N=50), +.010 (N=200), +.005 (N=1000) above the
+    ff_deep LSTMs at 20k (inventory 2026-11-01). Per 500 training episodes, the mean of the five seeds' single tests."""
+    runs = []
+    for r in TD_N100:
+        p = os.path.join(TD, r, "progress.log")
+        if not (os.path.exists(p) and open(p).read().rstrip().endswith("DONE")):
+            return None
+        runs.append(td_curve(r))
+    n = min(len(x) for x, _, _ in runs)
+    return runs[0][0][:n], np.mean([a[:n] for _, a, _ in runs], 0), np.mean([J[:n] for _, _, J in runs], 0)
+
+
+def esn_rescues():
+    """The ESNs that beat naive Bayes (John 2026-10-29: "the rescued ESNs (joint output and MLP layers)"; on every
+    frozen-widths figure from 11-01): the MLP read-in and read-out, the joint output trained from scratch with the joint
+    loss (td_curve("joint_echo_jl_s20261029"): train_training_dynamics.py, another session 10-30, seed 20261029's world,
+    joint Bayes .7677 per test batch; its 500-training-episode block means; until 11-01 the joint ESN continued with the
+    joint loss from 50k, joint_esn_extension/runs/joint_trained, drawn here; the joint output with the entropy bonus
+    was removed 11-01, John: "now that we have the joint-loss"); and as references the unrescued ESNs (John 2026-10-29:
+    "include the joint output no rescue cases as well"): Figure 1's marginal ESN and the joint-output ESN (both on their
+    own goal loss, 50k; the joint one's goal-loss continuation to 104k, .474, left out; the entropy run's control, the
+    same start without the bonus, 10k, dropped by John the same day as redundant with the joint-output ESN). All are a
+    frozen LSTM-1000 trained in mode SANITY (batch 8000, Adam 1e-3, symmetric KL
+    to joint Bayes at power 0.5, a test every 500 episodes on 8,000 test-state episodes), each in its own world, so its
+    gap is to its own world's joint Bayes: paired per test batch where the run logged joint Bayes (log.jsonl
+    opt_acc_T), else that world's joint Bayes accuracy (the SANITY ESNs': the mean over their continuations' logs, run in
+    the same environments, .7683 marginal / .7679 joint; the MLP rescue's: esn_mlp_rescue/bayes_reference_2026-10-29.json,
+    .7664 on 200,000 episodes). Per net: label (curve panel), a_label ((a)), colour, marker, rescue (False for the
+    references), segments [(thousands of episodes, accuracy, joint Bayes's accuracy, line style)] and, where its 20k
+    value comes from an earlier, undrawn stretch, start (thousands of episodes, accuracy, joint Bayes's accuracy)."""
+    def pth(path):
+        a = np.asarray(torch.load(path, map_location = "cpu", weights_only = False)["test_acc_through_training"], float)[:, -1]
+        return np.arange(len(a)) * .5, a                                   # a test every 500 episodes
+    def log(path):
+        L = [json.loads(l) for l in open(path) if l.strip()]
+        return tuple(np.array([r[k] for r in L], float) for k in ("update", "acc_T", "opt_acc_T"))
+    const = lambda a, J: np.full_like(a, J)
+    def n_params(path):                                                    # trainable: all but the frozen LSTM
+        w = torch.load(path, map_location = "cpu", weights_only = False)["weights"]
+        return sum(v.numel() for k, v in w.items() if not k.startswith("LSTM"))
+    out = []
+    x, a = pth(os.path.join(SANITY_DIR, "reservoir_ctx_2_net.pth"))
+    J = float(np.mean(log(os.path.join(ESN_RUNS, "marginal_both_trained", "log.jsonl"))[2]))
+    out.append(dict(label = "no rescue, marginal output", col = "#9e9e9e", mk = None, rescue = False, lw = 1.,
+                    segments = [(x, a, const(a, J), "-")]))
+    xj, aj = pth(os.path.join(SANITY_DIR, "joint_reservoir_ctx_2_net.pth"))   # joint output, its own (goal) loss
+    Jj = float(np.mean(np.concatenate([log(os.path.join(ESN_RUNS, r, "log.jsonl"))[2] for r in ("orig_trained", "joint_trained")])))
+    out.append(dict(label = "no rescue, joint output", col = "#4d4d4d", mk = None, rescue = False, lw = 1.2,
+                    segments = [(xj, aj, const(aj, Jj), "--")]))
+    x, a = pth(os.path.join(ESN_MLP, "esn_5in_5out_matched_ctx_2_net.pth"))
+    J = json.load(open(os.path.join(ESN_MLP, "bayes_reference_2026-10-29.json")))["joint"]
+    out.append(dict(label = "5-layer MLP read-in, read-out", a_label = "ESN + MLP read-in, read-out (at 50k)",
+                    col = "#c51b7d", mk = "X", rescue = True, lw = 1.4, segments = [(x, a, const(a, J), "-")],
+                    params = n_params(os.path.join(ESN_MLP, "esn_5in_5out_matched_ctx_2_net.pth"))))
+    x, a, J = td_curve("joint_echo_jl_s20261029")                          # from scratch, 40k training episodes
+    out.append(dict(label = "joint output, joint loss", a_label = "ESN, joint output, joint loss (at 40k)",
+                    col = "#00a6a6", mk = "p", rescue = True, lw = 1.4, segments = [(x, a, J, "-")],
+                    params = n_params(os.path.join(TD, "joint_echo_jl_s20261029", "final_net.pth"))))
+    return out
+
+
+def frozen_widths_figure(running = (), running_d30 = False, depths = (1, 2), name = "ff_deep_frozen_widths.png", ncols = None,
+                         shared_readin = False, running_shared = True, loglog = False, rescues = False, params_panel = True,
+                         upto = None, side_legend = True):
+    """FF with only readin and readout trained (every N x N layer frozen) at the given depths, against width (train_ff_deep.py
+    frozen_widths, reservoir_compare, matched_a, d4_w20000, small_widths; depth 1 has no N x N layer, so it is the
+    ordinary depth 1), with depth 30 and beside the reservoirs (an LSTM with only readin and readout trained) and the
+    fully trained LSTMs. Every net here used loss power 1 and saw the same data: 20k episodes x batch 8000, seed 0 (one
+    world); finished runs only. Reservoirs from N=1000 up ran on the wide path (fp16 frozen weights, deduplicating frozen
+    LSTM, micro-batches with accumulated gradients): the same model and updates, fp64-tested; N=10000 at lr 5e-4 (see
+    reservoir_stem). (a) final-step accuracy at 20k episodes (mean of the last 3 checkpoints) against width, legends to its
+    right. Below, final-step test accuracy through training, line thickness growing with width: one panel per depth, then
+    depth 30 with all 29 N x N layers frozen (purple, tff1_stem; its frozen layers are the default draws x sqrt(6),
+    Kaiming-uniform, because at the default scale 29 layers erase the input: 3e-11 of layer 30 depends on it at init and
+    the Oct 12 deep30 runs sat at chance), then the LSTMs: frozen (reservoirs, red) and fully trained (orange, the best
+    case). ncols: curve panels per row (default: all in one row). John 2026-10-21: no KL panel; versions, see
+    frozen_widths_figures. running: reservoir widths still training to include anyway, at their latest 3 checkpoints
+    (open markers, dotted link; their curve ends where training has got to); running_d30: the same for every depth-30
+    width past its first 500 episodes. shared_readin: also the shared-readin net (green, tffs_stem) in (a) and in its
+    own panel after depth 30's. running_shared (John 2026-10-29, "show it on the plot"): its running widths too, in its
+    curve panel past their first 500 episodes and in (a) once past 20k, when their 20k value is final (before, the
+    mean of their latest 3 tests would sit among 20k values; the width-10000 run, 60k episodes at lr 2.5e-4 with a
+    100-update lr warm-up, restarted 10-29: see tffs_stem; at lr 1e-3 it overshot as the lr-1e-3 reservoir did). A run
+    trained past 20k in one go (TRAINED_ON) enters (a) at its 20k value, its latest value an open marker as a continued
+    run's (moved right when the two would overlap); the curve panels then run to 40k or 60k. Reference lines: joint and naive Bayes, chance, and the
+    rule linear in the counts fitted by cross-entropy to the joint posterior, as the nets are trained (LINEAR_CE, John
+    2026-10-25). It is not a ceiling of linear rules: accuracy-tuned ones reach at least ~.55 (verify_2026-10-25).
+    loglog (John 2026-10-29: "a copy ... in log log scaling, or however is the canonical x-y scaling for this kind of
+    plot"): every accuracy replaced by its gap to joint Bayes on the same test batch, acc_joint - acc (the reducible error:
+    joint Bayes is the optimal decision rule, so the gap goes to 0 for an optimal net; the scaling-law convention plots
+    such an excess error on log axes, where a power law in width or in training is a straight line), against log width
+    and log training episodes (from the first test after training starts, 500 episodes). (a) takes the mean of the last
+    3 checkpoints' gaps; joint Bayes itself (gap 0) is off the log axis. No gap here is <= 0 (smallest .0087, the fully
+    trained LSTM at N = 1000); any would be left out. rescues (John 2026-10-29 log-log copy, 11-01 all four figures):
+    the ESNs that beat naive Bayes (esn_rescues: MLP read-in and read-out; joint output, joint loss), in (a) at N = 1000
+    at their end only (white: a longer run; drawn over the markers there), and in
+    their own panel with the unrescued ESNs, on its own x range (their runs go to 104k). They trained in their own
+    worlds, SANITY loss (power 0.5), not the seed-0 world at power 1 of the rest: compare gaps to each world's joint
+    Bayes (log-log copies). One marker per width (John 2026-11-01): a run trained past 20k shows its latest value,
+    white, in its 20k value's place on its family's line; no horizontal nudges. params_panel (John 2026-11-01): (b), the
+    same against trainable parameters (each run's summary count, else its family's formula: 36 N + 20 for the frozen FFs,
+    38 N + 20 for the reservoirs with their start state, 8 N^2 + 46 N + 20 for the LSTMs; the ESNs counted from their
+    weights, the frozen LSTM excluded: 8.05M with the MLPs, 118k with the joint output), sharing (a)'s y axis; the
+    reference labels and legends move right of (b), the curve panels' letters one on. upto (thousands of episodes; John
+    2026-11-01, "everything shown up until 20K"): every run at its value at upto in (a) and (b), filled (no longer-run
+    values, the ESNs and the N = 100 LSTM included), every curve cut there and the x axes ending there. side_legend False
+    (John 2026-11-01, the 20k copy): no family legend (the curve panels' titles name the families; the N = 100 LSTM's
+    protocol goes into the LSTM panel's legend), the top panels take its column, the line-width key runs along the
+    bottom."""
     fs = apply_fig_style()
     plt.rcParams["mathtext.fontset"] = "cm"
-    depths = (1, 2, 3)
     shade = {1: RAMP(.15), 2: RAMP(.45), 3: RAMP(.75), 4: RAMP(1.)}
+    tffs_col = "#1b7837"                                        # the green partner of depth 30's purple (PRGn)
     names = {1: "depth 1 (readin + readout)", 2: "depth 2, its layer frozen", 3: "depth 3, both layers frozen",
              4: "depth 4, all 3 layers frozen"}
+    titles = {1: "depth 1 (readin + readout)", 2: "depth 2, 1 layer frozen", 3: "depth 3, 2 layers frozen",
+              4: "depth 4, 3 layers frozen"}
     mark = {1: "o", 2: "s", 3: "D", 4: "h"}                    # neighbouring depths nearly coincide at small widths
     res_col, d30_col = "#b2182b", "#762a83"
 
+    def X(ep):
+        """episodes in thousands; with loglog the test at episode 0 is left out"""
+        ep = np.asarray(ep, float)
+        return np.where(ep > 0, ep / 1000, np.nan) if loglog else ep / 1000
+
+    def Y(acc, joint):
+        """the plotted quantity per checkpoint: accuracy, or with loglog its gap to joint Bayes on the same batch (> 0)"""
+        if not loglog:
+            return np.asarray(acc, float)
+        g = np.asarray(joint, float) - np.asarray(acc, float)
+        return np.where(g > 0, g, np.nan)
+
+    def val(acc, joint):
+        """(a)'s value: the mean of the last 3 checkpoints' accuracies, or of their gaps to joint Bayes"""
+        if not loglog:
+            return float(np.mean(acc[-3:]))
+        g = float(np.mean(np.asarray(joint[-3:], float) - np.asarray(acc[-3:], float)))
+        return g if g > 0 else np.nan
+
+    def cut(x, y):
+        """a curve only up to `upto` thousand episodes (John 2026-11-01: a copy with everything up to 20k); all of it if None"""
+        x, y = np.asarray(x, float), np.asarray(y, float)
+        return (x, y) if upto is None else (x, np.where(x <= upto + 1e-9, y, np.nan))
+
     def series(stem_of, widths_, run_ok):
-        """(width, KL, accuracy, finished, last episode) per run, and its curve: finished runs, plus the running ones that
-        run_ok admits (at their latest 3 checkpoints)."""
+        """(width, KL, accuracy, final, last episode) per run at 20k episodes, and its whole curve: finished runs, plus
+        the running ones that run_ok admits, at their latest 3 checkpoints up to 20k (final once the run is past 20k)."""
         rows, crv = [], {}
         for n in widths_:
             c = load_curve(os.path.join(OUT, stem_of(n) + "_curve.npz"))
             done = os.path.exists(os.path.join(OUT, stem_of(n) + "_summary.json"))
             if c is not None and (done or run_ok(n, c)):
-                rows.append((n, float(np.mean(c["kl_joint"][-3:])), float(np.mean(c["acc"][-3:])), done, int(c["ep"][-1])))
-                crv[n] = (c["ep"] / 1000, c["acc"], done)
+                m = c["ep"] <= 20000                                  # a run trained past 20k: its value at 20k
+                rows.append((n, float(np.mean(c["kl_joint"][m][-3:])), val(c["acc"][m], c["joint"][m]),
+                             done or bool(c["ep"][-1] > 20000), int(c["ep"][m][-1])))
+                crv[n] = (X(c["ep"]), Y(c["acc"], c["joint"]), done)
         return rows, crv
     reservoir, curves = series(reservoir_stem, RESERVOIR_WIDTHS, lambda n, c: n in running)
     d30, d30_curves = series(tff1_stem, FROZEN_WIDTH_SERIES, lambda n, c: running_d30 and c["ep"][-1] >= 500)   # not a stale start
     lstm, lstm_curves = series(lambda n: LSTM_STEMS[n], sorted(LSTM_STEMS), lambda n, c: False)
+    n100 = lstm_n100()                                           # the N = 100 LSTM (5 seeds, SANITY loss, 40k; John 11-01)
+    if n100 is not None:
+        x100, a100, J100 = n100
+        m100 = x100 <= 20 + 1e-9
+        lstm = sorted(lstm + [(100, np.nan, val(a100[m100], J100[m100]), True, 20000)])
+        lstm_curves[100] = (x100, Y(a100, J100), True)
+    shared, shared_curves = series(tffs_stem, FROZEN_WIDTH_SERIES, lambda n, c: running_shared and c["ep"][-1] >= 500) \
+        if shared_readin else ([], {})
+    shared = [r for r in shared if r[3]]                         # (a): finished, or past 20k (its 20k value); curves: all
     base = baselines()
+    resc = esn_rescues() if rescues else []
     widths = sorted(set(FROZEN_WIDTH_SERIES) | set(curves) | set(LSTM_STEMS))
     thick = lambda n: .3 + .75 * np.log10(n / 10)               # line width encodes the network width
 
-    fig = plt.figure(figsize = (18.5, 9.2))
-    top = fig.add_gridspec(1, 2, left = .05, right = .95, top = .95, bottom = .58, wspace = .25)
-    bottom = fig.add_gridspec(1, 5, left = .05, right = .95, top = .47, bottom = .07, wspace = .08)
-    ax_kl, ax_acc = fig.add_subplot(top[0, 0]), fig.add_subplot(top[0, 1])
-    curve_axes = [fig.add_subplot(bottom[0, i]) for i in range(5)]
+    # layout in inches: (a) against width and, with params_panel, (b) against trainable parameters (John 2026-11-01),
+    # sharing (a)'s y axis, the legends right of the last; then the curve panels in rows of ncols
+    n_curves = len(depths) + 2 + bool(shared_readin) + bool(rescues)
+    ncols = ncols or n_curves
+    nrows = -(-n_curves // ncols)
+    L, R, PW, PH, GW, GH = .7, .78, 2.15, 2.4, .16, .8         # margins, curve panel width / height, gaps
+    AH, LEG, GAP = 2.6, (3.1 if side_legend else 0), .3        # top panels' height; legend column right of the reference
+    W = L + ncols * PW + (ncols - 1) * GW + R                  # labels; between (a) and (b)
+    H = .35 + AH + .85 + nrows * PH + (nrows - 1) * GH + .55 + (0 if side_legend else .42)  # without: the line key below
+    AW = W - L - R - LEG
+    if params_panel:
+        AW = (AW - GAP) / 2
+    fig = plt.figure(figsize = (W, H))
+    ax_acc = fig.add_axes([L / W, (H - .35 - AH) / H, AW / W, AH / H])
+    ax_par = fig.add_axes([(L + AW + GAP) / W, (H - .35 - AH) / H, AW / W, AH / H], sharey = ax_acc) if params_panel else None
+    top_right = ax_par if params_panel else ax_acc             # the reference labels and the legends go right of it
+    letters = "cdefghijk" if params_panel else "bcdefghij"     # the curve panels'
+    curve_axes = []
+    for k in range(n_curves):
+        r, c = divmod(k, ncols)
+        y = H - .35 - AH - .85 - (r + 1) * PH - r * GH
+        curve_axes.append(fig.add_axes([(L + c * (PW + GW)) / W, y / H, PW / W, PH / H]))
 
-    # (a, b) against width
-    for d in depths:
-        rows = []
-        for n in FROZEN_WIDTH_SERIES:
-            c = load_curve(os.path.join(OUT, frozen_width_stem(d, n) + "_curve.npz"))
-            if os.path.exists(os.path.join(OUT, frozen_width_stem(d, n) + "_summary.json")) and c is not None:
-                rows.append((n, float(np.mean(c["kl_joint"][-3:])), float(np.mean(c["acc"][-3:]))))
-        if rows:
-            ax_kl.plot([r[0] for r in rows], [r[1] for r in rows], color = shade[d], marker = mark[d], ms = 5.5, lw = 1.5, label = names[d])
-            ax_acc.plot([r[0] for r in rows], [r[2] for r in rows], color = shade[d], marker = mark[d], ms = 5.5, lw = 1.5, label = names[d])
-    def draw_family(rows, col, mk, name):
-        """Finished widths as a solid line; running ones as open markers on one dotted path from the last finished width."""
-        handles = []
-        fin, run = [r for r in rows if r[3]], [r for r in rows if not r[3]]
-        for ax, i in ((ax_kl, 1), (ax_acc, 2)):
-            ms = 8.5 if mk == "*" else 6                     # a star reads small at the others' size
-            h = ax.plot([r[0] for r in fin], [r[i] for r in fin], color = col, marker = mk, ms = ms, lw = 1.5, label = name) if fin else []
+    # top row: accuracy at 20k episodes against width ((a)) and trainable parameters ((b)); a run trained longer
+    # (continued, or one long run) shows its latest value instead, white, in its 20k value's place on its family's line
+    # (John 2026-11-01: one marker per width)
+    fams = ([(lambda n, d = d: frozen_width_stem(d, n), f"depth {d}", FROZEN_WIDTH_SERIES) for d in depths]
+            + [(tff1_stem, "depth 30", FROZEN_WIDTH_SERIES), (reservoir_stem, "reservoir", RESERVOIR_WIDTHS)]
+            + ([(tffs_stem, "shared readin", sorted(shared_curves))] if shared_readin else [])
+            + [(lambda n: LSTM_STEMS[n], "lstm", sorted(LSTM_STEMS))])   # fully trained (continue_lstm, John 2026-11-02)
+    late, cont_running, long_done = {}, [], []                    # (family, width) -> its longer run's latest value
+    for stem_of, fam, ns in (fams if upto is None else []):     # cut at upto: every run at its 20k value
+        for n in ns:
+            cc = late_curve(stem_of(n))
+            if cc is None or load_curve(os.path.join(OUT, stem_of(n) + "_curve.npz")) is None:
+                continue
+            late[(fam, n)] = val(cc[1], cc[3])
+            if not cc[2]:
+                cont_running.append((fam, n, cc[0][-1], TRAINED_ON.get(stem_of(n))))
+            elif stem_of(n) in TRAINED_ON:                       # finished, trained past 20k in one go: say how far
+                long_done.append(f"{fam} at N = {n:g}: one run to {TRAINED_ON[stem_of(n)] // 1000}k")
+    if n100 is not None and upto is None:
+        late[("lstm", 100)] = val(a100, J100)
+        long_done.append("LSTM at N = 100: 5 seeds, one run each to 40k")
+    stems = {**{f"depth {d}": (lambda n, d = d: frozen_width_stem(d, n)) for d in depths}, "depth 30": tff1_stem,
+             "shared readin": tffs_stem, "reservoir": reservoir_stem, "lstm": lambda n: LSTM_STEMS[n]}
+
+    def n_params(fam, n):
+        """trainable parameters of the family's run at width n: its summary's count, else the family's formula (a
+        frozen FF: read-in 16 N + read-out 20 N + 20; a reservoir also its 2 N start state; an LSTM 8 N^2 + 46 N + 20)"""
+        try:
+            f = os.path.join(OUT, stems[fam](n) + "_summary.json")
+        except KeyError:                                          # the N = 100 LSTM: no ff_deep run
+            f = ""
+        t = json.load(open(f)).get("trainable") if os.path.exists(f) else None
+        return t or (8 * n * n + 46 * n + 20 if fam == "lstm" else 38 * n + 20 if fam == "reservoir" else 36 * n + 20)
+
+    def draw_top(ax, by_params):
+        """one top panel: every family against width or trainable parameters; the legend handles of (a) only"""
+        X = (lambda fam, n: n_params(fam, n)) if by_params else (lambda fam, n: n)
+        lab = (lambda t: "_nolegend_") if by_params else (lambda t: t)
+
+        def open_marks(pts, col, mk, ms):
+            """white markers over a family's line at its longer runs' points (the filled marker there is covered)"""
+            if pts:
+                ax.plot([q[0] for q in pts], [q[1] for q in pts], marker = mk, ms = ms, color = col, mfc = "white", mew = 1.2,
+                        ls = "none", zorder = 5)
+
+        for d in depths:
+            rows = []
+            for n in FROZEN_WIDTH_SERIES:
+                c = load_curve(os.path.join(OUT, frozen_width_stem(d, n) + "_curve.npz"))
+                if os.path.exists(os.path.join(OUT, frozen_width_stem(d, n) + "_summary.json")) and c is not None:
+                    rows.append((n, late.get((f"depth {d}", n), val(c["acc"], c["joint"]))))
+            if rows:
+                ax.plot([X(f"depth {d}", r[0]) for r in rows], [r[1] for r in rows], color = shade[d], marker = mark[d], ms = 5, lw = 1.4,
+                        label = lab(names[d]))
+                open_marks([(X(f"depth {d}", r[0]), r[1]) for r in rows if (f"depth {d}", r[0]) in late], shade[d], mark[d], 5)
+
+        def draw_family(rows, col, mk, name, fam):
+            """Finished widths as a solid line (a longer run's latest value white, in its 20k value's place); running ones
+            as open markers on one dotted path from the last finished width."""
+            rows = [(r[0], r[1], late.get((fam, r[0]), r[2])) + tuple(r[3:]) for r in rows]
+            fin, run = [r for r in rows if r[3]], [r for r in rows if not r[3]]
+            ms = 8 if mk == "*" else 5.5                     # a star reads small at the others' size
+            h = ax.plot([X(fam, r[0]) for r in fin], [r[2] for r in fin], color = col, marker = mk, ms = ms, lw = 1.4, label = lab(name)) if fin else []
+            open_marks([(X(fam, r[0]), r[2]) for r in fin if (fam, r[0]) in late], col, mk, ms)
             if run:
                 path = [q for q in fin if q[0] < run[0][0]][-1:] + run
-                ax.plot([q[0] for q in path], [q[i] for q in path], color = col, lw = 1.2, ls = ":")
+                ax.plot([X(fam, q[0]) for q in path], [q[2] for q in path], color = col, lw = 1.1, ls = ":")
                 eps = sorted({r[4] for r in run})
                 when = f"episode {eps[0]:,}" if len(eps) == 1 else f"episodes {eps[0]:,}-{eps[-1]:,}"
-                who = f" N = {run[0][0]:g}" if len(run) == 1 else ""
-                h = h + ax.plot([r[0] for r in run], [r[i] for r in run], ls = "none", marker = mk, ms = ms, color = col,
-                                mfc = "white", label = f"{name}{who},\n    still training ({when})")
-            if ax is ax_kl:
-                handles += h
-        return handles
-    res_line = draw_family(sorted(reservoir), res_col, "v", "reservoir (LSTM frozen, power 1)")
-    draw_family(sorted(d30), d30_col, "*", r"depth 30, all 29 layers frozen ($\times\sqrt{6}$)")   # in (b)'s depth legend
-    res_line += draw_family(lstm, LSTM1_COLOR, "^", "LSTM, fully trained (power 1)")
-    ax_kl.set_yscale("log")
-    ax_kl.yaxis.set_minor_formatter(FuncFormatter(lambda v, _: ""))
-    ax_kl.set_ylabel(KL("joint", "net") + ", final step (joint Bayes: 0)")
-    ax_kl.set_title("(a) distance from joint Bayes", fontsize = fs["label"])
-    ax_acc.set_ylabel("final-step accuracy")
-    ax_acc.set_title("(b) accuracy", fontsize = fs["label"])
-    for ax in (ax_kl, ax_acc):
-        ax.set_xscale("log")
-        ax.set_xticks(widths, [f"{n:g}" if n not in (400, 600) else "" for n in widths])   # LSTM-only widths: no room
-        ax.set_xticks([], minor = True)
-        ax.set_xlim(7, 28000)
-        ax.set_xlabel("width N")
-        ax.spines['top'].set_visible(False)
-        ax.spines['right'].set_visible(False)
-    ax_kl.legend(handles = res_line, frameon = False, fontsize = fs["tick"] - 1.5, loc = "lower left")    # empty there
-    ax_acc.legend(handles = [l for l in ax_acc.get_lines() if l.get_label().startswith("depth")], frameon = False,
-                  fontsize = fs["tick"] - 1.5, loc = "lower right", bbox_to_anchor = (1, .05))     # clear of the chance line
+                who = f" N = {run[0][0]:g}" if len(run) == 1 and f"N = {run[0][0]:g}" not in name else ""
+                h = h + ax.plot([X(fam, r[0]) for r in run], [r[2] for r in run], ls = "none", marker = mk, ms = ms, color = col,
+                                mfc = "white", label = lab(f"{name}{who},\n    still training ({when})"))
+            return h
+        family = draw_family(sorted(d30), d30_col, "*", r"depth 30, all 29 layers frozen ($\times\sqrt{6}$)", "depth 30")
+        if shared_readin:
+            family += draw_family(sorted(shared), tffs_col, "P", r"depth 30, the same layers ($\times\sqrt{6}$), input at" + "\n    every layer through one shared readin"
+                                  + "".join(f"\n    (lr {lr_text(TFFS_LR[r[0]])} at N = {r[0]:g}, 100-update warm-up)" for r in shared if r[0] in TFFS_LR),
+                                  "shared readin")
+        family += draw_family(sorted(reservoir), res_col, "v", "reservoir (LSTM frozen, power 1; lr 5e-4 at N = 10000)", "reservoir")
+        family += draw_family(lstm, LSTM1_COLOR, "^", "LSTM, fully trained (power 1)" + ("\n    (N = 100: SANITY loss, power 0.5, 5 seeds)"
+                                                                                         if n100 is not None else ""), "lstm")
+        for r in (r for r in resc if r["rescue"]):                # their end only (white: a longer run), at N = 1000
+            if upto is None:
+                y_r, fill, tag = val(r["segments"][-1][1], r["segments"][-1][2]), "white", r["a_label"]
+            else:                                                 # cut: their value at upto, filled like everyone's
+                x0, a0, J0 = r.get("start", r["segments"][0][:3])
+                m0 = x0 <= upto + 1e-9
+                y_r, fill, tag = val(a0[m0], J0[m0]), r["col"], re.sub(r"\(at \d+k\)", f"(at {upto:g}k)", r["a_label"])
+            ax.plot([r["params"] if by_params else 1000], [y_r], marker = r["mk"], ms = 6.5, color = r["col"], mfc = fill, mew = 1.2,
+                    ls = "none", zorder = 6.5)
+            family.append(plt.Line2D([], [], color = r["col"], marker = r["mk"], ms = 6, mfc = fill, mew = 1.2, lw = 1.4, label = tag))
+        return family
 
-    # (c-f) training curves, one panel per depth; (g) the reservoirs, in a panel of their own
-    for i, (ax, d) in enumerate(zip(curve_axes, depths)):
+    running_text = []                                             # one line per width: "depths 1, 2 at N = 10000: ..."
+    for n in sorted({n for _, n, _, _ in cont_running}):
+        fams_n, ks = [f for f, m, _, _ in cont_running if m == n], [k for _, m, k, _ in cont_running if m == n]
+        one = "".join(f"one {t // 1000}k run, " for t in sorted({t for _, m, _, t in cont_running if m == n and t}))
+        deps = [f.split(" ", 1)[1] for f in fams_n if f.startswith("depth ")]
+        who = ", ".join(([("depths " if len(deps) > 1 else "depth ") + ", ".join(deps)] if deps else [])
+                        + [{"lstm": "LSTM"}.get(f, f) for f in fams_n if not f.startswith("depth ")])
+        when = f"{min(ks):.1f}k" if max(ks) - min(ks) < .05 else f"{min(ks):.1f}-{max(ks):.1f}k"
+        line = f"{who} at N = {n:g}: {one}still training ({when})"
+        running_text.append(line if len(line) <= 48 else f"{who} at N = {n:g}:\n     {one}still training ({when})")
+    cont_handles = [] if upto is not None else [plt.Line2D([], [], color = "#5f5e5a", marker = "o", ms = 5.5, mfc = "white", mew = 1.2, ls = "none",
+                               label = "the same run trained longer (continued to 40k)" + "".join(f"\n    ({t})" for t in running_text + long_done))]
+    family = draw_top(ax_acc, False)
+    if params_panel:
+        draw_top(ax_par, True)
+    if resc:
+        family.append(plt.Line2D([], [], color = "none", label = "(rescued ESNs: frozen LSTM, N = 1000; SANITY loss,\n    power 0.5, each in its own world; see "
+                                 + f"({letters[len(depths) + 2 + bool(shared_readin)]}))"))         # the ESN panel's letter
+    quantity = ("gap to joint Bayes after" + ("\n20k episodes, " if params_panel else " 20k episodes, ") + r"$\mathrm{acc}_\mathrm{joint} - \mathrm{acc}$"
+                if loglog else "accuracy after 20k episodes")
+    if loglog:
+        ax_acc.set_ylabel("gap to joint Bayes")
+        ax_acc.set_yscale("log")
+        ax_acc.set_yticks([.01, .02, .05, .1, .2, .5], ["0.01", "0.02", "0.05", "0.1", "0.2", "0.5"])
+        ax_acc.set_yticks([], minor = True)
+    else:
+        ax_acc.set_ylabel("final-step accuracy")
+    ax_acc.set_title(f"(a) {quantity}" + (",\nagainst width" if params_panel and not loglog else "")
+                     + ("" if params_panel else " (open: the same run, trained longer)"), fontsize = fs["label"])
+    ax_acc.set_xscale("log")
+    shown = {10, 100, 1000, 10000} if AW < 5 else set(widths) - {400, 600}   # a narrow (a) labels decades only
+    ax_acc.set_xticks(widths, [f"{n:g}" if n in shown else "" for n in widths])
+    ax_acc.set_xticks([], minor = True)
+    ax_acc.tick_params(axis = "x", labelsize = fs["tick"] - 1)
+    ax_acc.set_xlim(7, 28000)
+    ax_acc.set_xlabel("width N")
+    ax_acc.spines['top'].set_visible(False)
+    ax_acc.spines['right'].set_visible(False)
+    if params_panel:
+        ax_par.set_xscale("log")
+        decades = [1e2, 1e3, 1e4, 1e5, 1e6, 1e7]
+        ax_par.set_xticks(decades, ["100", "1k", "10k", "100k", "1M", "10M"])
+        ax_par.set_xticks([], minor = True)
+        ax_par.tick_params(axis = "x", labelsize = fs["tick"] - 1)
+        ax_par.tick_params(axis = "y", labelleft = False)
+        ax_par.set_xlim(200, 2e7)
+        ax_par.set_xlabel("trainable parameters")
+        ax_par.set_title("(b) the same, against\ntrainable parameters", fontsize = fs["label"])
+        ax_par.spines['top'].set_visible(False)
+        ax_par.spines['right'].set_visible(False)
+    xleg = 1 + (R + .05) / AW                                   # just right of the reference-line labels
+    depth_lines = [l for l in ax_acc.get_lines() if l.get_label().startswith("depth") and l not in family]
+    line_key = [plt.Line2D([], [], color = "#5f5e5a", lw = thick(n), label = f"{n:g}") for n in widths]
+    if side_legend:
+        families = top_right.legend(handles = depth_lines + family + cont_handles, frameon = False, fontsize = fs["tick"] - 1.5, loc = "upper left",
+                                    bbox_to_anchor = (xleg, 1.04))
+        top_right.add_artist(families)
+        y_key = (-.24 if shared_readin else -.14) if rescues else -.06
+        key = top_right.legend(handles = line_key,
+                               title = "line width in the training curves = width N", title_fontsize = fs["tick"] - 1.5, frameon = False,
+                               fontsize = fs["tick"] - 2, loc = "lower left", bbox_to_anchor = (xleg, y_key), ncol = 5, columnspacing = .9,
+                               handlelength = 1.6, alignment = "left")
+        # the families' legend grows downwards with its notes (runs still training, runs trained longer; 2026-11-02 the
+        # all-depths figure's ran into the key): keep them 3 pt apart, measured at the saved resolution (savefig below,
+        # dpi 150: the legends' text is ~8% taller there than at the figure's 300 dpi), by raising the families' legend
+        # into the room above it, and only then lowering the key (below it are the curve panels' titles)
+        dpi0 = fig.dpi
+        fig.set_dpi(150)
+        r = fig.canvas.get_renderer()
+        fam, kb, pt = families.get_window_extent(r), key.get_window_extent(r), fig.dpi / 72
+        clash = kb.y1 - (fam.y0 - 3 * pt)                                                        # pixels at 150 dpi
+        if clash > 0:
+            up = min(clash, max(0., fig.bbox.y1 - 3 * pt - fam.y1))
+            families.set_bbox_to_anchor((xleg, 1.04 + up / top_right.bbox.height))
+            if clash > up:
+                key.set_bbox_to_anchor((xleg, y_key - (clash - up) / top_right.bbox.height))
+        fig.set_dpi(dpi0)
+    else:                                                        # the families named by the curve panels' titles (John
+        fig.legend(handles = line_key, title = "line width in the training curves = width N",   # 2026-11-01); the key below
+                   title_fontsize = fs["tick"] - 1, frameon = False, fontsize = fs["tick"] - 1.5, loc = "lower center",
+                   bbox_to_anchor = (.5, .01), ncol = len(line_key), columnspacing = 1.2, handlelength = 1.8)
+
+    # training curves: one panel per depth, then depth 30, then the LSTMs (frozen and fully trained)
+    for i, d in enumerate(depths):
+        ax = curve_axes[i]
         for n in FROZEN_WIDTH_SERIES:
             c = load_curve(os.path.join(OUT, frozen_width_stem(d, n) + "_curve.npz"))
             if c is not None and os.path.exists(os.path.join(OUT, frozen_width_stem(d, n) + "_summary.json")):   # finished runs only
-                ax.plot(c["ep"] / 1000, c["acc"], color = shade[d], lw = thick(n), alpha = .9)
-        ax.set_title(f"({'cdef'[i]}) {names[d]}", fontsize = fs["label"], color = shade[d] if d > 1 else RAMP(.35))
-    ax = curve_axes[3]                                           # depth 30, all 29 layers frozen x sqrt(6)
+                ax.plot(*cut(X(c["ep"]), Y(c["acc"], c["joint"])), color = shade[d], lw = thick(n), alpha = .9)
+                cc = continued_curve(frozen_width_stem(d, n))
+                if cc is not None and upto is None:
+                    ax.plot(np.r_[c["ep"][-1] / 1000, cc[0]], Y(np.r_[c["acc"][-1], cc[1]], np.r_[c["joint"][-1], cc[3]]),
+                            color = shade[d], lw = thick(n), alpha = .9)
+        ax.set_title(f"({letters[i]}) {titles[d]}", fontsize = fs["label"] - .5, color = shade[d] if d > 1 else RAMP(.35))
+    ax = curve_axes[len(depths)]                                 # depth 30, all 29 layers frozen x sqrt(6)
     for n, (x, y, done) in sorted(d30_curves.items()):
-        ax.plot(x, y, color = d30_col, lw = thick(n), alpha = .85)
-    ax.set_title(r"(f) depth 30, all 29 layers frozen ($\times\sqrt{6}$)", fontsize = fs["label"], color = d30_col)
-    ax = curve_axes[4]                                           # the LSTM frozen (reservoir) and fully trained, power 1
+        ax.plot(*cut(x, y), color = d30_col, lw = thick(n), alpha = .85)
+        cc = continued_curve(tff1_stem(n))
+        if cc is not None and upto is None:
+            ax.plot(np.r_[x[-1], cc[0]], np.r_[y[-1], Y(cc[1], cc[3])], color = d30_col, lw = thick(n), alpha = .85)
+    ax.set_title(rf"({letters[len(depths)]}) depth 30, all frozen ($\times\sqrt{{6}}$)", fontsize = fs["label"] - .5, color = d30_col)
+    k_lstm = len(depths) + 1
+    if shared_readin:                                            # the same 29 frozen layers, input at every layer
+        ax = curve_axes[k_lstm]
+        for n, (x, y, done) in sorted(shared_curves.items()):
+            ax.plot(*cut(x, y), color = tffs_col, lw = thick(n), alpha = .85)
+        ax.set_title(rf"({letters[k_lstm]}) depth 30, shared readin ($\times\sqrt{{6}}$)", fontsize = fs["label"] - .5, color = tffs_col)
+        still_shared = "".join(f"\nN = {n:g}" + (f", lr {lr_text(TFFS_LR[n])}" if n in TFFS_LR else "")
+                               + ((": still training" + (f" (to {TRAINED_ON[tffs_stem(n)] // 1000}k)" if tffs_stem(n) in TRAINED_ON else ""))
+                                  if not done else f": {TRAINED_ON[tffs_stem(n)] // 1000}k episodes")
+                               for n, (_, _, done) in sorted(shared_curves.items()) if not done or tffs_stem(n) in TRAINED_ON)
+        for a, note in ((curve_axes[len(depths)], "input at layer 1 only"), (ax, "input at every layer" + still_shared)):
+            a.text(.05, .2 if loglog else .8, note, transform = a.transAxes, fontsize = fs["tick"] - 1.5, color = "#5f5e5a",
+                   va = "top")                                   # log-log: the curves start top left
+        k_lstm += 1
+    ax = curve_axes[k_lstm]                                      # the LSTM frozen (reservoir) and fully trained, power 1
     for crv, col in ((curves, res_col), (lstm_curves, LSTM1_COLOR)):
         for n, (x, y, done) in sorted(crv.items()):
-            ax.plot(x, y, color = col, lw = thick(n), alpha = .85)
+            ax.plot(*cut(x, y), color = col, lw = thick(n), alpha = .85)
+            cc = (None if upto is not None else continued_curve(reservoir_stem(n)) if crv is curves else
+                  continued_curve(LSTM_STEMS[n]) if n in LSTM_STEMS else None)        # the N = 100 LSTM: its own 40k runs
+            if cc is not None:
+                ax.plot(np.r_[x[-1], cc[0]], np.r_[y[-1], Y(cc[1], cc[3])], color = col, lw = thick(n), alpha = .85)
     still = [n for n, (_, _, done) in curves.items() if not done]
-    ax.legend(handles = [plt.Line2D([], [], color = LSTM1_COLOR, lw = 1.5, label = "fully trained"),
+    ax.legend(handles = [plt.Line2D([], [], color = LSTM1_COLOR, lw = 1.5, label = "fully trained" + (
+                             "\n(N = 100: SANITY loss, 5 seeds)" if n100 is not None and not side_legend else "")),
                          plt.Line2D([], [], color = res_col, lw = 1.5, label = "frozen (reservoir)" +
                                     "".join(f"; N = {n:g} running" for n in still))],
-              frameon = False, fontsize = fs["tick"] - 2, loc = "lower right", bbox_to_anchor = (1, .07))
-    ax.set_title("(g) LSTM, frozen and fully trained", fontsize = fs["label"], color = res_col)
+              frameon = False, fontsize = fs["tick"] - 2.5,
+              **(dict(loc = "lower left") if loglog else                  # log-log: empty, early training is far from joint
+                 dict(loc = "center right", bbox_to_anchor = (1, .755))))  # between the linear bound and the trained LSTMs
+    ax.set_title(f"({letters[k_lstm]}) LSTM, frozen and trained", fontsize = fs["label"] - .5, color = res_col)
+    if rescues:                                                  # the rescued ESNs and the unrescued one (SANITY, own worlds)
+        ax = curve_axes[k_lstm + 1]
+        for r in resc:
+            for x, a, J, ls in r["segments"]:
+                ax.plot(*cut(np.where(x > 0, x, np.nan) if loglog else x, Y(a, J)), color = r["col"], ls = ls, lw = r["lw"], alpha = .9)
+        ax.legend(handles = [plt.Line2D([], [], color = r["col"], marker = r["mk"], ms = 5, lw = r["lw"], ls = r["segments"][0][3],
+                                        label = r["label"])
+                             for r in resc], frameon = False, fontsize = fs["tick"] - 2.5,
+                  **(dict(loc = "lower left") if loglog else dict(loc = "lower right", bbox_to_anchor = (1, .1))))   # the empty corner
+        ax.set_title(f"({letters[k_lstm + 1]}) rescued ESNs (N = 1000)", fontsize = fs["label"] - .5, color = "#c51b7d")
 
-    for i, ax in enumerate(curve_axes):
-        ax.set_xlim(0, 20.5)
-        ax.set_xticks([0, 5, 10, 15, 20])
-        ax.set_ylim(.05, .8)
-        ax.set_xlabel("training episodes (thousands)")
-        if i == 0:
-            ax.set_ylabel("final-step test accuracy")
+    acc_refs = [(base["acc_naive"], "naive Bayes", NAIVE_COLOR, "--"), (base["acc_joint"], "joint Bayes", JOINT_COLOR, ":"),
+                (LINEAR_CE, "linear rule\n(CE fit)", LINEAR_COLOR, "-."), (.1, "chance", "#b4b2a9", ":")]
+    if loglog:                                                   # their gaps to joint Bayes; joint Bayes itself is 0
+        acc_refs = [(base["acc_joint"] - y, label, col, ls) for y, label, col, ls in acc_refs if label != "joint Bayes"]
+    longest = max([20.] + [late_curve(st)[0][-1] for st in
+                           [frozen_width_stem(d, n) for d in depths for n in FROZEN_WIDTH_SERIES] + [tff1_stem(n) for n in FROZEN_WIDTH_SERIES]
+                           + [reservoir_stem(n) for n in RESERVOIR_WIDTHS] + [tffs_stem(n) for n in shared_curves] + list(LSTM_STEMS.values())
+                           if late_curve(st) is not None])
+    span = lambda top: next(x for x in (20, 40, 60, 80, 120) if top <= x + .01)   # thousands of episodes
+    xmax = span(longest) if upto is None else upto
+    xmax_esn = (span(max(float(np.max(x)) for r in resc for x, *_ in r["segments"])) if resc else xmax) if upto is None else upto
+    k_esn = len(depths) + 2 + bool(shared_readin) if rescues else None             # the ESN panel: its own x range
+    gap_ticks = [.01, .02, .05, .1, .2, .5]
+    for k, ax in enumerate(curve_axes):
+        xm = xmax_esn if k == k_esn else xmax
+        if loglog:
+            ax.set_xscale("log")
+            ax.set_yscale("log")
+            ax.set_xlim(.42, xm * 1.1)
+            ticks = [t for t in ((.5, 1, 2, 5, 10, 20, 50, 100) if xm > 60 else (.5, 1, 2, 5, 10, 20, 40, 60)) if t <= xm]
+            ax.set_xticks(ticks, [f"{t:g}" for t in ticks])
+            ax.set_xticks([], minor = True)
+            ax.set_ylim(.007, .8)
+            ax.set_yticks(gap_ticks, [f"{t:g}" for t in gap_ticks])
+            ax.set_yticks([], minor = True)
+        else:
+            ax.set_xlim(0, xm + .5)
+            ax.set_xticks([0, 5, 10, 15, 20] if xm == 20 else list(range(0, xm + 1, 10 if xm <= 60 else 20)))
+            ax.set_ylim(.05, .8)
+        if xm > 20:
+            ax.axvline(20, color = "#d3d1c7", lw = .7, zorder = 0)
+        ax.set_xlabel("training episodes (thousands" + (", log)" if loglog else ")"), fontsize = fs["label"] - .5)
+        if k % ncols == 0:
+            ax.set_ylabel("gap to joint Bayes" if loglog else "final-step test accuracy", fontsize = fs["label"] - .5)
         else:
             ax.set_yticklabels([])
         ax.spines['top'].set_visible(False)
         ax.spines['right'].set_visible(False)
-    curve_axes[0].legend(handles = [plt.Line2D([], [], color = "#5f5e5a", lw = thick(n), label = f"width {n:g}") for n in widths],
-                         frameon = False, fontsize = fs["tick"] - 2.5, loc = "upper left", bbox_to_anchor = (0, .95), ncol = 3,
-                         columnspacing = .8, handlelength = 1.6)     # above the curves: the small widths run along the bottom
-
-    ref_lines(ax_kl, [(base["kl_naive"], "naive Bayes", NAIVE_COLOR, "--"), (base.get("kl_joint_uniform", 1.76), "uniform", "#b4b2a9", ":")], fs)
-    lo, hi = ax_kl.get_ylim()                                    # after the reference lines, which can extend the range
-    ticks = [v for v in (.01, .02, .03, .05, .1, .2, .3, .5, .7, 1, 2, 3, 5, 7, 10) if lo <= v <= hi]   # within the range
-    ax_kl.set_yticks(ticks, [f"{v:g}" for v in ticks])
-    acc_refs = [(base["acc_naive"], "naive Bayes", NAIVE_COLOR, "--"), (base["acc_joint"], "joint Bayes", JOINT_COLOR, ":"),
-                (.1, "chance", "#b4b2a9", ":")]
-    ref_lines(ax_acc, acc_refs, fs)
-    for i, ax in enumerate(curve_axes):
-        if i == len(curve_axes) - 1:
-            ref_lines(ax, acc_refs, fs)                          # labelled once, at the right of the row
+        if k % ncols == ncols - 1 or k == n_curves - 1:
+            ref_lines(ax, acc_refs, fs)                          # labelled once per row, at its right end
         else:
             for y, _, col, ls in acc_refs:
                 ax.axhline(y, color = col, ls = ls, lw = 1, zorder = 1)
-    fig.savefig(fig_path("ff_deep_frozen_widths.png"), dpi = 150)
-    print(fig_path("ff_deep_frozen_widths.png"))
+    if params_panel:                                             # labelled once, right of (b); (a) shares its y range
+        for y, _, col, ls in acc_refs:
+            ax_acc.axhline(y, color = col, ls = ls, lw = 1, zorder = 1)
+    ref_lines(top_right, acc_refs, fs)
+    fig.savefig(fig_path(name), dpi = 150)
+    print(fig_path(name))
+
+
+def frozen_widths_figures(**kw):
+    """The two versions John asked for (2026-10-21): depths 1 and 30 (ff_deep_frozen_widths.png; depth 2 dropped later the
+    same day), and every depth of this setting, 1-4 and 30, with the shared-readin net (John 2026-10-25; it had its own
+    version, ff_deep_frozen_widths_shared_readin.png, from 10-22), curve panels in two rows of four
+    (ff_deep_frozen_widths_all_depths.png), each with a log-log copy (*_loglog.png; John 2026-10-29 the all-depths one,
+    11-01 the minimal one; see loglog in frozen_widths_figure: the gap to joint Bayes on log axes), and all four with the
+    rescued ESNs and their references (esn_rescues; John 2026-11-01); and the minimal log-log one cut at 20k episodes
+    (ff_deep_frozen_widths_loglog_20k.png, upto = 20; John 2026-11-01)."""
+    for loglog, tail in ((False, ""), (True, "_loglog")):          # the ESNs on all four (John 2026-11-01)
+        frozen_widths_figure(depths = (1,), name = f"ff_deep_frozen_widths{tail}.png", loglog = loglog, rescues = True, **kw)
+        frozen_widths_figure(depths = (1, 2, 3, 4), name = f"ff_deep_frozen_widths_all_depths{tail}.png", ncols = 4, shared_readin = True,
+                             loglog = loglog, rescues = True, **kw)
+    frozen_widths_figure(depths = (1,), name = "ff_deep_frozen_widths_loglog_20k.png", loglog = True, rescues = False, upto = 20,
+                         side_legend = False, **kw)                                    # everything only to 20k episodes, no ESN panel (John 2026-11-01:
+                                                                  # "super minimal")
+
+
+# ---- extrapolation to infinite training and width (John, 2026-10-21) ----
+EXTRAP = os.path.join(OUT, "extrapolation")
+
+
+def _limit_form(t, a, b, c, beta):
+    """Test accuracy after t thousand updates as a power-law approach to the limit a. Backtested 2026-10-21 on all 58
+    finished runs: fitted on 1k-10k updates it predicts the 19k-20k accuracy with mean error 0.007 and no bias (noise of
+    that target 0.003); an exponential approach under-predicts by 0.019 on average, logarithmic growth over-predicts by
+    0.019, a power law without the offset c is slightly worse (0.008)."""
+    return a - b * (t + c) ** (-beta)
+
+
+def extrapolation_runs():
+    """(family, width, stem) for every run of the frozen-widths figures."""
+    out = [(f"depth {d}", n, frozen_width_stem(d, n)) for d in (1, 2, 3, 4) for n in FROZEN_WIDTH_SERIES]
+    out += [("depth 30", n, tff1_stem(n)) for n in FROZEN_WIDTH_SERIES]
+    out += [("reservoir", n, reservoir_stem(n)) for n in RESERVOIR_WIDTHS]
+    out += [("LSTM trained", n, LSTM_STEMS[n]) for n in sorted(LSTM_STEMS)]
+    return out
+
+
+JOINT_CAP = .7663          # joint Bayes's argmax accuracy: the optimal decision rule, so no predictor beats it on this measure
+
+
+def fit_training_limits(refresh = False, draws = 300, cap = JOINT_CAP):
+    """Per finished run: the limit of test accuracy at infinite training (_limit_form fitted on checkpoints >= 1k
+    updates), a 95% interval from a moving-block residual bootstrap (blocks of 4 checkpoints, `draws` refits), and the
+    limit refitted on 1k-10k updates only. identified = interval narrower than 0.1 with its top below 0.85, i.e. the curve
+    has bent enough within 20k updates to pin its limit. Cached in EXTRAP/training_limits.json by stem; a run is refitted
+    when its curve file is newer than the cache entry."""
+    from scipy.optimize import curve_fit
+    os.makedirs(EXTRAP, exist_ok = True)
+    path = os.path.join(EXTRAP, "training_limits.json" if cap is None else "training_limits_capped.json")
+    cache = json.load(open(path)) if os.path.exists(path) and not refresh else {}
+    rng = np.random.default_rng(0)
+    top = 1.5 if cap is None else cap
+    p0, bounds = [min(.6, top - .01), .3, .5, .7], ([0, 0, 0, .01], [top, 5, 20, 5])
+
+    def fit(t, y, start = p0):
+        try:
+            return curve_fit(_limit_form, t, y, p0 = start, bounds = bounds, maxfev = 20000)[0]
+        except Exception:
+            return None
+    for fam, n, stem in extrapolation_runs():
+        f = os.path.join(OUT, stem)
+        if not (os.path.exists(f + "_summary.json") and os.path.exists(f + "_curve.npz")):
+            continue
+        mtime = os.path.getmtime(f + "_curve.npz")
+        if stem in cache and cache[stem]["mtime"] >= mtime:
+            continue
+        c = np.load(f + "_curve.npz")
+        t, y = c["ep"] / 1000., c["acc"].astype(float)
+        keep = t >= 1
+        t, y = t[keep], y[keep]
+        par = fit(t, y)
+        if par is None:
+            continue
+        early = t <= 10.001
+        par10 = fit(t[early], y[early])
+        fitted = _limit_form(t, *par)
+        res = y - fitted
+        boots = []
+        for _ in range(draws):
+            idx = np.concatenate([np.arange(s0, s0 + 4) for s0 in rng.integers(0, len(res) - 3, size = len(res) // 4 + 1)])[:len(res)]
+            q = fit(t, fitted + res[idx], start = par)
+            if q is not None:
+                boots.append(q[0])
+        lo, hi = np.percentile(boots, [2.5, 97.5])
+        cache[stem] = dict(family = fam, N = int(n), mtime = mtime, acc20k = float(np.mean(c["acc"][-3:])),
+                           params = [float(v) for v in par], limit = float(par[0]), lo = float(lo), hi = float(hi),
+                           limit_10k = None if par10 is None else float(par10[0]),
+                           identified = bool(hi - lo < .1 and hi < (.85 if cap is None else cap - .005)))
+    json.dump(cache, open(path, "w"), indent = 1)
+    return cache
+
+
+# reference levels (numbers kept here so the figure stands alone)
+BANDS = dict(naive = (.436, .469), joint = (.755, .775))   # 95% of single test batches, 2545 batches of the FF/LSTM curves
+LINEAR_READOUT = (.497, .538)   # a fixed linear readout of the five counts (naive_vs_linear, 2026-10-21): cross-entropy fit to the
+                                # joint posterior .497 (.504 with more data), fitted for accuracy >= .538; naive Bayes is one such
+                                # readout (.449). Beating naive by up to this much needs no inference over the other context.
+                                # Neither is a ceiling (verify_2026-10-25): .538 is one local optimum of the non-convex accuracy
+                                # fit; the best of 3 starts per pair reaches ~.550, and linear rules are bounded above only by
+                                # the joint. The extrapolation figure still shades .497-.538.
+LINEAR_CE = .503                # the linear rule fitted by cross-entropy to the joint posterior, the nets' own objective (John
+                                # 2026-10-25): convex, so one optimum; .497/.501/.503 with 1500/4000/16000 training episodes
+                                # per pair, .501-.503 on 8M of the env's own episodes (verify_2026-10-25/audit). A reference
+                                # for a linear readout trained like the nets, not an upper bound of linear rules.
+LINEAR_COLOR = "#6b6b47"
+JM = os.path.join(EXTRAP, "joint_models")   # the joint (width, training-time) models and the depth model, 2026-10-21 workflow
+
+
+def _extrap_models():
+    """the judged joint models (joint_models/judge/extrap_final.py: predict, interval, ...) and their parameter file"""
+    sys.path.insert(0, os.path.join(JM, "judge"))
+    import extrap_final
+    return extrap_final, json.load(open(os.path.join(JM, "judge", "final_extrapolation.json")))
+
+
+def extrapolation_figure(name = "ff_deep_extrapolated.png"):
+    """Extrapolated accuracy from the joint models (John, 2026-10-21, third version). Every family is fitted jointly over its
+    widths and training curves (joint_models/judge: depths 1-4 and 30 'kl-acc', reservoir 'smooth-max', trained LSTM
+    'shape'), so its curves cannot cross and share one saturation; the depth model (joint_models/depth) extends the
+    critical-init stack (frozen default draws x sqrt 6, depths 1 and 30 measured on the GPU, 10 and 100 as CPU replicas) to
+    any depth. Argmax accuracy (the env's measure). Bands: naive and joint Bayes (95% of single test batches), a fixed
+    linear readout of the counts (LINEAR_READOUT), chance.
+    (a) acc(N, t = inf) against width for every family; markers on the line where the width was trained (the t = inf value
+        is still an extrapolation in time), open beyond; from N = 10^4 up and at N = inf: 95% bootstrap (thick) and the
+        structural envelope, i.e. other forms that fit the data as well (thin). Depth 1 at lr 1e-3 dies at N = 10^5 and
+        2x10^5 (probes 2026-10-21), so the wide end describes nets whose training stays stable.
+    (b) acc(N, D, t = inf) of the critical-init stack: depth acts through an effective width, so width must outgrow depth;
+        paths N = 1000 D^gamma; dots: trained.
+    (c) very wide nets (N = 10^8) against depth, by training budget; D = inf in both orders of the limits.
+    (d-g) training curves (line width = N) with the joint model's continuation to convergence; grey: trained range;
+        lighter: the 4x reach the backtests checked; t = inf limit at the right. (e, f): the width-20000 runs continued
+        (dots) against the model's prediction at 40k updates made before the continuation (diamond, 95%)."""
+    from matplotlib.colors import LinearSegmentedColormap as LSC
+    X, J = _extrap_models()
+    PM = np.load(os.path.join(JM, "depth", "phase_map.npz"), allow_pickle = True)
+    D100 = np.load(os.path.join(JM, "depth", "depth100_curves.npz"), allow_pickle = True)
+    fs = apply_fig_style()
+    plt.rcParams["mathtext.fontset"] = "cm"
+    fams = [("depth 1", RAMP(.15), "o", "depth 1 (readin + readout)"), ("depth 2", RAMP(.45), "s", "depth 2, 1 layer frozen"),
+            ("depth 3", RAMP(.75), "D", "depth 3, 2 layers frozen"), ("depth 4", RAMP(1.), "h", "depth 4, 3 layers frozen"),
+            ("depth 30", "#762a83", "*", r"depth 30, 29 frozen ($\times\sqrt{6}$)"), ("reservoir", "#b2182b", "v", "reservoir (LSTM frozen)"),
+            ("LSTM trained", LSTM1_COLOR, "^", "LSTM, fully trained")]
+    col = {f: c for f, c, _, _ in fams}
+    mk = {f: m for f, _, m, _ in fams}
+    ms = lambda f, s = 4.2: s * 1.45 if f == "depth 30" else s
+    thick = lambda n: .3 + .55 * np.log10(n / 10)
+    grey, lgrey = "#5f5e5a", "#b4b2a9"
+
+    def refs(ax, labels = False, x = 1.02):
+        for (lo, hi), c_ in ((BANDS["naive"], NAIVE_COLOR), (BANDS["joint"], JOINT_COLOR)):
+            ax.axhspan(lo, hi, color = c_, alpha = .15, lw = 0, zorder = 0)
+        ax.axhspan(*LINEAR_READOUT, facecolor = "none", edgecolor = "#a8a6a0", hatch = "////", lw = 0, zorder = 0)
+        ax.axhline(.1, color = lgrey, ls = ":", lw = .9, zorder = 0)
+        if labels:
+            tr = ax.get_yaxis_transform()
+            for y, t_ in ((np.mean(BANDS["joint"]), "joint Bayes"), (np.mean(LINEAR_READOUT), "linear readout\nof the counts"),
+                          (np.mean(BANDS["naive"]) - .01, "naive Bayes"), (.1, "chance")):
+                ax.text(x, y, t_, transform = tr, fontsize = fs["tick"] - 1.5, color = grey, va = "center", ha = "left",
+                        clip_on = False, linespacing = .95)
+
+    def clean(ax, ylim = (.05, .8)):
+        for s in ("top", "right"):
+            ax.spines[s].set_visible(False)
+        ax.tick_params(length = 2.5, pad = 2)
+        ax.set_ylim(*ylim)
+
+    def title2(ax, letter, name_, formula, x = .5):
+        ax.annotate(formula, xy = (x, 1), xycoords = "axes fraction", xytext = (0, 4), textcoords = "offset points",
+                    fontsize = fs["tick"] - .5, ha = "center", va = "baseline", color = "#3d3d3a")
+        ax.annotate(name_, xy = (x, 1), xycoords = "axes fraction", xytext = (0, 16), textcoords = "offset points",
+                    fontsize = fs["label"], ha = "center", va = "baseline")
+        ax.annotate(r"$\mathbf{%s}$" % letter, xy = (0, 1), xycoords = "axes fraction", xytext = (-28, 16),
+                    textcoords = "offset points", fontsize = fs["label"], ha = "left", va = "baseline")
+
+    W, H = 13.9, 6.75
+    fig = plt.figure(figsize = (W, H))
+    ax_ = lambda x, y, w, h, **k: fig.add_axes([x / W, y / H, w / W, h / H], **k)
+    Y1, Y2, PH = 3.85, .62, 2.25                                  # row bottoms, panel height (in)
+
+    # ------------------------------------------------------------------------------- (a) infinite training against width
+    ax = ax_(.62, Y1, 3.95, PH)
+    axi = ax_(4.62, Y1, .62, PH, sharey = ax)
+    big = [1e4, 1e5, 1e6, 1e7, 1e8]
+    for k, (f, c_, m_, _) in enumerate(fams):
+        L = J["families"][f]["limits"]
+        Ns = np.array([np.inf if s == "inf" else float(s) for s in L["N"]])
+        pt, lo, hi = (np.array([np.nan if v is None else v for v in L[q]], float) for q in ("point", "lo", "hi"))
+        elo, ehi = (np.array([np.nan if v is None else v for v in L[q]], float) for q in ("envelope_lo", "envelope_hi"))
+        meas = np.array(J["families"][f]["measured_widths"], float)
+        fin = np.isfinite(Ns) & (Ns >= meas.min())
+        trained = fin & np.isin(Ns, meas)
+        last = meas.max()
+        ax.plot(Ns[fin & (Ns <= last)], pt[fin & (Ns <= last)], color = c_, lw = 1.3, zorder = 3)
+        ax.plot(Ns[fin & (Ns >= last)], pt[fin & (Ns >= last)], color = c_, lw = 1.1, ls = (0, (3, 1.6)), zorder = 3)
+        ax.plot(Ns[trained], pt[trained], ls = "none", marker = m_, ms = ms(f), color = c_, mec = "white", mew = .4, zorder = 4)
+        dx = 10 ** (.034 * (k - 3))                               # side by side at the extrapolated widths
+        for n in big:
+            i = np.where(Ns == n)[0]
+            if not len(i):
+                continue
+            i = i[0]
+            x = n * dx
+            ax.plot([x, x], [elo[i], ehi[i]], color = c_, lw = .7, alpha = .8, zorder = 2, solid_capstyle = "butt")
+            ax.plot([x, x], [lo[i], hi[i]], color = c_, lw = 2.2, alpha = .85, zorder = 3, solid_capstyle = "butt")
+            if n > last:
+                ax.plot([x], [pt[i]], marker = m_, ms = ms(f) * .9, color = c_, mfc = "white", mew = .8, zorder = 5)
+        i = np.where(np.isinf(Ns))[0][0]                          # the N = inf column
+        x = -.6 + 1.2 * k / (len(fams) - 1)
+        axi.plot([x, x], [elo[i], ehi[i]], color = c_, lw = .8, zorder = 2, solid_capstyle = "butt")
+        axi.plot([x, x], [lo[i], hi[i]], color = c_, lw = 2.6, alpha = .9, zorder = 3, solid_capstyle = "butt")
+        axi.plot([x], [pt[i]], marker = m_, ms = ms(f), color = c_, mfc = "white", mew = .9, zorder = 4)
+    ax.plot([1e5, 2e5], [.1, .1], ls = "none", marker = "x", ms = 5, mew = 1.3, color = col["depth 1"], zorder = 6, clip_on = False)
+    ax.annotate("depth 1 trained at lr 1e-3:\ndead at $N$ = 10$^5$, 2$\\times$10$^5$", xy = (1.5e5, .11), xytext = (2e3, .155),
+                fontsize = fs["tick"] - 1.5, color = col["depth 1"], ha = "center", va = "bottom",
+                arrowprops = dict(arrowstyle = "-", color = col["depth 1"], lw = .6, shrinkA = 1, shrinkB = 3))
+    ax.set_xscale("log")
+    ax.set_xticks([10, 100, 1e3, 1e4, 1e5, 1e6, 1e7, 1e8], ["10", "100", "1k", "10k", "100k", "1M", "10M", "100M"])
+    ax.set_xticks([], minor = True)
+    ax.set_xlim(7, 1.6e8)
+    ax.set_xlabel("width $N$", labelpad = 1)
+    ax.set_ylabel("accuracy at infinite training", labelpad = 2)
+    clean(ax)
+    refs(ax)
+    clean(axi)
+    refs(axi, labels = True, x = 1.06)
+    axi.set_xlim(-.85, .85)
+    axi.set_xticks([0], [r"$N=\infty$"])
+    axi.spines["left"].set_visible(False)
+    axi.tick_params(axis = "y", length = 0, labelleft = False)
+    title2(ax, "a", "Infinite training, against width",
+           r"$a(N,t\!=\!\infty)$: point, 95% bootstrap (thick), forms that fit as well (thin)", x = .55)
+    ax.legend(handles = [plt.Line2D([], [], color = c_, marker = m_, ms = ms(f), lw = 1.2, mec = "white", mew = .4, label = lab)
+                         for f, c_, m_, lab in fams],
+              frameon = False, fontsize = fs["tick"] - 1.6, loc = "lower right", bbox_to_anchor = (1.0, .17),
+              handlelength = 1.6, labelspacing = .25, borderaxespad = 0)
+
+    # ------------------------------------------------------------------------------- (b) width against depth, t = inf
+    axb = ax_(6.55, Y1, 2.55, PH)
+    lN, dd = PM["log10N_fine"].astype(float), PM["depth_fine"].astype(float)
+    okd = np.isfinite(dd)
+    Z = PM["fine_point_tinf"][okd][:, np.isfinite(lN)]
+    lNf, ddf = lN[np.isfinite(lN)], dd[okd]
+    cmap = LSC.from_list("acc", ["#f4f3ee", "#c9dcf2", "#7fb0e8", "#2a78d6", "#0d366b"])
+    pc = axb.pcolormesh(lNf, ddf, Z, cmap = cmap, vmin = .1, vmax = .77, shading = "nearest", rasterized = True, zorder = 0)
+    cs = axb.contour(lNf, ddf, Z, levels = [np.mean(BANDS["naive"]), .75], colors = [NAIVE_COLOR, JOINT_COLOR],
+                     linewidths = [1.1, 1.1], linestyles = ["--", "-"], zorder = 2)
+    axb.clabel(cs, fmt = {cs.levels[0]: "naive", cs.levels[1]: ".75"}, fontsize = fs["tick"] - 2, inline_spacing = 2)
+    for key, c_, lab in (("t20000", "#7fe3ff", r"2$\times$10$^4$"), ("t1e+06", "#ffb000", r"10$^6$"), ("t1e+09", "#e8590c", r"10$^9$")):
+        Zt = PM[f"fine_point_{key}"][okd][:, np.isfinite(lN)]          # where nets beat naive Bayes at a finite budget
+        ct = axb.contour(lNf, ddf, np.nan_to_num(Zt, nan = .1), levels = [np.mean(BANDS["naive"])], colors = [c_], linewidths = 1.3,
+                         linestyles = "-", zorder = 3)
+        axb.clabel(ct, fmt = {ct.levels[0]: lab}, fontsize = fs["tick"] - 2.2, inline_spacing = 1, manual = False)
+    D_ = np.geomspace(1, 1000, 60)
+    for g, ls in ((0, (0, (1, 1.4))), (.5, (0, (4, 1.5))), (1, "-")):
+        axb.plot(np.log10(1000 * D_ ** g), D_, color = "white", lw = 1.5, zorder = 3)
+        axb.plot(np.log10(1000 * D_ ** g), D_, color = "#3d3d3a", lw = .9, ls = ls, zorder = 4)
+    for g, d0 in ((0, 300), (.5, 200), (1, 60)):
+        axb.text(np.log10(1000 * d0 ** g) + .1, d0, rf"$\gamma$={g:g}", fontsize = fs["tick"] - 2, color = "#3d3d3a", va = "center",
+                 ha = "left", zorder = 5, path_effects = [__import__("matplotlib.patheffects", fromlist = ["x"]).withStroke(linewidth = 2, foreground = "white")])
+    meas = [(1, n) for n in FROZEN_WIDTH_SERIES] + [(30, n) for n in FROZEN_WIDTH_SERIES] + [(10, 100), (100, 50), (100, 100), (100, 200), (100, 400)]
+    axb.plot([np.log10(n) for _, n in meas], [d for d, _ in meas], ls = "none", marker = "o", ms = 2.2, color = "#1f1f1e", mec = "white",
+             mew = .3, zorder = 6)
+    axb.set_yscale("log")
+    axb.set_ylim(1, 1000)
+    axb.set_xlim(1, 8)
+    axb.set_xticks([1, 2, 3, 4, 5, 6, 7, 8], ["10", "", "1k", "", "100k", "", "10M", ""])
+    axb.set_xlabel("width $N$", labelpad = 1)
+    axb.set_ylabel("depth $D$", labelpad = 1)
+    axb.set_yticks([1, 10, 100, 1000], ["1", "10", "100", "1000"])
+    axb.tick_params(length = 2.5, pad = 2)
+    title2(axb, "b", r"Width against depth ($\times\sqrt{6}$ stack)",
+           r"colour: $t=\infty$; lines: naive level at $t$ = 2$\times$10$^4$, 10$^6$, 10$^9$")
+    cax = ax_(9.17, Y1 + .25, .09, PH - .5)
+    cb = fig.colorbar(pc, cax = cax, ticks = [.1, .3, .45, .6, .766])
+    cb.ax.set_yticklabels(["0.10", "0.30", "0.45", "0.60", "0.77"], fontsize = fs["tick"] - 2)
+    cb.outline.set_linewidth(.5)
+    cb.ax.tick_params(length = 2)
+
+    # ------------------------------------------------------------------------------- (c) very wide nets against depth
+    axc = ax_(10.25, Y1, 2.5, PH)
+    dep = PM["depth"].astype(float)
+    j8 = int(np.where(PM["log10N"] == 8)[0][0])
+    fin_d = np.isfinite(dep)
+    budgets = [("t20000", r"$t$ = 2$\times$10$^4$ (trained)", "#c6dbef"), ("t1e+06", r"$t$ = 10$^6$", "#7fb0e8"),
+               ("t1e+09", r"$t$ = 10$^9$", "#2a78d6"), ("tinf", r"$t=\infty$", "#0d366b")]
+    for key, lab, c_ in budgets:
+        y = PM[f"point_{key}"][fin_d, j8]
+        axc.fill_between(dep[fin_d], PM[f"lo95_{key}"][fin_d, j8], PM[f"hi95_{key}"][fin_d, j8], color = c_, alpha = .3, lw = 0, zorder = 1)
+        axc.plot(dep[fin_d], y, color = c_, lw = 1.6, zorder = 3, label = lab)
+    axc.plot(dep[fin_d], PM["env_lo_tinf"][fin_d, j8], color = "#0d366b", lw = .8, ls = (0, (2, 1.5)), zorder = 3,
+             label = r"$t=\infty$, lowest form that fits")
+    xinf = 3000
+    axc.plot([xinf], [.1], marker = "o", ms = 4, color = grey, zorder = 5, clip_on = False)
+    axc.plot([xinf], [float(PM["B_any_scalar"])], marker = "_", ms = 8, mew = 1.4, color = grey, zorder = 5, clip_on = False)
+    axc.annotate("$D\\to\\infty$ before $N$: chance at any\nfinite $N$, one channel $\\leq$ .21", xy = (xinf, .105), xytext = (1.1, .13),
+                 fontsize = fs["tick"] - 2, color = grey, ha = "left", va = "bottom",
+                 arrowprops = dict(arrowstyle = "-", color = grey, lw = .5, shrinkA = 1, shrinkB = 3, connectionstyle = "arc3,rad=-0.15"))
+    axc.set_xscale("log")
+    axc.set_xlim(.85, 4500)
+    axc.set_xticks([1, 10, 100, 1000, xinf], ["1", "10", "100", "1000", r"$\infty$"])
+    axc.set_xticks([], minor = True)
+    axc.set_xlabel("depth $D$", labelpad = 1)
+    clean(axc)
+    refs(axc, labels = True)
+    axc.tick_params(axis = "y", labelleft = True)
+    axc.legend(frameon = False, fontsize = fs["tick"] - 2, loc = "lower left", bbox_to_anchor = (0, .2), handlelength = 1.5,
+               labelspacing = .2, borderaxespad = 0)
+    title2(axc, "c", r"Very wide ($N$ = 10$^8$) against depth", r"$a(10^8, D, t)$ by training budget $t$; median, 95%")
+
+    # ------------------------------------------------------------------------------- (d-g) curves to convergence
+    T = np.geomspace(1e3, 1e16, 240)
+    panels = [("d", "LSTMs: frozen (red), trained (orange)", ("reservoir", "LSTM trained")),
+              ("e", "depth 1 (readin + readout)", ("depth 1",)),
+              ("f", r"depth 30, 29 frozen ($\times\sqrt{6}$)", ("depth 30",)),
+              ("g", r"depth 100, 99 frozen ($\times\sqrt{6}$)", ())]
+    PW, GAP = 2.75, .47
+    curve_axes = []
+    for k, (letter, ttl, fl) in enumerate(panels):
+        a_ = ax_(.62 + k * (PW + GAP), Y2, PW, PH)
+        curve_axes.append(a_)
+        a_.axvspan(1e3, 2e4, color = "#e8e7e2", lw = 0, zorder = 0)
+        a_.axvspan(2e4, 8e4, color = "#f3f2ee", lw = 0, zorder = 0)
+        for f in fl:
+            meas_n = J["families"][f]["measured_widths"]
+            stems = {n: s for f_, n, s in extrapolation_runs() if f_ == f}
+            for n in meas_n:
+                c = load_curve(os.path.join(OUT, stems[n] + "_curve.npz"))
+                if c is None:
+                    continue
+                m = c["ep"] >= 1000
+                a_.plot(c["ep"][m], c["acc"][m], color = col[f], lw = thick(n), alpha = .9, zorder = 3)
+                y = np.ravel(X.predict(f, float(n), T))
+                a_.plot(T[T >= 2e4], y[T >= 2e4], color = col[f], lw = max(thick(n) * .6, .35), ls = (0, (3, 1.4)), alpha = .85, zorder = 2)
+                lim_ = float(np.ravel(X.predict(f, float(n), np.inf))[0])
+                a_.plot([1.6e16], [lim_], marker = "<", ms = 3, color = col[f], clip_on = False, zorder = 4)
+        if letter in ("e", "f"):                                  # the width-20000 run, continued, against the prediction at 40k
+            f = fl[0]
+            stem = {"depth 1": "d1_N20000_p1_lr0.001_rep0", "depth 30": "tff1_N20000_p1_lr0.001_rep0"}[f]
+            cc = load_curve(os.path.join(OUT, "widths", "continued", stem + "_curve.npz"))
+            p, lo, hi = (float(np.ravel(v)[0]) for v in X.interval(f, 2e4, 4e4))
+            a_.plot([4e4, 4e4], [lo, hi], color = "#1f1f1e", lw = 1.1, zorder = 6)
+            a_.plot([4e4], [p], marker = "D", ms = 3.6, color = "white", mec = "#1f1f1e", mew = .9, zorder = 7)
+            if cc is not None and len(cc["ep"]) > 2:
+                a_.plot(cc["ep"][2:], cc["acc"][2:], ls = "none", marker = "o", ms = 1.9, color = "#1f1f1e", zorder = 7)
+                if f == "depth 30" and cc["acc"][2:].min() < .42:
+                    i = int(np.argmin(cc["acc"][2:])) + 2
+                    a_.annotate("dip after resuming\n(being checked)", xy = (cc["ep"][i], cc["acc"][i]), xytext = (3e5, .2),
+                                fontsize = fs["tick"] - 2.2, color = "#1f1f1e", ha = "left", va = "center",
+                                arrowprops = dict(arrowstyle = "-", color = "#1f1f1e", lw = .5, shrinkA = 1, shrinkB = 2))
+        if letter == "g":                                         # depth 100: CPU replicas and the depth model
+            for i, n in enumerate(D100["N"]):
+                n = float(n)
+                a_.fill_between(D100["t"], D100["lo95"][i], D100["hi95"][i], color = "#3d6fb6", alpha = .12, lw = 0, zorder = 1)
+                a_.plot(D100["t"], D100["median"][i], color = "#3d6fb6", lw = thick(n) * .8, zorder = 2)
+            a_.plot(D100["t"], D100["env_lo"][-1], color = "#3d6fb6", lw = .8, ls = (0, (2, 1.5)), zorder = 2)
+            for key in [k_ for k_ in D100.files if k_.startswith("measured_") and k_.endswith("_acc")]:
+                ep = D100[key.replace("_acc", "_ep")]
+                a_.plot(ep, D100[key], ls = "none", marker = "o", ms = 1.7, color = "#c2185b", zorder = 4)
+            a_.text(.03, .97, "dots: CPU replicas, $N$ = 50-400\nlines: model at $N$ = 100, 10$^3$, 5$\\times$10$^3$, 2$\\times$10$^4$\n"
+                    "(median, 95%); dashed: lowest form\nthat fits ($N$ = 2$\\times$10$^4$); converges\nonly after $\\sim$10$^{28}$ updates",
+                    transform = a_.transAxes, fontsize = fs["tick"] - 2.2, color = "#3d3d3a", ha = "left", va = "top", linespacing = 1.1)
+        a_.set_xscale("log")
+        a_.set_xlim(1e3, 1.6e16)
+        a_.set_xticks([1e3, 1e6, 1e9, 1e12, 1e15], ["10$^3$", "10$^6$", "10$^9$", "10$^{12}$", "10$^{15}$"])
+        a_.set_xticks([], minor = True)
+        a_.set_xlabel("training updates (line width = $N$)", labelpad = 1)
+        clean(a_)
+        refs(a_, labels = k == 3)
+        if k == 0:
+            a_.set_ylabel("accuracy", labelpad = 2)
+        else:
+            a_.tick_params(axis = "y", labelleft = False)
+        title2(a_, letter, ttl, {"d": r"converge within $\sim$10$^6$ updates",
+                                 "e": r"converges after $\sim$10$^9$ updates (wide)",
+                                 "f": r"converges after $\sim$10$^{15}$ updates",
+                                 "g": r"$N\leq$ 400 trained on CPU; wider: depth model"}[letter])
+    a_ = curve_axes[0]
+    a_.text(1.15e3, .065, "trained", fontsize = fs["tick"] - 2.4, color = grey, va = "bottom", rotation = 90)
+    a_.text(2.2e4, .065, "backtested", fontsize = fs["tick"] - 2.4, color = grey, va = "bottom", rotation = 90)
+    a_.text(1.2e5, .065, "model only", fontsize = fs["tick"] - 2.4, color = grey, va = "bottom")
+    curve_axes[1].legend(handles = [plt.Line2D([], [], color = "#1f1f1e", marker = "o", ms = 2.2, ls = "none",
+                                               label = "$N$ = 20000 continued (10-21)"),
+                                    plt.Line2D([], [], color = "#1f1f1e", marker = "D", ms = 3.6, mfc = "white", mew = .9, lw = 1.1,
+                                               label = "model's prediction at 40k, 95%")],
+                         frameon = False, fontsize = fs["tick"] - 2, loc = "lower right", bbox_to_anchor = (1, .12), borderaxespad = 0)
+    fig.text(.62 / W, .05 / H,
+             "Every value at $t=\\infty$ or beyond $2\\times10^4$ updates is the model's continuation; the backtests checked it to 4x the "
+             "trained range (intervals there covered 77-88% at nominal 95%: widen them about 1.3-1.5x). Single seed per width. "
+             "Depths 2-4: PyTorch's default init; depth 30 and 100: $\\times\\sqrt{6}$.",
+             fontsize = fs["tick"] - 1.6, color = "#5f5e5a", ha = "left", va = "bottom")
+    fig.savefig(fig_path(name), dpi = 200)
+    print(fig_path(name))
 
 
 if __name__ == "__main__":
@@ -1348,4 +2166,4 @@ if __name__ == "__main__":
     heatmaps_figure()
     relations_figure()
     disagreement_figure()
-    frozen_widths_figure()
+    frozen_widths_figures()

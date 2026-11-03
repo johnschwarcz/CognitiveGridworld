@@ -1,0 +1,82 @@
+{
+ "T1_joint_max_change": 4.973799150320701e-14,
+ "T1_naive_max_change": 4.618527782440651e-14,
+ "T2_marginal_over_joint_max": -0.0291365986975336,
+ "T2_steer_minus_pmi_range_max": -9.749975510647662,
+ "T2_steer_mean_at_T": 11.157991400027607,
+ "T2_pmi_range_mean": 57.73182507562674,
+ "T3_eig_vs_1pm_rho_max": 1.3730593773075839e-08,
+ "T3_jacobian_vs_finite_diff_rel_max": 6.616383910969198e-09,
+ "T3_rho1_mean": 0.10283574996162044,
+ "tangent_vs_finite_diff_rel_max": 6.42663803136912e-10,
+ "frame_ftle_top5_mean_a": [
+  -0.13012738525867462,
+  -0.1412731409072876,
+  -0.14254631102085114,
+  -0.1469137966632843,
+  -0.15445856750011444
+ ],
+ "frame_ftle_top5_mean_b": [
+  -0.13112901151180267,
+  -0.1388062685728073,
+  -0.14678141474723816,
+  -0.15752387046813965,
+  -0.15610598027706146
+ ],
+ "frame_ftle1_per_episode_max_abs_diff": 0.0762408971786499,
+ "logq_vs_engine_max": 0.0,
+ "T1_joint_euclid_30step_mean_p5_p95": [
+  0.024782938600378824,
+  -0.045360940275552195,
+  0.06442421292446658
+ ],
+ "T1_joint_euclid_share_positive": 0.817,
+ "T1_joint_fisher_rao_30step_mean_p5_p95": [
+  -0.021080794541562118,
+  -0.06391258423832849,
+  0.007273531738058096
+ ],
+ "T1_joint_fisher_rao_share_positive": 0.148,
+ "T1_joint_dH_30step_mean_p5_p95": [
+  -8.823739101405359e-13,
+  -1.3954836315733491e-10,
+  1.265696504458749e-10
+ ],
+ "T1_joint_dH_share_positive": 0.49,
+ "T1_naive_euclid_30step_mean_p5_p95": [
+  -0.010947317622082576,
+  -0.07510996301056971,
+  0.0248694055845849
+ ],
+ "T1_naive_euclid_share_positive": 0.485,
+ "T1_naive_fisher_rao_30step_mean_p5_p95": [
+  -0.0226390773596357,
+  -0.07102952494808247,
+  0.0038820969805285596
+ ],
+ "T1_naive_fisher_rao_share_positive": 0.104,
+ "T1_naive_dH_30step_mean_p5_p95": [
+  -8.470477340085886e-13,
+  -1.1121452832786451e-10,
+  1.13203381661459e-10
+ ],
+ "T1_naive_dH_share_positive": 0.47,
+ "T3_euclid_sigma_max_p50_p95_max": [
+  1.2682583674868586,
+  1.7072627848548763,
+  2.594530545614814
+ ],
+ "T3_euclid_share_sigma_max_above_2": 0.007933333333333334,
+ "T3_euclid_sigma_max_minus_1_plus_rho1_p50_max": [
+  0.18334881870254202,
+  1.0851083046807906
+ ],
+ "T3_logdet_minus_sum_log_1_minus_rho2_maxabs": 9.734435479913373e-13,
+ "T3_det_sign_min": 1.0,
+ "T3_det_max": 1.0000000000000004,
+ "T3_rho1_mean_step1_step30": [
+  0.5994090197683676,
+  0.020431953096828707
+ ],
+ "T3_pi_metric_sigma_max_minus_1_plus_rho1_maxabs": 1.5543122344752192e-15
+}

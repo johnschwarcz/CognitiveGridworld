@@ -44,7 +44,8 @@ class Model_architecture(Model_controller):
             from main.model.time_ff import TimeInjectedFF
             self.classifier_readin = TimeInjectedFF(inp_dims, self.hid_dim, self.step_num, self.ff_frozen_gain,
                                                     self.ff_regenerate, self.device, shared = getattr(self, "ff_shared_readin", False),
-                                                    first_only = getattr(self, "ff_inject_first_only", False))
+                                                    first_only = getattr(self, "ff_inject_first_only", False),
+                                                    layer_gains = getattr(self, "ff_layer_gains", False))
         else:
             self.classifier_readin = self.mlp_stack(inp_dims, self.hid_dim, self.readin_depth)   
         self.classifier_readout = self.mlp_stack(self.hid_dim, out_dims, self.readout_depth)

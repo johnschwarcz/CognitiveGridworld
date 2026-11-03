@@ -1,0 +1,630 @@
+[
+ {
+  "id": "P1_central_object",
+  "claim": "Bayes's goal update is the new observation's likelihood averaged over the contextual variable with the current belief pi_{t-1}(k|j) (telescoping identity); naive Bayes uses uniform weights per observable, the step-wise rule per step, block/window rules in between. Every rule beyond naive differs from naive only in how far back that belief reaches.",
+  "status": "exact",
+  "numbers": {},
+  "episode_set": "n/a (identity)",
+  "sources": [
+   "/home/johns/Desktop/CognitiveGridworld/main/DATA/experimental/esn_learnability/sources_10-27/verify_theory/v2_bayes_parts.json (telescoping_max_abs_err 5e-14)"
+  ],
+  "verification": "algebra (Appendix A); the identity was checked numerically to 5e-14 in v2_bayes_parts.json; the rules derived from it reproduce the stored ladder exactly (see reference_ladder)."
+ },
+ {
+  "id": "reference_ladder",
+  "claim": "Reference accuracies at T = 30: naive 0.452, step-wise 0.614, blocks of 2/3/5/6/10/15 steps 0.680/0.705/0.727/0.739/0.754/0.761, window w = 5/6 0.748/0.754, Bayes 0.771 (12,000 pairs); naive 0.450, step-wise 0.609, Bayes 0.772 (6,000 own-goal episodes); window rules on the networks' 12,000-episode set: w = 5/6 0.751/0.759, w = 30 0.776.",
+  "status": "computed",
+  "numbers": {
+   "naive": 0.4516,
+   "stepwise": 0.6136,
+   "block_2": 0.6796,
+   "block_3": 0.7046,
+   "block_5": 0.7271,
+   "block_6": 0.7386,
+   "block_10": 0.7536,
+   "block_15": 0.7614,
+   "window_5": 0.7482,
+   "window_6": 0.7537,
+   "bayes": 0.7714,
+   "own_goal_naive": 0.4502,
+   "own_goal_stepwise": 0.6093,
+   "own_goal_bayes": 0.7723,
+   "xpool_window_5": 0.7508,
+   "xpool_window_6": 0.7592
+  },
+  "episode_set": "held-out pool episodes 54,000-59,999 of joint_esn/D_critic/pool/meta_jesn_1.npz, both variables as goal (12,000 pairs) and own goal (6,000); window rules also on XPOOL 48,000-59,999 (12,000)",
+  "sources": [
+   "/home/johns/Desktop/CognitiveGridworld/main/DATA/experimental/esn_learnability/sources_10-27/theory_marg/c2_prior_ladder.json",
+   "/home/johns/Desktop/CognitiveGridworld/main/DATA/experimental/esn_learnability/readout_only/bayes_ref.json",
+   "/tmp/claude-1002/-home-johns-Desktop-CognitiveGridworld/d2a8859d-af2d-4881-a4e5-84ac9f884f2b/scratchpad/learn4/run_esn/results.json (1f_window_bayes)",
+   "scripts/verify_refs.json"
+  ],
+  "verification": "recomputed from the stored episodes with an independent implementation of the generator (scripts/verify_refs.py); identical to four decimals with c2_prior_ladder.json and bayes_ref.json."
+ },
+ {
+  "id": "rank_one_tables",
+  "claim": "Every logit table is rank one, x_i(j,k;z) = u_i(j;z) v_i(k;z).",
+  "status": "exact",
+  "numbers": {
+   "max_s2_over_s1_1000_tables": 2.7e-16
+  },
+  "episode_set": "1,000 pool tables",
+  "sources": [
+   "main/env/bayes_likelihood.py (soft_roll)",
+   "main/env/env_preprocessing.py (V_range)",
+   "scripts/verify_refs.json"
+  ],
+  "verification": "the generator builds x as a product of two soft_roll profiles; recomputed singular values."
+ },
+ {
+  "id": "P2_one_equation",
+  "claim": "For any update theta_dot = -P grad L with P >= 0, the logits obey Y_dot = -K G with K = J P J^T (reach) and G = dL/dY (push); frozen stages contribute nothing to K; for a linear read-out on fixed features the reach is exactly the feature span.",
+  "status": "exact",
+  "numbers": {},
+  "episode_set": "n/a",
+  "sources": [
+   "/home/johns/Desktop/CognitiveGridworld/main/DATA/experimental/interaction_bounds/learning_theory/esn_theory_compact.tex (Thm flow)"
+  ],
+  "verification": "chain rule (Appendix A)."
+ },
+ {
+  "id": "P3a_marginal_format",
+  "claim": "On a state affine in the counts, a linear marginal read-out gives goal contrasts affine in the counts (zero interaction between observations); with per-observable loadings it is naive Bayes's family.",
+  "status": "proved here (premise measured)",
+  "numbers": {
+   "R1_affine_share": 0.986,
+   "R3_affine_share": 0.994
+  },
+  "episode_set": "within-environment variance of the summed state, stored checkpoints",
+  "sources": [
+   "/home/johns/Desktop/CognitiveGridworld/main/DATA/experimental/interaction_bounds/learning_theory/esn_theory_compact.tex (Thm format, Prop esn a)",
+   "/home/johns/Desktop/CognitiveGridworld/main/DATA/experimental/esn_learnability/writeup/results.json (R1.counts)"
+  ],
+  "verification": "proof in Appendix A; the affine shares are read from the compact note (forward passes), not recomputed here."
+ },
+ {
+  "id": "P3b_joint_format",
+  "claim": "On the same state a linear joint read-out followed by row sums gives LSE_k of affine functions of the counts: Bayes's form, with Bayes a member. The row sum equals LSE_k Y(j,k) minus a constant.",
+  "status": "proved here",
+  "numbers": {
+   "rowsum_equals_lse_err": 8.9e-16
+  },
+  "episode_set": "n/a",
+  "sources": [
+   "/home/johns/Desktop/CognitiveGridworld/main/DATA/experimental/interaction_bounds/learning_theory/esn_theory_compact.tex (Thm format b)",
+   "scripts/verify_refs.json"
+  ],
+  "verification": "proof in Appendix A; the row-sum identity checked numerically."
+ },
+ {
+  "id": "P3c_window",
+  "claim": "An output that is a sum over steps of functions of w-step windows has zero interaction between observations w or more steps apart and, if it depends only on the counts, is affine in them; a frozen stage responding linearly to its input, read out linearly and summed, is such a sum with w = 1 whatever its memory.",
+  "status": "proved here",
+  "numbers": {},
+  "episode_set": "n/a",
+  "sources": [
+   "/home/johns/Desktop/CognitiveGridworld/main/DATA/experimental/interaction_bounds/learning_theory/esn_theory_compact.tex (Thm window a, b, f)"
+  ],
+  "verification": "short proof in Appendix A; the L2 bounds of the full theorem are cited, not re-proved."
+ },
+ {
+  "id": "P4_gated_push",
+  "claim": "For any loss depending on joint logits through the row log-masses, dL/dY(j,k) = q(k|j) dL/dm(j) (Fisher's identity): the goal-loss gradient is the joint-loss gradient with the network's own conditional in place of Bayes's; it is the softmax policy gradient with the cells as actions; recovery from depth u0 needs time >= (e^{u0}-1)/C. A marginal output is not gated.",
+  "status": "proved here; policy form cited",
+  "numbers": {
+   "identity_max_abs_err_autograd": 1.8e-15
+  },
+  "episode_set": "20 random logit tables",
+  "sources": [
+   "scripts/verify_refs.json",
+   "/home/johns/Desktop/CognitiveGridworld/main/DATA/experimental/esn_learnability/sources_10-27/literature/lit.md (Fisher identity, Mei et al. 2020)"
+  ],
+  "verification": "proof in Appendix A; autograd check."
+ },
+ {
+  "id": "P4b_joint_loss_ungated",
+  "claim": "The joint loss gives G = q - p*, which does not vanish for unlikely cells, and a convex read-out problem; an entropy bonus pushes cell r by beta q(r)[log(1/q(r)) - H], a gate that closes more slowly than q.",
+  "status": "proved here",
+  "numbers": {},
+  "episode_set": "n/a",
+  "sources": [
+   "/home/johns/Desktop/CognitiveGridworld/main/DATA/experimental/interaction_bounds/learning_theory/esn_theory_compact.tex (Prop remedies a)"
+  ],
+  "verification": "proof in Appendix A."
+ },
+ {
+  "id": "principle",
+  "claim": "A network learns beyond naive Bayes only along directions that are in its reach and receive a push; the contextual belief enters the reach only through trained nonlinear processing after the combination of evidence or through the joint output's LSE, and is pushed ungated through a marginal output but gated by the network's own belief through a joint output. Necessity follows from P2-P4; sufficiency is measured (Table 1).",
+  "status": "proved here (necessity); measured (sufficiency)",
+  "numbers": {},
+  "episode_set": "see the table rows",
+  "sources": [
+   "theory.tex Sections 3-4"
+  ],
+  "verification": "the necessity is the conjunction of P2, P3 and P4; every row of Table 1 is consistent with it; no counterexample was found (Appendix D)."
+ },
+ {
+  "id": "R1_level",
+  "claim": "The marginal ESN R1 scores 0.437 (XPOOL), 0.442 at its last checkpoint and 0.436 over the last ten (its 8,000 test-state episodes); its KL to Bayes grows about linearly with t (0.11 at t = 1 to 3.58 at t = 30) while the trained LSTM's stays at 0.007-0.015.",
+  "status": "measured",
+  "numbers": {
+   "R1_xpool": 0.437,
+   "R1_last_ckpt": 0.442,
+   "R1_last10_mean": 0.4358,
+   "R1_KL_t1": 0.109,
+   "R1_KL_t30": 3.581,
+   "LSTM_KL_t1": 0.012,
+   "LSTM_KL_t30": 0.015
+  },
+  "episode_set": "XPOOL 12,000 pool episodes; the run's 8,000 test-state episodes",
+  "sources": [
+   "/home/johns/Desktop/CognitiveGridworld/main/DATA/sanity/reservoir_ctx_2_net.pth",
+   "/home/johns/Desktop/CognitiveGridworld/main/DATA/sanity/fully_trained_ctx_2_net.pth",
+   "/home/johns/Desktop/CognitiveGridworld/main/DATA/experimental/esn_learnability/writeup/results.json (final.canonical_values)"
+  ],
+  "verification": "recomputed from the .pth arrays test_acc_through_training and test_net_joint_DKL_through_training; the XPOOL value read from results.json."
+ },
+ {
+  "id": "R3_trap",
+  "claim": "The joint ESN R3 (goal loss, trained start) is trapped: 0.464 on the harvest, 0.478 on the held-out pool, 30 of 100 cells alive, the truth inside the alive set in 30.25% of episodes, 0.754 inside and 0.359 outside.",
+  "status": "measured",
+  "numbers": {
+   "acc_harvest": 0.464,
+   "acc_pool": 0.4782,
+   "n_alive": 30,
+   "truth_in_alive": 0.3025,
+   "acc_inside": 0.754,
+   "acc_outside": 0.359,
+   "acc_last_ckpt_test_states": 0.469
+  },
+  "episode_set": "harvest 20,000; held-out pool 54,000-59,999 (6,000); test states",
+  "sources": [
+   "/home/johns/Desktop/CognitiveGridworld/main/DATA/sanity/joint_reservoir_ctx_2_net.pth",
+   "/tmp/claude-1002/-home-johns-Desktop-CognitiveGridworld/d2a8859d-af2d-4881-a4e5-84ac9f884f2b/scratchpad/joint_esn/D_critic/pool/u_jesn_1.npy",
+   "scripts/verify_r3.json",
+   "/home/johns/Desktop/CognitiveGridworld/main/DATA/experimental/esn_learnability/writeup/results.json"
+  ],
+  "verification": "alive set, truth-in-alive and pool accuracy recomputed from R3's stored read-out and stored frozen states (scripts/verify_r3.py); the decomposition 0.3025 x 0.754 + 0.6975 x 0.359 = 0.478 reproduces the write-up."
+ },
+ {
+  "id": "R3_rescues_full",
+  "claim": "R3 continued 54k updates: own loss 0.489, start 0 0.627, joint loss 0.678; the joint ESN from scratch with start 0 (R4) 0.615 at 50k; the marginal ESN continued with start 0 0.442.",
+  "status": "measured",
+  "numbers": {
+   "R3_own_54k": 0.48925,
+   "R3_start0_54k": 0.627125,
+   "R3_jointloss_54k": 0.67825,
+   "R4_50k": 0.615125,
+   "R1_start0_54k": 0.44175,
+   "R1_both_marginals_54k": 0.4465
+  },
+  "episode_set": "the runs' 8,000 test-state episodes",
+  "sources": [
+   "/home/johns/Desktop/CognitiveGridworld/main/DATA/experimental/interaction_bounds/analyses/joint_esn_extension/runs/{orig_trained,orig_zero,joint_trained,joint_scratch_zero,marginal_zero,marginal_both_trained}/log.jsonl"
+  ],
+  "verification": "last line of each log read in this session."
+ },
+ {
+  "id": "readout_only_rescues",
+  "claim": "Read-out retrained from zero on R3's frozen states (20k updates): own loss 0.454 (63 frozen rows, 31 alive); entropy bonus beta 0.003/0.01/0.03/0.1: 0.472/0.545/0.585/0.603 (alive 38/77/97/100; frozen 51/3/0/0); beta 0.3/1.0: 0.273/0.230; annealed 0.574; start 0: 0.525 (still rising); fresh random start per episode: 0.338; goal CE with Adam 0.491, sign-SGD 0.372 (100 alive), SGD 0.329 (27 alive); joint loss from zero 0.609.",
+  "status": "measured (one seed each; pool-overfitted lower bounds)",
+  "numbers": {
+   "own": 0.4537,
+   "ent0.003": 0.4723,
+   "ent0.01": 0.5448,
+   "ent0.03": 0.5845,
+   "ent0.1": 0.6032,
+   "ent0.3": 0.2728,
+   "ent1.0": 0.2297,
+   "anneal": 0.574,
+   "start0": 0.5247,
+   "fresh_start": 0.338,
+   "gce_adam_10k": 0.4908,
+   "gce_signsgd_10k": 0.3718,
+   "gce_sgd": 0.3292,
+   "joint_loss_from_zero": 0.6088
+  },
+  "episode_set": "held-out pool episodes 54,000-59,999 (6,000); training on the 54,000-episode pool",
+  "sources": [
+   "/home/johns/Desktop/CognitiveGridworld/main/DATA/experimental/esn_learnability/readout_only/*/metrics.json",
+   "/home/johns/Desktop/CognitiveGridworld/main/DATA/experimental/esn_learnability/readout_only/earlier_joint_vs_own_curves.json"
+  ],
+  "verification": "last metrics record of each run read in this session."
+ },
+ {
+  "id": "entropy_full_runs",
+  "claim": "Full joint ESN from scratch with an entropy bonus beta = 0.03: 0.610 at 20,000 updates, 0.618 at 22,500, 0.616 at 24,500 (100 alive cells, 0 frozen rows), still running to 50,000; its paired beta = 0 control 0.4145 at 10,000 (42 alive). Full marginal ESN with the same bonus: 0.419 at 20,000, 0.421 at 24,000.",
+  "status": "measured (running; single seed)",
+  "numbers": {
+   "joint_ent_20k": 0.609875,
+   "joint_ent_22500": 0.618375,
+   "joint_ent_23000": 0.61175,
+   "joint_ctrl_10k": 0.4145,
+   "marginal_ent_20k": 0.419125,
+   "marginal_ent_23000": 0.427,
+   "joint_ent_latest_update": 24500,
+   "joint_ent_latest_acc": 0.616,
+   "marginal_ent_latest_update": 24000,
+   "marginal_ent_latest_acc": 0.421375
+  },
+  "episode_set": "the runs' 8,000 test-state episodes",
+  "sources": [
+   "/home/johns/Desktop/CognitiveGridworld/main/DATA/experimental/esn_learnability/full_esn_entropy/{joint_native_ent0.03,joint_native,marginal_native_ent0.03}/log.jsonl",
+   "/home/johns/Desktop/CognitiveGridworld/main/DATA/experimental/esn_learnability/full_esn_entropy/continued/{joint_native_ent0.03,marginal_native_ent0.03}/log.jsonl"
+  ],
+  "verification": "log lines read on 28 Oct 2026 (latest at finalisation); the continued runs were not touched."
+ },
+ {
+  "id": "memoryless_nets",
+  "claim": "Memoryless per-step networks (ESN read-in, linear read-out, summed, no reservoir), 25k updates: joint output with own loss 0.687, joint loss 0.713, goal CE 0.670; marginal output depth 1: 0.438 (still rising), depth 2: 0.570. The goal-loss joint net excludes 52 cells by update 10 and recovers without a shared start.",
+  "status": "measured (one seed; lower bounds)",
+  "numbers": {
+   "j2_own": 0.6868,
+   "j1_joint": 0.7125,
+   "jg_goalCE": 0.6698,
+   "m1": 0.4381,
+   "m2": 0.57,
+   "refs_naive": 0.4496,
+   "refs_stepwise": 0.6149,
+   "refs_bayes": 0.7748
+  },
+  "episode_set": "8,000 held-out episodes of the runs",
+  "sources": [
+   "/home/johns/Desktop/CognitiveGridworld/main/DATA/experimental/esn_learnability/no_reservoir/e2e_d1_s0/{j1,j2,jg,m1}.json",
+   "/home/johns/Desktop/CognitiveGridworld/main/DATA/experimental/esn_learnability/writeup/results.json (final.check1.learning_order: m2)"
+  ],
+  "verification": "final fields read; m2 from the write-up's results.json (its run file lives in the scratchpad)."
+ },
+ {
+  "id": "shared_joint_readouts",
+  "claim": "A shared linear joint read-out fitted on fresh environments scores 0.500 on R1's state and 0.576 on R3's state on all 20,000 harvest episodes (own read-outs 0.437 and 0.464; naive 0.451). This refutes \"no shared linear read-out of the ESN's state beats 0.436\" for the joint format.",
+  "status": "measured",
+  "numbers": {
+   "R1_state_joint_ridge": 0.4995,
+   "R3_state_joint_ridge": 0.57625,
+   "own_R1": 0.43685,
+   "own_R3": 0.46375,
+   "naive": 0.45075
+  },
+  "episode_set": "all 20,000 harvest episodes; fits on 30,000 (R1) / 60,000 (R3) fresh-environment pool episodes",
+  "sources": [
+   "/home/johns/Desktop/CognitiveGridworld/main/DATA/experimental/fig1/scratch_code_2026-10-18_19/joint_esn/D_critic/results_pool_ridge_esn_2.json",
+   "/home/johns/Desktop/CognitiveGridworld/main/DATA/experimental/fig1/scratch_code_2026-10-18_19/joint_esn/D_critic/results_pool_ridge_jesn_1.json"
+  ],
+  "verification": "json read in this session."
+ },
+ {
+  "id": "per_environment_readouts",
+  "claim": "Fitted within one environment, a linear marginal read-out of R1's state reaches 0.668 +- 0.011 (naive 0.444 +- 0.024, Bayes 0.774 on the same streams), a linear joint read-out 0.725, an MLP read-out 0.738; R1's own read-out (0.437) is the best known shared marginal read-out of its state.",
+  "status": "measured",
+  "numbers": {
+   "within_env_lin20": 0.668,
+   "within_env_lin100": 0.725,
+   "within_env_mlp20": 0.738,
+   "within_env_naive": 0.444,
+   "within_env_joint": 0.774,
+   "cross_env_lin": 0.213,
+   "cross_env_mlp": 0.235
+  },
+  "episode_set": "within: 20 environments x 100 cells x 200 streams, 2-fold CV over streams; cross: 20,000 harvest episodes, environment split",
+  "sources": [
+   "/home/johns/Desktop/CognitiveGridworld/main/DATA/experimental/fig1/scratch_code_2026-10-18_19/alias_B/analyze_within_out.txt",
+   "/home/johns/Desktop/CognitiveGridworld/main/DATA/experimental/fig1/scratch_code_2026-10-18_19/alias_B/within_env_K20_log.txt",
+   "/home/johns/Desktop/CognitiveGridworld/main/DATA/experimental/fig1/scratch_code_2026-10-18_19/alias_B/analyze_cross_out.txt"
+  ],
+  "verification": "read; note the episode sets differ between the within- and cross-environment fits (Appendix D). Reviewer note (main session, 28 Oct): the cross-environment decoders (0.213 linear, 0.235 MLP) also score the trained LSTM's state at only 0.40-0.44 against its own 0.77, so they bound nothing and are not evidence that shared marginal read-outs of R1's state cannot beat 0.437; that question is untested."
+ },
+ {
+  "id": "routing_ladder",
+  "claim": "Trained per-step read-outs on frozen states (own loss, marginal, summed; fresh environments): on R1's states a 2-hidden-layer read-out reaches 0.668 at 20k (still rising; 1 hidden layer 0.576); on the MLP-rescued ESN's states the same read-out reaches 0.738 within 2k updates (linear 0.634).",
+  "status": "measured (still rising)",
+  "numbers": {
+   "R1_h2_u_20k": 0.6676,
+   "R1_h1_u_20k": 0.5761,
+   "E55_h2_u_2k": 0.7377,
+   "E55_lin_u_2k": 0.6339
+  },
+  "episode_set": "16,000 fresh held-out episodes (seed 4242)",
+  "sources": [
+   "/tmp/claude-1002/-home-johns-Desktop-CognitiveGridworld/d2a8859d-af2d-4881-a4e5-84ac9f884f2b/scratchpad/learn4/run_esn/results.json (3_readouts, 3_readout_summary_convergence_and_paired)",
+   "/tmp/claude-1002/-home-johns-Desktop-CognitiveGridworld/d2a8859d-af2d-4881-a4e5-84ac9f884f2b/scratchpad/learn4/run_esn/out/ro_A.json, ro_B_final.json, ro_C.json"
+  ],
+  "verification": "read; scratchpad files (session only); the write-up's results.json carries the same numbers."
+ },
+ {
+  "id": "mlp_rescued_esn",
+  "claim": "The MLP-rescued ESN scores 0.755 (XPOOL) and 0.746 (mean of its last ten tests; 0.749 last, 0.756 best); truncated to its last w inputs it tracks the window rule 0.008-0.024 below it at every w and matches w = 5-6 intact; reset every step it scores 0.598.",
+  "status": "measured (one run)",
+  "numbers": {
+   "xpool": 0.755,
+   "last10_mean": 0.7458,
+   "last": 0.749,
+   "best": 0.756,
+   "memoryless": 0.598,
+   "trainable_params": 8046020
+  },
+  "episode_set": "XPOOL 12,000; its 8,000 test states",
+  "sources": [
+   "/home/johns/Desktop/CognitiveGridworld/main/DATA/experimental/esn_mlp_rescue/esn_5in_5out_matched_ctx_2_net.pth",
+   "/home/johns/Desktop/CognitiveGridworld/main/DATA/experimental/esn_mlp_rescue/README.txt",
+   "/tmp/claude-1002/-home-johns-Desktop-CognitiveGridworld/d2a8859d-af2d-4881-a4e5-84ac9f884f2b/scratchpad/learn4/run_esn/results.json (1g_truncation_vs_windowed_bayes, 1g_memoryless)"
+  ],
+  "verification": "accuracy arrays and parameter count recomputed from the .pth; truncation numbers read."
+ },
+ {
+  "id": "reservoir_memory",
+  "claim": "Forget-gate time constants tau = 1/(1 - mean forget gate): R1 median 2.02 steps, 99th percentile 2.52, no unit above 3; MLP-rescued ESN 53 units above 5 (7 above 10); trained LSTM 111 above 5 (38 above 10).",
+  "status": "measured",
+  "numbers": {
+   "R1_tau_median": 2.016,
+   "R1_tau_q99": 2.518,
+   "R1_units_gt3": 0,
+   "E55_units_gt5": 53,
+   "E55_units_gt10": 7,
+   "LSTM_units_gt5": 111
+  },
+  "episode_set": "forward passes of the stored networks on pool episodes",
+  "sources": [
+   "/tmp/claude-1002/-home-johns-Desktop-CognitiveGridworld/d2a8859d-af2d-4881-a4e5-84ac9f884f2b/scratchpad/learn4/run_esn/results.json (1_internals_gates)",
+   "/tmp/claude-1002/-home-johns-Desktop-CognitiveGridworld/d2a8859d-af2d-4881-a4e5-84ac9f884f2b/scratchpad/learn4/run_esn/out/an2_gates_{R1e5,E55,LSTMe5}.json"
+  ],
+  "verification": "read (scratchpad, session only); not recomputed."
+ },
+ {
+  "id": "trained_lstm",
+  "claim": "The trained LSTM scores 0.769 (XPOOL), 0.767 at its last checkpoint, 0.764 over the last ten; in the FF series' setup (loss power 1, 20k updates) 0.753.",
+  "status": "measured",
+  "numbers": {
+   "xpool": 0.769,
+   "last": 0.767,
+   "last10_mean": 0.7639,
+   "ff_setup": 0.7527
+  },
+  "episode_set": "XPOOL; its test states; the FF series' test episodes",
+  "sources": [
+   "/home/johns/Desktop/CognitiveGridworld/main/DATA/sanity/fully_trained_ctx_2_net.pth",
+   "/home/johns/Desktop/CognitiveGridworld/main/DATA/experimental/ff_deep/lstm_p1_lr0.001_rep0_summary.json"
+  ],
+  "verification": "recomputed from the .pth; summary json read."
+ },
+ {
+  "id": "ff_depth_ladder",
+  "claim": "FF (width 1,000, loss power 1, lr 1e-3, 20k updates), mean of the last three checkpoints, rep0/rep1: depth 1 0.488/0.491; 2 0.623/0.624; 3 0.705/0.708; 4 0.733/0.739; 5 0.741/0.744; 6 0.739/0.746; 7 0.742/0.746; 8 0.740/0.742; 9 0.727/0.741.",
+  "status": "measured (two seeds)",
+  "numbers": {
+   "d1": [
+    0.488,
+    0.491
+   ],
+   "d2": [
+    0.623,
+    0.624
+   ],
+   "d3": [
+    0.705,
+    0.708
+   ],
+   "d4": [
+    0.733,
+    0.739
+   ],
+   "d5": [
+    0.741,
+    0.744
+   ],
+   "d6": [
+    0.739,
+    0.746
+   ],
+   "d7": [
+    0.742,
+    0.746
+   ],
+   "d8": [
+    0.74,
+    0.742
+   ],
+   "d9": [
+    0.727,
+    0.741
+   ]
+  },
+  "episode_set": "the FF series' common test episodes (naive 0.450, Bayes 0.766 there)",
+  "sources": [
+   "/home/johns/Desktop/CognitiveGridworld/main/DATA/experimental/ff_deep/d{1..9}_p1_lr0.001_rep{0,1}_summary.json"
+  ],
+  "verification": "acc_last3 read from every summary json."
+ },
+ {
+  "id": "ff_frozen_input_end",
+  "claim": "FF depth 9 with k layers frozen at the input end (k = 1..8): accuracy 0.719, 0.726, 0.694, 0.553, 0.433, 0.368, 0.342, 0.254; final KL divided by that of the trained network of depth 9-k: 1.8, 1.7, 2.8, 9.3, 10.1, 6.0, 2.8, 1.8. Depth 4 with its first layer frozen 0.682, first two 0.528, all three 0.377; one trained layer followed by one frozen layer 0.425 (one trained layer alone 0.488).",
+  "status": "measured (one seed)",
+  "numbers": {
+   "acc_k1_8": [
+    0.719,
+    0.726,
+    0.694,
+    0.553,
+    0.433,
+    0.368,
+    0.342,
+    0.254
+   ],
+   "kl_ratio_to_depth_9_minus_k": [
+    1.8,
+    1.7,
+    2.8,
+    9.3,
+    10.1,
+    6.0,
+    2.8,
+    1.8
+   ],
+   "d4_frz1": 0.682,
+   "d4_frz12": 0.528,
+   "d4_frz123": 0.377,
+   "d2_frz1": 0.425
+  },
+  "episode_set": "the FF series' test episodes",
+  "sources": [
+   "/home/johns/Desktop/CognitiveGridworld/main/DATA/experimental/ff_deep/d9_frozen/*_curve.npz",
+   "/home/johns/Desktop/CognitiveGridworld/main/DATA/experimental/ff_deep/d4_variants/*_summary.json",
+   "/home/johns/Desktop/CognitiveGridworld/main/DATA/experimental/ff_deep/widths/d2_p1_lr0.001_frz1_rep0_summary.json"
+  ],
+  "verification": "KL ratios recomputed from the curve files (kl_joint, mean of the last three checkpoints)."
+ },
+ {
+  "id": "ff_frozen_output_end",
+  "claim": "FF depth 9 with k layers frozen at the output end (k = 1..7): 0.738, 0.742, 0.746, 0.730, 0.707, 0.627, 0.502; KL ratio to the trained depth 9-k: 1.03, 1.05, 0.91, 1.48, 1.96, 2.25, 1.70. So after six or more trained layers up to three frozen layers cost about as much as removing them.",
+  "status": "measured (one seed)",
+  "numbers": {
+   "acc_k1_7": [
+    0.738,
+    0.742,
+    0.746,
+    0.73,
+    0.707,
+    0.627,
+    0.502
+   ],
+   "kl_ratio": [
+    1.03,
+    1.05,
+    0.91,
+    1.48,
+    1.96,
+    2.25,
+    1.7
+   ]
+  },
+  "episode_set": "the FF series' test episodes",
+  "sources": [
+   "/home/johns/Desktop/CognitiveGridworld/main/DATA/experimental/ff_deep/d9_frozen/*_curve.npz"
+  ],
+  "verification": "recomputed from the curve files."
+ },
+ {
+  "id": "ff_deep30_and_widths",
+  "claim": "Depth 30 with 29 frozen layers at width 4,000: 0.100 (chance); 0.476 with skip connections. Depth-1 width series: 0.354 (100) to 0.593 (20,000; 0.630 at 40k). Reservoirs (frozen LSTM) at widths 100-10,000: 0.294-0.429; trained LSTMs of 50/200/400/600 units: 0.445/0.690/0.737/0.752.",
+  "status": "measured (one seed each)",
+  "numbers": {
+   "d30_frozen": 0.1,
+   "d30_frozen_res": 0.476,
+   "d1_N20000": 0.593,
+   "d1_N20000_40k": 0.63,
+   "reservoir_N10000": 0.427,
+   "lstm_N50": 0.445,
+   "lstm_N200": 0.69,
+   "lstm_N400": 0.737,
+   "lstm_N600": 0.752
+  },
+  "episode_set": "the FF series' test episodes",
+  "sources": [
+   "/home/johns/Desktop/CognitiveGridworld/main/DATA/experimental/ff_deep/widths/*_summary.json",
+   "/home/johns/Desktop/CognitiveGridworld/main/DATA/experimental/ff_deep/widths/continued/*_summary.json"
+  ],
+  "verification": "read."
+ },
+ {
+  "id": "learning_speed",
+  "claim": "Same setup (batch 8,000, Adam 1e-3, power 1, same test episodes): deep FFs (depths 5-8) reach accuracy 0.60 and KL 0.5 at 1,000-1,500 updates, the LSTM at 2,000; the LSTM reaches accuracy 0.70/0.73 and KL 0.15/0.07 at 3,500/6,000 and 4,000/8,000, the FFs at 4,000-6,500/7,000-12,000 and 5,000-9,000/15,500-19,500 (depth 4 never reaches KL 0.07); final KL 0.027 (LSTM) against 0.057-0.097 (FFs). Confounded by all-step supervision.",
+  "status": "measured (checkpoints every 500 updates)",
+  "numbers": {
+   "lstm_first_acc60_70_73": [
+    2000,
+    3500,
+    6000
+   ],
+   "lstm_first_kl05_015_007": [
+    2000,
+    4000,
+    8000
+   ],
+   "lstm_final_kl": 0.027,
+   "ff_d5_8_first_acc60": [
+    1000,
+    1500
+   ],
+   "ff_final_kl_range": [
+    0.057,
+    0.097
+   ]
+  },
+  "episode_set": "the FF series' test episodes",
+  "sources": [
+   "/home/johns/Desktop/CognitiveGridworld/main/DATA/experimental/ff_deep/d{4..9}_p1_lr0.001_rep{0,1}_curve.npz",
+   "/home/johns/Desktop/CognitiveGridworld/main/DATA/experimental/ff_deep/lstm_p1_lr0.001_rep0_curve.npz"
+  ],
+  "verification": "recomputed from the curve files (Appendix F)."
+ },
+ {
+  "id": "procrustes_shape",
+  "claim": "After a generalised orthogonal Procrustes alignment of the environments' centred cell-mean grids, the environment-specific shape share of the hidden state at T = 30 is 5.4% for the trained LSTM (u; 8.0% for c) against 19.9% for the ESN (20.0% for c); unaligned (coordinate) shares 46% against 87%.",
+  "status": "measured",
+  "numbers": {
+   "trained_u_aligned_T30": 0.054,
+   "echo_u_aligned_T30": 0.199,
+   "trained_c_aligned": 0.08,
+   "echo_c_aligned": 0.2,
+   "trained_u_coord": 0.459,
+   "echo_u_coord": 0.875
+  },
+  "episode_set": "39 environments x 100 cells (cell means of 50 streams), alias scan",
+  "sources": [
+   "/home/johns/Desktop/CognitiveGridworld/main/DATA/experimental/fig1c_compression/figdata/round6_hidden/gpa_steps.json",
+   "main/REPLICATION/claude_plots/plot_fig1c_lowdim_story.py (_gpa_share)"
+  ],
+  "verification": "json read; definition read from the plotting script."
+ },
+ {
+  "id": "count_linear_family",
+  "claim": "Rules linear in the counts, fitted per environment: cross-entropy fit 0.497-0.503, accuracy fit 0.515-0.539 (naive 0.449). No ceiling of this family is known; the word \"upper bound\" does not apply.",
+  "status": "measured",
+  "numbers": {
+   "CE_fit": [
+    0.497,
+    0.503
+   ],
+   "accuracy_fit": [
+    0.515,
+    0.539
+   ],
+   "naive": 0.449
+  },
+  "episode_set": "all 1,275 test environments, exact tables, T = 30",
+  "sources": [
+   "/home/johns/Desktop/CognitiveGridworld/main/DATA/experimental/ff_deep/extrapolation/naive_vs_linear/README.txt",
+   "/home/johns/Desktop/CognitiveGridworld/main/DATA/experimental/ff_deep/extrapolation/naive_vs_linear/recheck_new/c7_delta.json (linP)"
+  ],
+  "verification": "read."
+ },
+ {
+  "id": "refuted_claims",
+  "claim": "Refuted or retracted and not used: the trap is naive Bayes; Adam's sign step writes the trap (plain SGD excludes 73 cells, sign-SGD none); a prior shared by the joint and marginal ESNs; no shared linear read-out beats 0.436 (joint read-outs do); FFs learn slowly (only shallow or input-frozen ones); the trained LSTM integrates with fewer bits (ill-posed); the per-episode random start rescues (0.338 at sigma = 1); step-1 deepening scales with the shared channel; the memory-nonlinearity trade-off limits R1; the MLP-rescued ESN is per-step computation only.",
+  "status": "refuted (measured)",
+  "numbers": {
+   "sgd_excluded": 73,
+   "signsgd_excluded": 0,
+   "fresh_start_readout": 0.338,
+   "joint_readout_R1_state": 0.5
+  },
+  "episode_set": "see the individual entries",
+  "sources": [
+   "/home/johns/Desktop/CognitiveGridworld/main/DATA/experimental/esn_learnability/writeup/answer.md (3.2 What failed)",
+   "/home/johns/Desktop/CognitiveGridworld/main/DATA/experimental/esn_learnability/readout_only/{E6_r3_gce_sgd_lr3e-2,D6_r3_gce_signsgd,B2f_epr_fresh_own_adam}/metrics.json",
+   "/home/johns/Desktop/CognitiveGridworld/main/DATA/experimental/esn_learnability/naive_null_check/refs_*.json"
+  ],
+  "verification": "the SGD / sign-SGD / fresh-start numbers were read from their metrics.json; the rest from the verified write-up."
+ },
+ {
+  "id": "predictions",
+  "claim": "Open problems with predicted outcomes (Appendix E): FF with joint output needs less depth and shows a transient trap under the goal loss; an LSTM trained on the last step only keeps its accuracy and loses part of its KL advantage if supervision density is the cause; after-only rescue 0.67-0.70, before-only <= 0.69; the MLP-rescued ESN's deficit grows with T while the trained LSTM's does not; the entropy run ends between 0.62 and 0.68.",
+  "status": "hypothesis",
+  "numbers": {},
+  "episode_set": "n/a",
+  "sources": [
+   "theory.tex Appendix E"
+  ],
+  "verification": "untested."
+ }
+]

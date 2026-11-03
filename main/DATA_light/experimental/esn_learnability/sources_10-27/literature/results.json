@@ -1,0 +1,77 @@
+{
+ "definitions": {
+  "adam_ratio": "|mhat_n/sqrt(vhat_n)| of PyTorch-style Adam (beta1=0.9, beta2=0.999, eps=0) after n steps of a given gradient sequence",
+  "fisher_errors": "max abs difference between autograd gradient of goalCE wrt joint logits and the closed forms (float64, 64 episodes x 100 cells, random logits and targets)",
+  "symkl_curvature": "second derivative in the logit difference x of KL(p||q)+KL(q||p), two classes, p uniform",
+  "default_init": "PyTorch nn.LSTM default U(-1/sqrt(H),1/sqrt(H)), H=1000"
+ },
+ "adam_ratio": {
+  "kingma_ba_sparse_case": 3.1622776601683773,
+  "cauchy_schwarz_supremum_cA": 7.270291799999694,
+  "constant_gradient": 0.9999999999999994,
+  "single_spike_after_zeros_n20000": 3.1622776569418565,
+  "growing_by_beta2_over_beta1": {
+   "50": 1.6142644685575562,
+   "100": 2.2433640863285187,
+   "200": 3.096078930047392,
+   "400": 4.175288095748708,
+   "1000": 5.7811602003495945,
+   "2000": 6.76098077841759,
+   "5000": 7.245818385946568,
+   "10000": 7.2701275864417365
+  }
+ },
+ "fisher_errors": {
+  "goalCE_grad_vs_q_minus_pg_qcond": 1.734723475976807e-18,
+  "goalCE_grad_vs_pseudo_target_jointCE_grad": 1.734723475976807e-18,
+  "goal_minus_joint_grad_vs_pg_times_(pcond_minus_qcond)": 2.168404344971009e-18,
+  "max_abs_grad_for_scale": 0.003271672041709252
+ },
+ "symkl_curvature": {
+  "negative_for_abs_x_greater_than": 2.3999999999999995,
+  "min_second_derivative": -0.03691437178152434,
+  "closed_form_match_max_err": 6.389207729746472e-07,
+  "goalCE_min_second_derivative_on_[-8,8]": 0.00033523767075636815
+ },
+ "default_init": {
+  "entry_std": 0.018257418583505537,
+  "combined_gate_bias_std": 0.025819888974716113,
+  "circular_law_radius": 0.5773502691896257
+ },
+ "forgetting_time_steps_1_over_1_minus_sigma": {
+  "drive_+0.17": 2.1853048513203657,
+  "drive_-0.17": 1.8436648165963834,
+  "f_0.5": 2.0
+ },
+ "fp16": {
+  "min_subnormal_2^-24": 5.960464477539063e-08,
+  "zero_threshold_round_to_nearest": 2.9802322387695312e-08,
+  "unscaled_zero_threshold_scale_2^16": 4.547473508864641e-13,
+  "unscaled_zero_threshold_scale_2^18": 1.1368683772161603e-13,
+  "torch_rounding_check": {
+   "5.960e-08": 5.960464477539063e-08,
+   "4.470e-08": 5.960464477539063e-08,
+   "2.980e-08": 0.0,
+   "2.921e-08": 0.0,
+   "3.040e-08": 5.960464477539063e-08
+  }
+ },
+ "safran_shamir_thm4_denominator_(2m)^(4l)": {
+  "m1000_l2": 256000000000000000000000000,
+  "m1000_l3": 4096000000000000000000000000000000000000
+ },
+ "literature_counts": {
+  "entries": 41,
+  "verified_full_text_or_exact_statement": 36,
+  "partial": 5,
+  "urls_checked_http_200": 41
+ },
+ "status_words": {
+  "adam_ratio": "computed",
+  "fisher_errors": "computed",
+  "symkl_curvature": "computed",
+  "default_init": "computed (cited formula)",
+  "fp16": "computed",
+  "literature": "cited"
+ }
+}

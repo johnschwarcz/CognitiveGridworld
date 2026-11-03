@@ -1,0 +1,90 @@
+{
+ "subset_equals_sweep_rows": [
+  24,
+  24
+ ],
+ "engine_trained_25": {
+  "intact_logq_max": 7.62939453125e-06,
+  "flipped_logq_max": 9.507735313718513e-06,
+  "dh_max": 6.556511160438205e-06,
+  "skl_max": 1.2504461595064242e-06,
+  "dh_range": [
+   0.050383590161800385,
+   9.752640724182129
+  ],
+  "sup_k1_equals_actual": 0.0
+ },
+ "engine_trained_1100": {
+  "intact_logq_max": 7.62939453125e-06,
+  "flipped_logq_max": 9.693001217669917e-06,
+  "dh_max": 8.940696716308594e-06,
+  "skl_max": 1.0719187635288563e-05,
+  "dh_range": [
+   0.31439507007598877,
+   51.55009078979492
+  ],
+  "sup_k1_equals_actual": 0.0
+ },
+ "engine_trained_2100": {
+  "intact_logq_max": 7.62939453125e-06,
+  "flipped_logq_max": 1.0844024615153103e-05,
+  "dh_max": 1.1205673217773438e-05,
+  "skl_max": 3.6986846048137068e-06,
+  "dh_range": [
+   0.7233992218971252,
+   22.259559631347656
+  ],
+  "sup_k1_equals_actual": 0.0
+ },
+ "engine_trained_49995": {
+  "intact_logq_max": 3.814697265625e-06,
+  "flipped_logq_max": 6.1806755198290375e-06,
+  "dh_max": 7.3909759521484375e-06,
+  "skl_max": 1.133750548332202e-06,
+  "dh_range": [
+   0.4791627526283264,
+   17.5841007232666
+  ],
+  "sup_k1_equals_actual": 0.0
+ },
+ "engine_echo_49995": {
+  "intact_logq_max": 1.52587890625e-05,
+  "flipped_logq_max": 1.7788795247497546e-05,
+  "dh_max": 1.850724220275879e-05,
+  "skl_max": 4.178474536153942e-06,
+  "dh_range": [
+   0.41959482431411743,
+   20.085285186767578
+  ],
+  "sup_k1_equals_actual": 0.0
+ },
+ "sweep_k1": {
+  "checkpoints": 228,
+  "max_abs": 0.03124237060546875,
+  "min_share_within_1_fp16_ulp": 1.0
+ },
+ "bayes_vs_log_jb": 3.7912844845777727e-06,
+ "naive_vs_log_nb": 6.612335710087791e-06,
+ "exact_vs_brute_force_max": {
+  "bayes": 5.684341886080802e-14,
+  "naive": 7.194245199571014e-14,
+  "adf": 9.237055564881302e-14
+ },
+ "naive_dh_lag_dev_max": 0.0,
+ "naive_sup_minus_actual_max": 0.0,
+ "refs_skl_over_half_dh_max": -0.000118255615234375,
+ "harvest_files_checked": 684,
+ "fp16_envsum_rel_max": 0.0004233337585639095,
+ "net_skl_minus_half_dh_max": 0.0,
+ "net_skl_min": 0.0,
+ "net_sup_k1_minus_actual_envsum_max": 0.0,
+ "class_net_change_mismatches": 0,
+ "classes_vs_harvest": {
+  "files": 684,
+  "max_abs_dh": 1.51805579662323e-05,
+  "max_abs_skl": 6.643666267791559e-06,
+  "units_per_env_ok": true
+ },
+ "refs_classes_vs_refs_max": 9.682634527052869e-06,
+ "acc_jumps_vs_replication_boot_max": 2.4783730623312294e-11
+}

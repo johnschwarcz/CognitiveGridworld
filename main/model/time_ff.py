@@ -52,15 +52,35 @@ class RegeneratedLinear(torch.autograd.Function):
             return dy.to(dtype) @ W, None, None, None
 
 
+class ScaleByGain(torch.autograd.Function):
+    """z * g for a 0-dim fp32 gain g: the product in z's dtype (exactly z at g = 1); the gain's gradient summed in fp32,
+    since an fp16 sum of B x N terms of the loss-scaled gradient overflows."""
+    @staticmethod
+    def forward(ctx, z, g):
+        ctx.save_for_backward(z, g)
+        return z * g.to(z.dtype)
+
+    @staticmethod
+    def backward(ctx, dy):
+        z, g = ctx.saved_tensors
+        acc = torch.promote_types(dy.dtype, torch.float32)                  # fp32 at least (fp64 stays fp64)
+        return dy * g.to(dy.dtype), (dy.to(acc) * z.to(acc)).sum().to(g.dtype).reshape(g.shape)
+
+
 class TimeInjectedFF(torch.nn.Module):
-    def __init__(self, in_dims, n, steps, gain, regenerate, device, seed = 0, shared = False, first_only = False):
+    def __init__(self, in_dims, n, steps, gain, regenerate, device, seed = 0, shared = False, first_only = False,
+                 layer_gains = False):
         """Frozen layers are drawn on `device` in both modes: CPU and CUDA generators give different numbers for one seed.
         shared: one readin for every layer (each layer still gets its own average), 36 N + 20 trainable parameters as a
-        depth-1 FF, instead of one readin per layer (500 N + 20). first_only: input at layer 1 only (one readin)."""
+        depth-1 FF, instead of one readin per layer (500 N + 20). first_only: input at layer 1 only (one readin).
+        layer_gains (ff_layer_gains; John 2026-10-25): one trainable scalar per layer multiplying that layer's input (the
+        readin's output, its bias included), initialised at 1, so the layers' inputs can be weighted differently; with
+        all gains at 1 the net is exactly the one without them (and draws no random numbers, so its init is the same)."""
         super().__init__()
         self.n, self.steps, self.gain, self.regenerate, self.seed = n, steps, gain, regenerate, seed
         self.shared, self.first_only = shared or first_only, first_only
         self.readins = torch.nn.ModuleList([torch.nn.Linear(in_dims, n) for _ in range(1 if self.shared else steps)])   # trainable
+        self.layer_gains = torch.nn.Parameter(torch.ones(steps, device = device)) if layer_gains else None   # trainable
         if not regenerate:                                   # stored, not saved: rebuilt from the seeds on load
             for k in range(1, steps):
                 W, b = frozen_layer(seed, k, n, gain, torch.float32, device)
@@ -81,5 +101,7 @@ class TimeInjectedFF(torch.nn.Module):
                 h = torch.relu(self.frozen(k, h))
                 continue
             z = self.readins[0 if self.shared else k](torch.cat((prefix_means[:, T - 1 - k], Z), -1))
+            if self.layer_gains is not None:
+                z = ScaleByGain.apply(z, self.layer_gains[k])
             h = torch.relu(z if h is None else z + self.frozen(k, h))
         return h
