@@ -9,7 +9,7 @@ whole: rebuild only what one analysis needs.
 |---|---|---|---|
 | code, figures (`main/REPLICATION/figure_bin`, PNG/SVG) | — | git | clone |
 | light: figure-level summary caches | ~96 MB | git, `main/DATA_light/` | `python main/data_tools.py light-restore` |
-| archive: weights, training-run logs, the probe set | ~107 GB | external dataset repo (not uploaded yet) | `python main/data_tools.py fetch '<pattern>'` |
+| archive: weights, training-run logs, the probe set (a 38 GB selection, below) | 38 GB | private Hugging Face dataset `johnschwarcz/cognitive-gridworld-data` | `python main/data_tools.py fetch '<pattern>'` (needs a read token: `export HF_TOKEN=...`, ask John) |
 | caches: everything else in `main/DATA` | ~105 GB | not stored | regenerate (below) |
 
 `main/DATA_MANIFEST.md` summarises every folder of `main/DATA` (size, tier, the modules that mention it).
@@ -72,7 +72,21 @@ reference cache. With `CGW_ROOT` pointing at the copy, it regenerated two caches
 | `through_training/interaction_pcs/trained_49995.npz` | 4e-17 |
 | `through_training/lesions/trained/fixed_49995.npz` | 4e-16 |
 
-## Why the archive is ~107 GB
+## What the archive holds (`archive_selection` in main/data_tools.py; 5,573 files, 38.4 GB)
+
+Weights through training (all 114 checkpoints) are kept only where through-training analyses use them:
+* the Trained RNN and the ESN;
+* the width and loss-power replications: N = 50, 200, 100 × 5 seeds, and loss power 1.
+
+Every other run keeps only its final weights: the joint-loss runs, the MLP and the last-step variants. Only the last
+optimizer state is kept per run. All training logs, the probe set and the other experiments' networks are kept.
+
+Not uploaded, and kept only on John's machine:
+* the very wide networks (`ff_deep/widths`, 28 GB; `lazyrich`, 7 GB);
+* the other runs' intermediate checkpoints (30 GB);
+* older optimizer states.
+
+## Why the full local archive is ~107 GB
 
 | what | size |
 |---|---|

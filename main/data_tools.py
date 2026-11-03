@@ -15,7 +15,8 @@ Commands (run from the repository root with the repo's python, /home/johns/anaco
   python main/data_tools.py manifest        # rewrite DATA_MANIFEST.tsv / .md from main/DATA
   python main/data_tools.py light-build     # refresh main/DATA_light from main/DATA (the curated list)
   python main/data_tools.py light-restore   # copy main/DATA_light into main/DATA (missing files only)
-  python main/data_tools.py upload [glob]   # checkpoints (or files matching glob) -> the archive (needs a write token)
+  python main/data_tools.py stage           # link the archive selection (archive_selection) into main/DATA/_hf_stage
+  python main/data_tools.py upload [glob]   # the staged selection (or files matching glob) -> the archive (write token)
   python main/data_tools.py fetch <glob>    # archive -> main/DATA, e.g. 'experimental/training_dynamics/trained_s*/*'
   python main/data_tools.py trace <name> <script.py> [args]  # run it, record the DATA files it reads / writes
   python main/data_tools.py plan <name>     # minimal rebuild for a traced command: what to fetch, what to run first
@@ -31,7 +32,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA = os.path.join(ROOT, "main", "DATA")
 LIGHT = os.path.join(ROOT, "main", "DATA_light")
 CODE = [os.path.join(ROOT, "main", "REPLICATION"), os.path.join(ROOT, "main", "REPLICATION", "claude_plots")]
-DATA_REPO = os.environ.get("CGW_DATA_REPO", "")               # e.g. "<hf-user>/cognitive-gridworld-data" (dataset)
+DATA_REPO = os.environ.get("CGW_DATA_REPO", "johnschwarcz/cognitive-gridworld-data")               # e.g. "<hf-user>/cognitive-gridworld-data" (dataset)
 LIGHT_CAP = 5_000_000                                          # bytes per file for the named summary caches
 LIGHT_EXTRA = ("experimental/training_dynamics/through_training/chaos/pairs_ratio.npz",
                "experimental/training_dynamics/through_training/flips/ratio/*.npz")
@@ -147,18 +148,108 @@ def light_restore():
     print(f"restored {n} files into {DATA}")
 
 
+# what goes to the archive (John 11-03): weights through training only where analyses use them, final weights elsewhere
+ARCH_TT_RUNS = {"trained_s20261029", "echo_s20261029", "trained_p1_s20261029", "trained_N50_s20261029",
+                "trained_N200_s20261029", *(f"trained_N100_s{s}" for s in range(20261029, 20261034))}
+ARCH_DROP = ("experimental/ff_deep/widths/", "lazyrich/")    # the very wide networks (N = 10,000 / 20,000)
+STAGE = os.path.join(DATA, "_hf_stage")                       # symlink tree of the selection (upload_large_folder)
+
+
+def archive_selection():
+    """the archive files to upload (paths relative to main/DATA): every archive-tier file, except: the dropped
+    folders; in training-run folders outside ARCH_TT_RUNS only the last weight checkpoint (ckpt_ep*_net.pth); in every
+    run folder only the last optimizer state (adam_ep*.pth); plus the runs' top-level logs (<run>.log)"""
+    import csv
+    rows = list(csv.DictReader(open(os.path.join(ROOT, "main", "DATA_MANIFEST.tsv")), delimiter="\t"))
+    last = {}
+    for r in rows:
+        m = re.match(r"(.*_s\d{8})/(ckpt_ep|adam_ep)(\d+)", r["path"])
+        if m:
+            k = (m.group(1), m.group(2))
+            last[k] = max(last.get(k, -1), int(m.group(3)))
+    out = []
+    for r in rows:
+        p = r["path"]
+        if r["tier"] != "archive" and not re.search(r"_s\d{8}\.log$", p):
+            continue
+        if any(p.startswith(d) for d in ARCH_DROP):
+            continue
+        m = re.match(r"(.*_s\d{8})/(ckpt_ep|adam_ep)(\d+)", p)
+        if m:
+            run = os.path.basename(m.group(1))
+            keep_all = m.group(2) == "ckpt_ep" and run in ARCH_TT_RUNS
+            if not keep_all and int(m.group(3)) != last[(m.group(1), m.group(2))]:
+                continue
+        out.append((p, int(r["bytes"])))
+    return out
+
+
+def stage():
+    """main/DATA/_hf_stage: symlinks to the selection at their main/DATA paths"""
+    sel = archive_selection()
+    n = 0
+    for p, _ in sel:
+        dst = os.path.join(STAGE, p)
+        if not os.path.lexists(dst):
+            os.makedirs(os.path.dirname(dst), exist_ok=True)
+            os.symlink(os.path.join(DATA, p), dst)
+            n += 1
+    print(f"selection: {len(sel):,} files, {sum(b for _, b in sel) / 1e9:.1f} GB; {n} new links in {STAGE}")
+
+
 def _repo():
     assert DATA_REPO, "set CGW_DATA_REPO=<hf-user>/<dataset-name> (a Hugging Face dataset repo)"
     return DATA_REPO
 
 
 def upload(pattern=None):
-    """checkpoints (default) or the files matching pattern -> the archive, keeping their main/DATA paths"""
-    from huggingface_hub import HfApi
+    """the archive selection (default) or the archive-tier files matching pattern -> the archive (a private Hugging
+    Face dataset repo) at their main/DATA paths, in commits of <= ~3 GB / 300 files with retries; files already in the
+    repo are skipped, so a rerun resumes"""
+    import time
+    import fnmatch
+    from huggingface_hub import HfApi, CommitOperationAdd
     api = HfApi()
     api.create_repo(_repo(), repo_type="dataset", private=True, exist_ok=True)
-    allow = [pattern] if pattern else ARCHIVE_PATTERNS
-    api.upload_large_folder(repo_id=_repo(), repo_type="dataset", folder_path=DATA, allow_patterns=allow)
+    have = set(api.list_repo_files(_repo(), repo_type="dataset"))
+    sel = archive_selection()
+    if pattern:
+        sel = [(p, b) for p, b in sel if fnmatch.fnmatch(p, pattern)]
+    todo = [(p, b) for p, b in sel if p not in have]
+    batches, cur, size = [], [], 0
+    for p, b in sorted(todo):
+        if cur and (size + b > 3e9 or len(cur) >= 300 or os.path.dirname(p) != os.path.dirname(cur[-1][0])):
+            batches.append(cur)
+            cur, size = [], 0
+        cur.append((p, b))
+        size += b
+    if cur:
+        batches.append(cur)
+    tot = sum(b for _, b in todo)
+    print(f"{len(sel):,} selected, {len(sel) - len(todo):,} already in {_repo()}; uploading {len(todo):,} files "
+          f"({tot / 1e9:.1f} GB) in {len(batches)} commits", flush=True)
+    t0, done = time.time(), 0
+    for i, batch in enumerate(batches):
+        gb = sum(b for _, b in batch) / 1e9
+        for attempt in range(6):
+            try:
+                api.create_commit(repo_id=_repo(), repo_type="dataset", commit_message=f"archive: {os.path.dirname(batch[0][0])} "
+                                  f"({len(batch)} files, {gb:.2f} GB)",
+                                  operations=[CommitOperationAdd(path_in_repo=p, path_or_fileobj=os.path.join(DATA, p))
+                                              for p, _ in batch])
+                break
+            except Exception as e:                                                      # noqa: BLE001
+                print(f"  batch {i + 1} attempt {attempt + 1} failed: {type(e).__name__}: {str(e)[:200]}", flush=True)
+                time.sleep(30 * (attempt + 1))
+        else:
+            print(f"  batch {i + 1} gave up; rerun upload to resume", flush=True)
+            continue
+        done += gb * 1e9
+        el = time.time() - t0
+        print(f"{time.strftime('%H:%M:%S')} {i + 1}/{len(batches)} {os.path.dirname(batch[0][0])}: {gb:.2f} GB; "
+              f"total {done / 1e9:.1f}/{tot / 1e9:.1f} GB, {done / 1e6 / max(el, 1):.0f} MB/s, ETA "
+              f"{(tot - done) / max(done / max(el, 1), 1) / 60:.0f} min", flush=True)
+    print("done", flush=True)
 
 
 def fetch(pattern):
@@ -272,5 +363,5 @@ def plan(name):
 if __name__ == "__main__":
     cmd, *rest = sys.argv[1:] or ["manifest"]
     {"manifest": manifest, "light-build": light_build, "light-restore": light_restore,
-     "upload": lambda: upload(*rest), "fetch": lambda: fetch(*rest), "trace": lambda: trace(*rest),
+     "stage": stage, "upload": lambda: upload(*rest), "fetch": lambda: fetch(*rest), "trace": lambda: trace(*rest),
      "plan": lambda: plan(*rest)}[cmd]()
