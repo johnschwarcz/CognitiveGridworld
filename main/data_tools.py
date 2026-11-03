@@ -41,7 +41,11 @@ CKPT = (".pth", ".pt")
 
 def _files():
     for d, _, fs in os.walk(DATA):
+        if os.path.relpath(d, DATA).split(os.sep)[0] in ("_hf_stage", ".cache"):
+            continue
         for f in fs:
+            if f.startswith("_hf_upload"):
+                continue
             p = os.path.join(d, f)
             if os.path.isfile(p):
                 yield os.path.relpath(p, DATA), os.path.getsize(p)
@@ -152,6 +156,14 @@ def light_restore():
 ARCH_TT_RUNS = {"trained_s20261029", "echo_s20261029", "trained_p1_s20261029", "trained_N50_s20261029",
                 "trained_N200_s20261029", *(f"trained_N100_s{s}" for s in range(20261029, 20261034))}
 ARCH_DROP = ("experimental/ff_deep/widths/", "lazyrich/")    # the very wide networks (N = 10,000 / 20,000)
+# caches worth archiving (John 11-03, "since we have space"): expensive per GB (lesions, memory cuts: ~10-13 GPU-h per
+# GB), the most-used harvest (analysis of the Trained RNN and ESN), and the through-training harvests of the runs whose
+# intermediate weights are not archived (joint-loss runs, MLP); the FF training curves (training records)
+ARCH_CACHES = ("experimental/training_dynamics/through_training/", "experimental/training_dynamics/analysis/trained/",
+               "experimental/training_dynamics/analysis/echo/", "experimental/training_dynamics/analysis/joint_trained/",
+               "experimental/training_dynamics/analysis/joint_echo/", "experimental/training_dynamics/analysis/joint_echo_jl/",
+               "experimental/training_dynamics/analysis/mlp55/", "experimental/ff_deep/")
+ARCH_SKIP = ("experimental/training_dynamics/through_training/chaos/pairs.npz",)   # superseded (old M4 cache)
 STAGE = os.path.join(DATA, "_hf_stage")                       # symlink tree of the selection (upload_large_folder)
 
 
@@ -170,9 +182,10 @@ def archive_selection():
     out = []
     for r in rows:
         p = r["path"]
-        if r["tier"] != "archive" and not re.search(r"_s\d{8}\.log$", p):
+        cache = r["tier"] != "archive" and any(p.startswith(d) for d in ARCH_CACHES)
+        if r["tier"] != "archive" and not cache and not re.search(r"_s\d{8}\.log$", p):
             continue
-        if any(p.startswith(d) for d in ARCH_DROP):
+        if any(p.startswith(d) for d in ARCH_DROP) or p in ARCH_SKIP or p.endswith(".tmp.npz"):
             continue
         m = re.match(r"(.*_s\d{8})/(ckpt_ep|adam_ep)(\d+)", p)
         if m:

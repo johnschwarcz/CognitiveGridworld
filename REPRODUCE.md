@@ -9,7 +9,7 @@ whole: rebuild only what one analysis needs.
 |---|---|---|---|
 | code, figures (`main/REPLICATION/figure_bin`, PNG/SVG) | — | git | clone |
 | light: figure-level summary caches | ~96 MB | git, `main/DATA_light/` | `python main/data_tools.py light-restore` |
-| archive: weights, training-run logs, the probe set (a 38 GB selection, below) | 38 GB | private Hugging Face dataset `johnschwarcz/cognitive-gridworld-data` | `python main/data_tools.py fetch '<pattern>'` (needs a read token: `export HF_TOKEN=...`, ask John) |
+| archive: weights, training-run logs, the probe set, and the costly caches (selection below) | 81 GB | private Hugging Face dataset `johnschwarcz/cognitive-gridworld-data` | `python main/data_tools.py fetch '<pattern>'` (needs a read token: `export HF_TOKEN=...`, ask John) |
 | caches: everything else in `main/DATA` | ~105 GB | not stored | regenerate (below) |
 
 `main/DATA_MANIFEST.md` summarises every folder of `main/DATA` (size, tier, the modules that mention it).
@@ -62,6 +62,18 @@ whole: rebuild only what one analysis needs.
 * Rebuilding all caches takes about a day of GPU time. A single analysis usually needs one run's checkpoints and minutes
   to a couple of hours.
 
+## On a weak machine (CPU only)
+
+* Set `CUDA_VISIBLE_DEVICES=""`. Modules fall back to the CPU (`td_tt_intervene._device`); one harvest
+  (td_tt_flips) requires a GPU.
+* Measured: the interaction-direction harvest takes 10.8 s per checkpoint on 4 CPU threads, using 2.3 GB of RAM. On a
+  GPU it takes 2-3 s. Light forward passes are fine on a CPU.
+* The per-checkpoint analysis harvest (`td_analysis`, ~65 s per checkpoint on a GPU, including a credit-assignment
+  pass) is the step to avoid on a CPU: fetch its archived caches instead.
+* Most figures and summary analyses only read caches: seconds to minutes on a CPU, with 8 GB of RAM enough for the
+  largest (`pairs_v2.npz`, 1.2 GB).
+* `plan <name>` lists what to fetch. Fetch archived caches rather than weights whenever a cache exists.
+
 ## Tested (2026-11-03)
 
 A fresh copy of the repository was given only the inputs `plan` lists: the probe set, one checkpoint and one 26 MB
@@ -72,7 +84,7 @@ reference cache. With `CGW_ROOT` pointing at the copy, it regenerated two caches
 | `through_training/interaction_pcs/trained_49995.npz` | 4e-17 |
 | `through_training/lesions/trained/fixed_49995.npz` | 4e-16 |
 
-## What the archive holds (`archive_selection` in main/data_tools.py; 5,573 files, 38.4 GB)
+## What the archive holds (`archive_selection` in main/data_tools.py; 15,823 files, 81.4 GB)
 
 Weights through training (all 114 checkpoints) are kept only where through-training analyses use them:
 * the Trained RNN and the ESN;
@@ -80,6 +92,17 @@ Weights through training (all 114 checkpoints) are kept only where through-train
 
 Every other run keeps only its final weights: the joint-loss runs, the MLP and the last-step variants. Only the last
 optimizer state is kept per run. All training logs, the probe set and the other experiments' networks are kept.
+
+Caches that are expensive or irreplaceable are archived as well (+43 GB):
+* all through-training analysis caches, `through_training/` (14 GB). Lesion passes and memory cuts cost about
+  10-13 GPU-hours per GB;
+* the per-checkpoint analysis harvest (`analysis/`) of the Trained RNN and the ESN (9.5 GB), the inputs most modules
+  read;
+* the same harvest for the joint-loss and MLP runs (19 GB). Their intermediate weights are not archived, so these are
+  their only through-training record;
+* the FF training curves (1.1 GB).
+
+The width runs' harvests (13 GB) are not archived. They take about 3 GPU-hours to regenerate from the archived weights.
 
 Not uploaded, and kept only on John's machine:
 * the very wide networks (`ff_deep/widths`, 28 GB; `lazyrich`, 7 GB);
