@@ -62,8 +62,11 @@ class Env_model_manager(Env_model_data_manager):
         self.model.ctx_inds = self.model.ctx_inds.long()
         self.model.goal_ind = self.model.goal_ind.long()
 
+    def uses_micro_batches(self):
+        return self.mode == "SANITY" and bool(self.micro_batch) and self.micro_batch < self.batch_num
+
     def forward_backward(self):
-        micro = self.mode == "SANITY" and bool(self.micro_batch) and self.micro_batch < self.batch_num
+        micro = self.uses_micro_batches()
         with torch.amp.autocast('cuda', enabled = self.device_type != "cpu"):
             if self.test_set:
                 with torch.no_grad():

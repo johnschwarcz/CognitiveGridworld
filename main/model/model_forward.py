@@ -22,10 +22,14 @@ class _SharedCastMatmul(torch.autograd.Function):
         return (g @ Jh).float(), grad_J, None      # grad_J laid out like J, so accumulating it stays contiguous
 
 class Model_forward(Model_backward):
-    def forward_pass(self):
+    def forward_compute(self):
+        """forward_pass without its outputs: everything stays on the GPU"""
         self.MC_to_interactions()
         self.MC_to_classification()
         self.MC_to_pobs()
+
+    def forward_pass(self):
+        self.forward_compute()
         return tnp([self.classifier_belief_flat, self.classifier_goal_belief, self.input_flat, self.update_flat], 'np')
 
     def default_interactions(self):
@@ -143,14 +147,16 @@ class Model_forward(Model_backward):
         finally:
             self.__dict__.update(saved)
 
-    def forward_pass_micro(self, train):
+    def forward_pass_micro(self, train, outputs = True):
         """A SANITY episode in slices of micro_batch episodes, so memory follows the slice, not the batch. Training: each
         slice's SANITY_loss, weighted by its share of the batch, is backpropagated, so the gradients accumulate to the
         whole batch's; then one optimizer step. Exact at loss power 1, where the loss is a plain mean. At other powers
         DKL_loss's detached minimum is the slice's: near-exact (<= 0.5% of the gradient weight at initialization with
         slices of 100, ~1e-17 once trained; measured 2026-10-13). The logged loss sums the slices' shares.
-        returns: forward_pass()'s outputs, then (training) backward_pass()'s"""
+        returns: forward_pass()'s outputs, then (training) backward_pass()'s; outputs = False (training only): the same
+        slices, losses and step, with nothing gathered or copied to the CPU, and returns None"""
         assert self.mode == "SANITY" and not self.learn_embeddings, "micro_batch supports mode SANITY without learned embeddings"
+        assert train or outputs, "outputs = False steps the optimizer: training only"
         self.MC_to_interactions()
         if train:
             self.classifier_optim.zero_grad()
@@ -159,14 +165,20 @@ class Model_forward(Model_backward):
         for start in range(0, B, self.micro_batch):
             with self.batch_slice(slice(start, min(start + self.micro_batch, B))) as share:
                 self.MC_to_classification()
-                part = [self.classifier_belief_flat, self.classifier_goal_belief.detach(), self.classifier_goal_selection, self.ACC]
-                if keep:
-                    part += [self.input_flat, self.update_flat]
+                if outputs:
+                    part = [self.classifier_belief_flat, self.classifier_goal_belief.detach(), self.classifier_goal_selection, self.ACC]
+                    if keep:
+                        part += [self.input_flat, self.update_flat]
+                    parts.append(part)
                 if train:
                     self.SANITY_loss()
                     self.scaler.scale(self.classifier_loss * share).backward()
                     loss = loss + self.classifier_loss.detach() * share
-                parts.append(part)
+        if not outputs:
+            self.MC_to_pobs()
+            self.scaler.step(self.classifier_optim)
+            self.scaler.update()
+            return
         whole = [torch.cat(x) for x in zip(*parts)]
         self.classifier_belief_flat, self.classifier_goal_belief, self.classifier_goal_selection, self.ACC = whole[:4]
         self.classifier_belief = self.classifier_belief_flat

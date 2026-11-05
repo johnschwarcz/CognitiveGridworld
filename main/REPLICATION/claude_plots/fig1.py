@@ -26,10 +26,10 @@ gradflow_analysis' own builders where they can (a figure series also needs gradf
     cache/supplementary_harvest.npz                             supplementary_plotter2's harvest: (d-f)
 
 Figure caches, built on first use in main/DATA/experimental/fig1/ (or in the directory $FIG1_CACHE
-names). A cold build takes about 9-10 min on the CPU, 7-8 of them in fr_correlation's root-finds, and peaks at
+names). A cold build takes about 9-10 min on the CPU, 7-8 of them in sp.fr_correlation's root-finds, and peaks at
 ~4.6 GB of RAM; a warm render takes ~5 s and ~1.3 GB:
     beliefs.npz                            the networks' beliefs at t = 1 and T = 30 (collect_beliefs)
-    fr_corr_implied.npz                    the FR-correctness correlation through training (fr_correlation)
+    fr_corr_implied.npz                    the FR-correctness correlation through training (sp.fr_correlation)
     band_energy_r.npz                      each band's activity energy against entanglement (band_energy_r)
     alias_traj_1434_2000_02_58_93_97.npz   (c)'s trajectories, 2000 streams per cell (alias_trajectories)
 A rebuild reproduces fr_corr_implied.npz and band_energy_r.npz byte for byte, and beliefs.npz too when torch runs on
@@ -190,7 +190,7 @@ def training_series():
     """(d-f)'s data, from supplementary_plotter2's harvest (no smoothing, as there): per network the final-step
     accuracy of every test batch through training, the FR-correctness correlation and the participation-ratio gain;
     the Optimal and Naive bounds; the testing episode where the trained network first passes the Naive bound"""
-    Hc, corr = np.load(sp.HARVEST_CACHE), fr_correlation()
+    Hc, corr = np.load(sp.HARVEST_CACHE), sp.fr_correlation(FR_IMPLIED)
     out = {}
     for lab, tag in (("Trained", "tr_"), ("Echo", "ec_")):
         A = sp.Bunch({k[len(tag):]: Hc[k] for k in Hc.files if k.startswith(tag)})
@@ -200,32 +200,6 @@ def training_series():
     naive = np.mean([out[l]["naive"] for l in out])
     crossing = int(np.flatnonzero(out["Trained"]["acc"] > naive)[0]) + 1                 # testing episode (x = index + 1)
     return out, joint, naive, crossing
-
-
-def fr_correlation():
-    """the point-biserial r between final-step FR and final-step correctness in each test batch, through training.
-    The run logged only the logistic fit of correctness on FR (env_model_data_manager: sklearn's LogisticRegression,
-    with intercept, lightly L2-penalised); its fit reproduces cov(FR, correct) (exactly at the maximum-likelihood fit,
-    to 5e-5 here), so r follows from the logged slope and accuracy, given FR's distribution (a task property: the
-    harvest's final-step FR, pooled). Error against a batch's exact r: about 1% of |r| (SD), below its sampling noise"""
-    if os.path.exists(FR_IMPLIED):
-        f = np.load(FR_IMPLIED)
-        return {"Trained": f["trained"], "Echo": f["echo"]}
-    from scipy.optimize import brentq
-    Hc = np.load(sp.HARVEST_CACHE)
-    sig = lambda z: 1 / (1 + np.exp(-z))
-    out = {}
-    for lab, tag in (("Trained", "tr_"), ("Echo", "ec_")):
-        fr = Hc[tag + "fr"].astype(np.float64).ravel()
-        acc = np.clip(Hc[tag + "test_acc_through_training"][:, -1].astype(np.float64), 1e-3, 1 - 1e-3)
-        r = []
-        for b, p in zip(Hc[tag + "test_SII_coef_through_training"].astype(np.float64), acc):
-            a = brentq(lambda a: sig(a + b * fr).mean() - p, -30, 30)               # intercept from the accuracy
-            r.append(np.cov(fr, sig(a + b * fr))[0, 1] / (fr.std() * np.sqrt(p * (1 - p))))
-        out[lab] = np.array(r)
-    os.makedirs(CACHE_DIR, exist_ok=True)
-    np.savez(FR_IMPLIED, trained=out["Trained"], echo=out["Echo"])
-    return out
 
 
 def learning_numbers(T):

@@ -23,6 +23,8 @@ from main.utils import fig_path, apply_fig_style
 # Set False to re-collect; True re-plots from the cached harvest in seconds.
 LOAD_HARVEST = True
 HARVEST_CACHE = os.path.join(_ROOT, 'main', 'DATA', 'cache', 'supplementary_harvest.npz')
+FR_IMPLIED = os.path.join(os.environ.get('FIG1_CACHE') or os.path.join(_ROOT, 'main', 'DATA', 'experimental', 'fig1'),
+                          'fr_corr_implied.npz')
 
 F64, I64 = np.float64, np.int64
 
@@ -40,6 +42,10 @@ PLOT_CFG = {
     "figsize_E": (10.4, 3.3),    # 1 x 3 Calibration by tier, C inside the panels
     "early_epochs": 800,
     "smooth_w": 1,
+    "acc_smooth_w": 11,     # accuracy on the x-axis of the vs-accuracy panels, as Figure 1 (e)
+    "acc_xlim": (.05, .82),
+    "test_batch": 8000,     # trajectories per test
+    "diag_title_fs": 14,    # the diagnostics panels: their longest title on one line
     "line_width": 2.5,
     "title_fs": 18,
     "math_fs": 17,          # Subtitle font size
@@ -245,6 +251,8 @@ CAL_AGENTS = {"Joint": ("Expert", "Exact", "joint", "trained"),
               "Echo State": ("Baseline", "Trained", "net", "echo")}
 
 AGENT_COLORS = {"Trained": "#1f77b4", "Echo": "#ff7f0e", "Joint": "#2ca02c", "Naive": "#d62728"}
+BOUND_COLORS = {"Joint": "k", "Naive": "0.5"}    # the accuracy bounds, as Figure 1 draws them
+CORR_LABEL = "Correlation over the batch"   # one test's trajectories
 # Marker outline in the calibration scatters: the two networks are outlined in red, the
 # two exact Bayesian agents in black, so a glance separates measured from computed.
 NET_EDGE, EXACT_EDGE = "#d62728", "k"
@@ -284,6 +292,32 @@ def pr_gain(agent):
     """
     return (pr_stat(agent.test_model_update_dim_through_training)
             - (pr_stat(agent.test_model_input_dim_through_training) + 1e-12))
+
+
+def fr_correlation(cache=FR_IMPLIED):
+    """the point-biserial r between final-step FR and final-step correctness in each test batch, through training.
+    The run logged only the logistic fit of correctness on FR (env_model_data_manager: sklearn's LogisticRegression,
+    with intercept, lightly L2-penalised); its fit reproduces cov(FR, correct) (exactly at the maximum-likelihood fit,
+    to 5e-5 here), so r follows from the logged slope and accuracy, given FR's distribution (a task property: the
+    harvest's final-step FR, pooled). Error against a batch's exact r: about 1% of |r| (SD), below its sampling noise"""
+    if os.path.exists(cache):
+        f = np.load(cache)
+        return {"Trained": f["trained"], "Echo": f["echo"]}
+    from scipy.optimize import brentq
+    Hc = np.load(HARVEST_CACHE)
+    sig = lambda z: 1 / (1 + np.exp(-z))
+    out = {}
+    for lab, tag in (("Trained", "tr_"), ("Echo", "ec_")):
+        fr = Hc[tag + "fr"].astype(np.float64).ravel()
+        acc = np.clip(Hc[tag + "test_acc_through_training"][:, -1].astype(np.float64), 1e-3, 1 - 1e-3)
+        r = []
+        for b, p in zip(Hc[tag + "test_SII_coef_through_training"].astype(np.float64), acc):
+            a = brentq(lambda a: sig(a + b * fr).mean() - p, -30, 30)               # intercept from the accuracy
+            r.append(np.cov(fr, sig(a + b * fr))[0, 1] / (fr.std() * np.sqrt(p * (1 - p))))
+        out[lab] = np.array(r)
+    os.makedirs(os.path.dirname(cache), exist_ok=True)
+    np.savez(cache, trained=out["Trained"], echo=out["Echo"])
+    return out
 
 
 def approx_lik(b, eps=1e-99):
@@ -536,6 +570,22 @@ def collect_or_load(cfg, prm, cache=None, load=None):
 # Plotting Functions
 # ═══════════════════════════════════════════════════════════════════
 
+def _plot_r_vs_acc(ax, agent, name):
+    """The FR correlation against accuracy, as Figure 1 (e): each test's single-batch accuracy
+    faint, and over it the same r against smoothed accuracy, so test noise does not scribble
+    along x."""
+    acc, c = agent.test_acc_through_training[:, -1], AGENT_COLORS[name]
+    ax.plot(acc, agent.fr_r, c=c, lw=.5, alpha=.35, zorder=2)
+    ax.plot(_smooth(acc, PLOT_CFG["acc_smooth_w"]), agent.fr_r, c=c, lw=1, zorder=3)
+
+
+def _plot_r_vs_pr(ax, agent, name):
+    """The FR correlation against PR(RNN) -- both internal, so this asks whether they move
+    together without accuracy as the intermediary."""
+    ax.plot(_smooth(pr_gain(agent), PLOT_CFG["smooth_w"]), _smooth(agent.fr_r, PLOT_CFG["smooth_w"]),
+            c=AGENT_COLORS[name], lw=1, zorder=3)
+
+
 def plot_diagnostics_full(axes, agent, name):
     """All testing episodes: accuracy and FR correlation against episode, then the FR
     correlation against accuracy and against the recurrent state's dimensionality."""
@@ -544,72 +594,78 @@ def plot_diagnostics_full(axes, agent, name):
     # 1. Final Step Accuracy
     x, y = ex(agent.test_acc_through_training[:, -1])
     axes[0].plot(x, y, c=AGENT_COLORS[name], label=name, zorder=3)
-    baseline_color = AGENT_COLORS["Joint"] if name == "Trained" else AGENT_COLORS["Naive"]
-    baseline_label = "Joint" if name == "Trained" else "Naive"
-    acc = float(np.mean(agent.joint_acc)) if name == "Trained" else float(np.mean(agent.naive_acc))
-    axes[0].axhline(acc, c=baseline_color, ls="--", label=baseline_label, zorder=5)
 
     # 2. Correlation(FR, Acc.)
-    x, y = ex(agent.test_SII_coef_through_training)
+    x, y = ex(agent.fr_r)
     axes[1].plot(x, y, c=AGENT_COLORS[name], zorder=3)
-    axes[1].axhline(y=0, c='k', alpha=0.5)
 
-    # 3. FR correlation against accuracy
-    x_acc = _smooth(agent.test_acc_through_training[:, -1], PLOT_CFG["smooth_w"])
-    y_sii = _smooth(agent.test_SII_coef_through_training, PLOT_CFG["smooth_w"])
-    n = min(len(x_acc), len(y_sii))
-    axes[2].plot(x_acc[:n], y_sii[:n], c=AGENT_COLORS[name], zorder=3)
-    axes[2].axhline(y=0, c='k', alpha=0.5)
-
-    # 4. FR correlation against PR(RNN) -- both internal, so this asks whether they move
-    # together without accuracy as the intermediary
-    y_pr = _smooth(pr_gain(agent), PLOT_CFG["smooth_w"])
-    m = min(len(y_pr), len(y_sii))
-    axes[3].plot(y_pr[:m], y_sii[:m], c=AGENT_COLORS[name], zorder=3)
-    axes[3].axhline(y=0, c='k', alpha=0.5)
+    # 3. and 4. FR correlation against accuracy and against PR(RNN)
+    _plot_r_vs_acc(axes[2], agent, name)
+    _plot_r_vs_pr(axes[3], agent, name)
+    for ax in axes[1:]:
+        ax.axhline(y=0, c='k', alpha=0.5)
 
 
 def plot_diagnostics_early(axes, agent, name):
-    """2 x 3 over the first PLOT_CFG['early_epochs'] episodes, where the FR correlation
-    emerges. Top row: accuracy in full (so the early window has context), then accuracy
-    and the RNN participation ratio across that window. Bottom row: the FR correlation
-    over the same window, then that correlation against each quantity plotted above it,
-    so a column reads as one pairing."""
+    """2 x 3. Top row: accuracy, the FR correlation and the PR gain over the first
+    PLOT_CFG['early_epochs'] episodes, where the FR correlation emerges. Bottom row, all
+    testing episodes: accuracy, then the FR correlation against
+    accuracy and against the PR gain."""
     lim = PLOT_CFG["early_epochs"]
     def ex(y, l=lim): return _ep_xy(_smooth(y, PLOT_CFG["smooth_w"]), l)
-    def cut(y): return _smooth(y, PLOT_CFG["smooth_w"])[:lim]
     c = AGENT_COLORS[name]
 
-    # (0,0) Final Step Accuracy -- full range, with the early window marked
-    x, y = ex(agent.test_acc_through_training[:, -1], None)
-    axes[0, 0].plot(x, y, c=c, label=name, zorder=3)
-    baseline_color = AGENT_COLORS["Joint"] if name == "Trained" else AGENT_COLORS["Naive"]
-    baseline_label = "Joint" if name == "Trained" else "Naive"
-    acc = float(np.mean(agent.joint_acc)) if name == "Trained" else float(np.mean(agent.naive_acc))
-    axes[0, 0].axhline(acc, c=baseline_color, ls="--", label=baseline_label, zorder=5)
-    axes[0, 0].axvline(lim, c='0.4', ls=':', lw=1.5, zorder=2)
-
-    # (0,1) Accuracy, early window
+    # (0,0) Accuracy, early window
     x, y = ex(agent.test_acc_through_training[:, -1])
+    axes[0, 0].plot(x, y, c=c, zorder=3)
+
+    # (0,1) Correlation(FR, Acc.), early window
+    x, y = ex(agent.fr_r)
     axes[0, 1].plot(x, y, c=c, zorder=3)
+    axes[0, 1].axhline(y=0, c='k', alpha=0.5)
 
     # (0,2) PR(RNN) - PR(read-in), early window: the dimensionality the update ADDS
     x, y = ex(pr_gain(agent))
     axes[0, 2].plot(x, y, c=c, zorder=3)
     axes[0, 2].axhline(y=0, c='k', alpha=0.5)
 
-    # (1,0) Correlation(FR, Acc.), early window
-    x, y = ex(agent.test_SII_coef_through_training)
-    axes[1, 0].plot(x, y, c=c, zorder=3)
+    # (1,0) Final Step Accuracy -- full range
+    x, y = ex(agent.test_acc_through_training[:, -1], None)
+    axes[1, 0].plot(x, y, c=c, label=name, zorder=3)
 
-    y_sii = cut(agent.test_SII_coef_through_training)
-    # (1,1) and (1,2): the same correlation against each panel above it
-    for j, q in enumerate((agent.test_acc_through_training[:, -1], pr_gain(agent))):
-        v = cut(q)
-        n = min(len(v), len(y_sii))
-        axes[1, j + 1].plot(v[:n], y_sii[:n], c=c, zorder=3)
-    for j in range(3):
+    # (1,1) and (1,2): the correlation against accuracy and the PR gain, all testing episodes
+    _plot_r_vs_acc(axes[1, 1], agent, name)
+    _plot_r_vs_pr(axes[1, 2], agent, name)
+    for j in (1, 2):
         axes[1, j].axhline(y=0, c='k', alpha=0.5)
+
+
+def mark_bounds(agents, y_axes=(), x_axes=()):
+    """Joint and Naive accuracy, each dashed and named on its line, as Figure 1 (d-f):
+    y_axes carry accuracy on y, x_axes on x."""
+    bounds = {lab: float(np.mean([np.mean(a[key]) for a in agents]))
+              for lab, key in (("Joint", "joint_acc"), ("Naive", "naive_acc"))}
+    for lab, v in bounds.items():
+        c = BOUND_COLORS[lab]
+        for ax in y_axes:
+            ax.axhline(v, c=c, ls='--', lw=1.2, zorder=1)
+            ax.annotate(lab, (1, v), xycoords=ax.get_yaxis_transform(), xytext=(-3, 2),
+                        textcoords="offset points", color=c, ha="right", va="bottom")
+        for ax in x_axes:
+            ax.axvline(v, c=c, ls='--', lw=1.2, zorder=1)
+            ax.annotate(lab, (v, .04), xycoords=ax.get_xaxis_transform(), color=c, va="bottom",
+                        xytext=(3 if lab == "Naive" else -3, 0), textcoords="offset points",
+                        ha="left" if lab == "Naive" else "right")
+    for ax in x_axes:
+        ax.set_xlim(*PLOT_CFG["acc_xlim"])
+
+
+def note_counts(fig, agent, y=-.005):
+    """The data behind a diagnostics figure, under its lower right corner."""
+    fig.text(.995, y, f"r of FR and correctness across the {PLOT_CFG['test_batch']:,} trajectories of each "
+             "test, implied by its logistic fit; "
+             f"1 run per network, {len(agent.fr_r):,} tests", ha="right", va="top",
+             fontsize=PLOT_CFG["tick_fs"], color="0.3")
 
 
 def _equalize_row(axes, ylabels, tight=0.013, pad=0.004):
@@ -656,7 +712,7 @@ def _share_groups(axes, ylabels):
 
 def _finalize_row(axes, titles, ylabels, xlabels):
     for i, ax in enumerate(axes):
-        ax.set_title(titles[i], pad=15)
+        ax.set_title(titles[i], pad=15, fontsize=PLOT_CFG["diag_title_fs"])
         ax.set_ylabel("" if i and ylabels[i] == ylabels[i - 1] else ylabels[i])
         ax.set_xlabel(xlabels[i])
         ax.spines[['top', 'right']].set_visible(False)
@@ -665,39 +721,66 @@ def _finalize_row(axes, titles, ylabels, xlabels):
     _share_groups(axes, ylabels)
     axes[0].legend(loc='lower right', frameon=False, ncols=2)
     plt.tight_layout(w_pad=0.5)
-    _equalize_row(axes, ylabels)
+    _equalize_row(axes, ylabels, pad=.02)
 
 
 def finalize_layout_full(axes):
     _finalize_row(axes,
-        ["Final Step Accuracy", "Correlation(FR, Acc.)", "Correlation vs. Acc.",
-         r"Correlation vs. PR(RNN) $-$ PR(read-in)"],
-        ["Accuracy", "r (Correlation)", "r (Correlation)", "r (Correlation)"],
-        ["Testing Episode", "Testing Episode", "Accuracy", r"PR(RNN) $-$ PR(read-in)"])
+        ["Final step accuracy", "FR-accuracy correlation", "Corr. vs. avg. accuracy",
+         "Corr. vs. PR(recurrent)"],
+        ["Accuracy (average over the batch)", CORR_LABEL, CORR_LABEL, CORR_LABEL],
+        ["Testing episode", "Testing episode", "Test accuracy", r"PR(RNN) $-$ PR(read-in)"])
+
+
+def _match_ylim(axes):
+    lo = min(a.get_ylim()[0] for a in axes)
+    hi = max(a.get_ylim()[1] for a in axes)
+    for a in axes:
+        a.set_ylim(lo, hi)
+
+
+def _align_columns(axes, pad=.02, right=.995):
+    """One grid for a (rows, cols) array of panels: every column gets a single left edge
+    and width, each gutter as wide as its column's widest y-axis needs."""
+    fig = axes[0, 0].get_figure()
+    fig.canvas.draw()
+    r = fig.canvas.get_renderer()
+    inv = fig.transFigure.inverted()
+    gutter = [max(a.get_position().x0 - a.yaxis.get_tightbbox(r).transformed(inv).x0 for a in col) + pad
+              for col in axes.T]
+    w = (right - sum(gutter)) / axes.shape[1]
+    x = 0
+    for g, col in zip(gutter, axes.T):
+        x += g
+        for a in col:
+            p_ = a.get_position()
+            a.set_position([x, p_.y0, w, p_.height])
+        x += w
 
 
 def finalize_layout_early(axes):
-    """axes is (2, 3). Each row is finished independently: the rows carry different
-    quantities, so they group and equalize separately."""
+    """axes is (2, 3). The rows share one column grid, every panel carrying its own y-axis,
+    with a blank strip under each row for panel letters. Accuracy and r keep one scale
+    across the rows."""
     PR = r"PR(RNN) $-$ PR(read-in)"
-    rows = [(["Final Step Acc.", "Early Final Step Acc.", PR],
-             ["Accuracy", "Accuracy", PR],
-             ["Testing Episode"] * 3),
-            (["Correlation(FR, Acc.)", "Correlation vs. Acc.", "Correlation vs. " + PR],
-             ["r (Correlation)"] * 3,
-             ["Testing Episode", "Accuracy", PR])]
+    rows = [(["Early final step acc.", "FR-accuracy correlation", "PR(recurrent)"],
+             ["Accuracy (average over the batch)", CORR_LABEL, PR],
+             ["Testing episode"] * 3),
+            (["Full final step acc.", "Corr. vs. avg. accuracy", "Corr. vs. PR(recurrent)"],
+             ["Accuracy (average over the batch)", CORR_LABEL, CORR_LABEL],
+             ["Testing episode", "Test accuracy", PR])]
     for r, (titles, ylabels, xlabels) in enumerate(rows):
         for i, ax in enumerate(axes[r]):
-            ax.set_title(titles[i], pad=15)
-            ax.set_ylabel("" if i and ylabels[i] == ylabels[i - 1] else ylabels[i])
+            ax.set_title(titles[i], pad=15, fontsize=PLOT_CFG["diag_title_fs"])
+            ax.set_ylabel(ylabels[i])
             ax.set_xlabel(xlabels[i])
             ax.spines[['top', 'right']].set_visible(False)
             ax.grid(True, ls='--', alpha=0.3)
-        _share_groups(axes[r], ylabels)
-    axes[0, 0].legend(loc='lower right', frameon=False, ncols=2)
-    plt.tight_layout(w_pad=0.5, h_pad=2.2)
-    for r, (_, ylabels, _) in enumerate(rows):
-        _equalize_row(axes[r], ylabels)
+    _match_ylim([axes[0, 0], axes[1, 0]])
+    _match_ylim([axes[0, 1], axes[1, 1], axes[1, 2]])
+    axes[1, 0].legend(loc='lower right', frameon=False, ncols=2)
+    plt.tight_layout(w_pad=0.5, h_pad=4.5)
+    _align_columns(axes)
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -1458,18 +1541,24 @@ if __name__ == "__main__":
     # 1. Prepare Data -- one agent resident at a time, then cached to HARVEST_CACHE
     trained, echo = collect_or_load(CFG, DYN_PARAMS)
     data_tr, data_ec = episode_xcorr(trained), episode_xcorr(echo)
+    corr = fr_correlation()
+    trained["fr_r"], echo["fr_r"] = corr["Trained"], corr["Echo"]
 
     # 2. Figure A1: Diagnostics over all testing episodes
     figA1, axesA1 = plt.subplots(1, 4, figsize=PLOT_CFG["figsize_A"])
     plot_diagnostics_full(axesA1, trained, "Trained")
     plot_diagnostics_full(axesA1, echo, "Echo")
+    mark_bounds((trained, echo), y_axes=axesA1[:1], x_axes=axesA1[2:3])
     finalize_layout_full(axesA1)
+    note_counts(figA1, trained)
 
     # 2b. Figure A2: Diagnostics over early learning only
     figA2, axesA2 = plt.subplots(2, 3, figsize=PLOT_CFG["figsize_A_early"], squeeze=False)
     plot_diagnostics_early(axesA2, trained, "Trained")
     plot_diagnostics_early(axesA2, echo, "Echo")
+    mark_bounds((trained, echo), y_axes=(axesA2[0, 0], axesA2[1, 0]), x_axes=(axesA2[1, 1],))
     finalize_layout_early(axesA2)
+    note_counts(figA2, trained, y=-.05)      # below the strip left for panel letters
 
     # 2c. Figure E: the one calibration figure -- tiers as panels, C as colour, and the
     # regret that explains the trend. CAL_TIER_STYLE picks what is drawn; the kernel,

@@ -34,7 +34,8 @@ class Bayes_inference(Plotters):
 
         return self.postprocess_belief(p_x, dist_flat, naive)
 
-    def gpu_forward_inference(self, L, naive = False):
+    def gpu_belief(self, L, naive = False):
+        """the belief at every step as a GPU tensor: forward_inference's gpu_inference path, before anything leaves the GPU"""
         B, T, R, C = self.batch_num, self.step_num, self.realization_num, self.ctx_num
         Lt = torch.as_tensor(L, device = self.device)
         ot = torch.as_tensor(self.obs_flat, device = self.device).to(Lt.dtype)
@@ -48,12 +49,12 @@ class Bayes_inference(Plotters):
         dist = e / e.sum(-1, keepdim = True)
 
         if naive:
-            belief = dist
-        else:
-            belief = torch.stack([dist.reshape(B, T, R**c, R, R**(C - 1 - c)).sum((2, 4)) for c in range(C)], dim = 2)
+            return dist
+        return torch.stack([dist.reshape(B, T, R**c, R, R**(C - 1 - c)).sum((2, 4)) for c in range(C)], dim = 2)
 
+    def gpu_forward_inference(self, L, naive = False):
         p_x = None 
-        belief = belief.cpu().numpy()
+        belief = self.gpu_belief(L, naive).cpu().numpy()
         est, goal_belief, acc, TP, mse = self.get_goal_performance(belief)
         return p_x, belief, goal_belief, est, acc, TP, mse
 

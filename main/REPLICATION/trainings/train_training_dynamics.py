@@ -29,7 +29,7 @@ before, 1 after) and mlp19 (1 before, 9 after). Queued later the same day for th
 the trained LSTM's fast phase after naive Bayes the onset of memory use; does trained recurrence avoid the joint-output
 trap): joint_trained (the trained LSTM with the joint read-out and the goal-only loss), trained_lastT (the trained LSTM
 with the loss at T = 30 only: the same symmetric KL, batch-minimum shift and power on the last step), trained_N50 /
-trained_N100 / trained_N200 (the trained LSTM at widths 50, 100, 200). Added 11-01 (John: "yea let's start that
+trained_N100 / trained_N200 (the trained LSTM at widths 50, 100, 200). Added 11-04 (John: "start a joint output goal supervision on one GPU and joint output joint supervision on the other"): joint_trained_N100 / joint_trained_N100_jl, the width-100 trained LSTM (trained_N100's config, seed 20261029) with the joint read-out, on the goal-only loss (as joint_trained) and on the joint loss (as joint_echo_jl): the parameter-matched (92,700 vs the joint ESNs' 118,100) Trained arm of plot_matched_params_new.py's right panel. joint_trained_N200 / joint_trained_N200_jl: the same at width 200 (11-04, John: "yes please"; 345,300 parameters). joint_trained_N50 / joint_trained_N50_jl: the same at width 50 (11-04; 26,400 parameters). echo_N500, joint_echo_N500 / _jl and joint_echo_N2000 / _jl (11-04): the ESN at widths 500 and 2000, echo_N200 and joint_echo_N200 / _jl at width 200, and the trained LSTM at widths 150 and 500 (trained_N150, joint_trained_N150 / _jl, and the same with N500), and the ESN at width 10000 (joint_echo_N10000 / _jl; batch 2,000 and lr 1e-3 as the paper's Echo N = 10k, train_sanity_reps.py, on the wide path, micro-batches of 250, deduplicating fp16 frozen LSTM, to fit beside other runs); width 2000 in micro-batches of 1000 for memory, as train_esn_widths.py (the joint loss and the recorder handle slices; its test episodes keep no activations, so no input or update spectra there). Added 11-01 (John: "yea let's start that
 now"): joint_trained_jl (the trained LSTM with the joint read-out on joint_echo_jl's joint loss: the empty cell of
 plot_matched_params_new.py's right panel, trained network x joint output x full supervision).
 Added for the queued runs (John 10-29: "make sure that you know what you want to record from the others' training"):
@@ -148,14 +148,14 @@ class Recorder:
         if self.extra and getattr(m, "output_joint", False):
             with torch.no_grad():
                 lq = m._jl_logq.float()                                              # (B, T, 100), r_0-major
-                cv = torch.as_tensor(np.asarray(env.ctx_vals), device=lq.device).long()
+                cv = torch.as_tensor(np.asarray(env.ctx_vals), device=lq.device).long()[-lq.shape[0]:]   # micro_batch: the last slice
                 true = cv[:, 0] * env.realization_num + cv[:, 1]
                 W, b = m.classifier_readout.weight, m.classifier_readout.bias
                 st = m.classifier_optim.state
                 vW = st[W]["exp_avg_sq"].float().mean(1) if W in st else torch.full((W.shape[0],), float("nan"))
                 vb = st[b]["exp_avg_sq"].float() if b in st else torch.full((b.shape[0],), float("nan"))
                 R_ = env.realization_num
-                gi = torch.as_tensor(np.asarray(env.goal_ind), device=lq.device).long()
+                gi = torch.as_tensor(np.asarray(env.goal_ind), device=lq.device).long()[-lq.shape[0]:]
                 Q = lq[:, [0, -1]].exp().reshape(len(true), 2, R_, R_)              # (B, 2, r_0, r_1)
                 qg = torch.where((gi == 0)[:, None], Q[torch.arange(len(true)), :, cv[:, 0], :].sum(-1),
                                  Q[torch.arange(len(true)), :, :, cv[:, 1]].sum(-1))   # the goal's marginal (B, 2)
@@ -192,6 +192,9 @@ class Recorder:
             rec["SII_score"] = rec["SII_coef"] = np.float32(np.nan)
         with torch.no_grad():
             for k, T in (("update_dim", m.update_flat), ("input_dim", m.input_flat)):
+                if T.numel() < m.hid_dim:                                          # micro_batch: no test activations kept
+                    rec[k], rec[k + "_finite"] = np.full(1, np.nan, np.float32), np.bool_(False)
+                    continue
                 X_ = T.reshape(-1, m.hid_dim).float()
                 X_ = X_ - X_.mean(0, keepdim=True)
                 C = (X_.T @ X_ / (X_.shape[0] - 1)).double().cpu().numpy()       # eigenvalues on the CPU: cusolver
@@ -252,10 +255,46 @@ NETS = {"trained": dict(reservoir=False), "echo": dict(reservoir=True),
         "mlp19": dict(reservoir=True, readin_depth=1, readout_depth=9),
         "joint_trained": dict(reservoir=False, output_joint=True, gpu_inference=True),
         "joint_trained_jl": dict(reservoir=False, output_joint=True, gpu_inference=True),
+        "joint_trained_N100": dict(reservoir=False, output_joint=True, gpu_inference=True, hid_dim=100),
+        "joint_trained_N100_jl": dict(reservoir=False, output_joint=True, gpu_inference=True, hid_dim=100),
+        "joint_trained_N200": dict(reservoir=False, output_joint=True, gpu_inference=True, hid_dim=200),
+        "joint_trained_N200_jl": dict(reservoir=False, output_joint=True, gpu_inference=True, hid_dim=200),
+        "joint_trained_N50": dict(reservoir=False, output_joint=True, gpu_inference=True, hid_dim=50),
+        "joint_trained_N50_jl": dict(reservoir=False, output_joint=True, gpu_inference=True, hid_dim=50),
+        "joint_echo_N10000": dict(reservoir=True, output_joint=True, gpu_inference=True, hid_dim=10000, batch_num=2000, micro_batch=250,
+                                  reservoir_dedup=True, reservoir_fp16=True),
+        "joint_echo_N10000_jl": dict(reservoir=True, output_joint=True, gpu_inference=True, hid_dim=10000, batch_num=2000, micro_batch=250,
+                                     reservoir_dedup=True, reservoir_fp16=True),
+        "trained_N300": dict(reservoir=False, gpu_inference=True, hid_dim=300),
+        "joint_trained_N300": dict(reservoir=False, output_joint=True, gpu_inference=True, hid_dim=300),
+        "joint_trained_N300_jl": dict(reservoir=False, output_joint=True, gpu_inference=True, hid_dim=300),
+        "trained_N400": dict(reservoir=False, gpu_inference=True, hid_dim=400),
+        "joint_trained_N400": dict(reservoir=False, output_joint=True, gpu_inference=True, hid_dim=400),
+        "joint_trained_N400_jl": dict(reservoir=False, output_joint=True, gpu_inference=True, hid_dim=400),
+        "trained_N500": dict(reservoir=False, gpu_inference=True, hid_dim=500),
+        "joint_trained_N500": dict(reservoir=False, output_joint=True, gpu_inference=True, hid_dim=500),
+        "joint_trained_N500_jl": dict(reservoir=False, output_joint=True, gpu_inference=True, hid_dim=500),
+        "trained_N150": dict(reservoir=False, gpu_inference=True, hid_dim=150),
+        "joint_trained_N150": dict(reservoir=False, output_joint=True, gpu_inference=True, hid_dim=150),
+        "joint_trained_N150_jl": dict(reservoir=False, output_joint=True, gpu_inference=True, hid_dim=150),
+        "echo_N200": dict(reservoir=True, gpu_inference=True, hid_dim=200),
+        "joint_echo_N200": dict(reservoir=True, output_joint=True, gpu_inference=True, hid_dim=200),
+        "joint_echo_N200_jl": dict(reservoir=True, output_joint=True, gpu_inference=True, hid_dim=200),
+        "echo_N500": dict(reservoir=True, gpu_inference=True, hid_dim=500),
+        "joint_echo_N500": dict(reservoir=True, output_joint=True, gpu_inference=True, hid_dim=500),
+        "joint_echo_N500_jl": dict(reservoir=True, output_joint=True, gpu_inference=True, hid_dim=500),
+        "joint_echo_N2000": dict(reservoir=True, output_joint=True, gpu_inference=True, hid_dim=2000, micro_batch=1000),
+        "joint_echo_N2000_jl": dict(reservoir=True, output_joint=True, gpu_inference=True, hid_dim=2000, micro_batch=1000),
         "trained_lastT": dict(reservoir=False),
         "trained_N50": dict(reservoir=False, hid_dim=50), "trained_N100": dict(reservoir=False, hid_dim=100),
         "trained_N200": dict(reservoir=False, hid_dim=200),
         "trained_lastT_p1": dict(reservoir=False), "trained_p1": dict(reservoir=False)}
+
+
+LEAN = ("joint_echo_N500", "joint_echo_N2000", "joint_echo_N2000_jl",           # the one switch: Lean + LeanRecorder (11-04)
+        "echo_N200", "joint_echo_N200", "joint_echo_N200_jl", "trained_N150", "joint_trained_N150", "joint_trained_N150_jl",
+        "trained_N300", "joint_trained_N300", "joint_trained_N300_jl", "trained_N400", "joint_trained_N400", "joint_trained_N400_jl",
+        "trained_N500", "joint_trained_N500", "joint_trained_N500_jl", "joint_echo_N10000", "joint_echo_N10000_jl")
 
 
 def joint_log_posterior(env):
@@ -279,8 +318,11 @@ def _logits_to_belief(self, logits):
 
 def _joint_loss(self, eps=1e-8, power=0.5):
     """replaces SANITY_loss: KL(P_opt || Q_model) over the 100 cells, mean over episodes and steps (run_variant.py)"""
-    logp = self._jl_logp
-    self.classifier_loss = (logp.exp() * (logp - self._jl_logq)).sum(-1).mean()
+    logq = self._jl_logq
+    n, s = logq.shape[0], self._jl_pos                                            # micro_batch: this slice's episodes, in order
+    logp = self._jl_logp[s:s + n]
+    self._jl_pos = (s + n) % self._jl_logp.shape[0]
+    self.classifier_loss = (logp.exp() * (logp - logq)).sum(-1).mean()
 
 
 class JointAgent(CognitiveGridworld):
@@ -298,11 +340,110 @@ class JointAgent(CognitiveGridworld):
                 m.SANITY_loss = types.MethodType(_joint_loss, m)
             m._jl_patched = True
         if self.joint_loss:
-            m._jl_logp = joint_log_posterior(self)
+            m._jl_logp, m._jl_pos = joint_log_posterior(self), 0
 
 
 class JointLossAgent(JointAgent):
     joint_loss = True
+
+
+class LeanRecorder(Recorder):
+    """the lean runs' recorder (John 11-04: "we just want their through training accuracies and final episode weights"): every
+    test's accuracies in test_*.npz, the first weights (the figures count parameters from them), rolling weights and Adam
+    state every 5,000 episodes (ckpt_latest_net.pth, adam_latest.pth), no per-update logs, spectra or checkpoint series. It
+    reads the run and changes nothing in it."""
+    def __call__(self, env):
+        if not env.test_set:
+            return {}
+        e, m = env.e, env.model
+        self.test.append({"episode": e, "acc": np.asarray(env.test_accs[env.test_e - 1], np.float32),
+                          "joint_acc": np.asarray(env.joint_acc, np.float64).mean(0).astype(np.float32),
+                          "naive_acc": np.asarray(env.naive_acc, np.float64).mean(0).astype(np.float32)})
+        if e % 5000 == 0:
+            save = {"K": env.all_K, "Q": env.all_Q, "model_K": tnp(m.all_K, "np"), "model_Q": tnp(m.all_Q, "np"),
+                    "weights": {k: v.detach().cpu() for k, v in m.state_dict().items()}, "episode": e}
+            path = os.path.join(self.out, "ckpt_ep00000_net.pth" if e == 0 else "ckpt_latest_net.pth")
+            torch.save(save, path + ".tmp")
+            os.replace(path + ".tmp", path)
+            path = os.path.join(self.out, "adam_latest.pth")
+            torch.save({"optim": m.classifier_optim.state_dict(), "scaler": m.scaler.state_dict(), "episode": e}, path + ".tmp")
+            os.replace(path + ".tmp", path)
+        if e % 1000 == 0:
+            self._flush()
+            with open(os.path.join(self.out, "progress.log"), "a") as f:
+                f.write(f"{time.strftime('%H:%M:%S')} ep {e} test acc T {float(np.asarray(env.model_acc).mean(0)[-1]):.4f} "
+                        f"elapsed {(time.time() - self.t0) / 60:.1f} min\n")
+        return {}
+
+
+class Lean:
+    """the same training with less work around it (John 11-04: only what keeps a fair comparison). Every episode, test
+    schedule, batch and update stays: the environment's draws and the forward pass, with its sampling, are untouched. On
+    training episodes the belief and outputs stay on the GPU (the whole-batch path still reads back its gradient norms and
+    loss) and Bayes computes only what the loss uses: the goal marginal, kept on the GPU (the joint loss builds its own
+    target). Test episodes run the ordinary code, without keeping activations. What a training episode no longer computes
+    is set to None, on the environment (UNSET) and on the model (MODEL_UNSET), so a read gets None, not the last test's
+    values: most uses then raise, though numpy turns None into NaN. The training logs are NaN from the start, not zeros.
+    check_lean.py compares this with the ordinary path; rerun it after any change here or in the code it calls."""
+    UNSET = ("joint_px", "joint_belief", "joint_goal_belief", "joint_est", "joint_acc", "joint_TP", "joint_mse",
+             "naive_px", "naive_belief", "naive_goal_belief", "naive_est", "naive_acc", "naive_TP", "naive_mse",
+             "SII", "agent_beliefs", "mse_diff", "model_belief", "model_goal_belief", "model_input_flat", "model_update_flat",
+             "model_est", "model_acc", "model_TP", "model_mse", "classifier_loss", "generator_loss", "readin_grad", "readout_grad",
+             "agent_ests", "agent_accs", "agent_TPs", "agent_mses")
+    MODEL_UNSET = ("classifier_belief", "classifier_belief_flat", "classifier_goal_belief", "classifier_goal_selection", "ACC",
+                   "classifier_loss", "_jl_logq")
+
+    def prep_data_manager(self):
+        super().prep_data_manager()
+        for k in ("train_accs", "train_TPs", "train_mses", "classifier_loss_log", "generator_loss_log", "readin_grad_log",
+                  "readout_grad_log"):
+            getattr(self, k)[:] = np.nan
+
+    def prep_model(self):
+        super().prep_model()
+        m = self.model
+        m.keep_test_activations = lambda: False
+        if not self.test_set:                                                      # an empty stand-in for micro_batch's slicing:
+            m.joint_goal_belief = torch.empty(self.batch_num, 0, device=self.device) if self.joint_loss else self._goal_belief
+
+    def run_inference(self):
+        if self.test_set:
+            return super().run_inference()
+        for k in self.UNSET:
+            setattr(self, k, None)
+        if not self.joint_loss:
+            belief = self.gpu_belief(self.joint_likelihood)
+            gi = torch.as_tensor(self.goal_ind, device=self.device).long()
+            self._goal_belief = belief[torch.arange(self.batch_num, device=self.device), :, gi].float()
+
+    def forward_backward(self):
+        if self.test_set:
+            return super().forward_backward()
+        m = self.model
+        with torch.amp.autocast('cuda', enabled=self.device_type != "cpu"):
+            if self.uses_micro_batches():
+                m.forward_pass_micro(train=True, outputs=False)
+            else:
+                m.forward_compute()
+                m.backward_pass()
+        for k in self.MODEL_UNSET:
+            setattr(m, k, None)
+
+    def log_model(self):
+        if self.test_set:
+            super().log_model()
+
+
+class LeanAgent(Lean, CognitiveGridworld):
+    joint_loss = False
+
+
+class LeanJointAgent(Lean, JointAgent):
+    pass
+
+
+class LeanJointLossAgent(Lean, JointLossAgent):
+    pass
 
 
 def _last_step_loss(self, eps=1e-8, power=0.5):
@@ -360,17 +501,33 @@ def main(net, gpu, episodes=50000, seed=SEED):
         cfg["batch_num"] = int(os.environ["TD_BATCH"])
     if os.environ.get("TD_GPU_BAYES"):                                            # recorded in run.json's cfg
         cfg["gpu_inference"] = True
-    json.dump({"run": run, "net": net, "seed": seed, "cfg": cfg, "schedule": sched,
-               "source": "retrain_other_models.train_e5_variants, + checkpoints and per-update logs",
+    lean = net in LEAN or os.environ.get("TD_LEAN") == "1"                        # TD_LEAN: check_lean.py only; "0" forces full
+    lean = lean and os.environ.get("TD_LEAN") != "0"
+    json.dump({"run": run, "net": net, "seed": seed, "cfg": cfg, "lean": lean, "schedule": [0] if lean else sched,
+               "source": "retrain_other_models.train_e5_variants" + ("; lean: tests and final weights only" if lean
+                                                                     else ", + checkpoints and per-update logs"),
                "started": time.strftime("%Y-%m-%d %H:%M:%S")}, open(os.path.join(out, "run.json"), "w"), indent=1)
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
-    rec = Recorder(out, sched, extra=net not in ("trained", "echo"))
+    rec = (LeanRecorder if lean else Recorder)(out, sched, extra=net not in ("trained", "echo"))
     Agent = {"joint_echo": JointAgent, "joint_trained": JointAgent, "joint_echo_jl": JointLossAgent,
              "joint_trained_jl": JointLossAgent,
+             "joint_trained_N100": JointAgent, "joint_trained_N100_jl": JointLossAgent,
+             "joint_trained_N200": JointAgent, "joint_trained_N200_jl": JointLossAgent,
+             "joint_trained_N50": JointAgent, "joint_trained_N50_jl": JointLossAgent,
+             "joint_trained_N150": JointAgent, "joint_trained_N150_jl": JointLossAgent,
+             "joint_trained_N300": JointAgent, "joint_trained_N300_jl": JointLossAgent,
+             "joint_trained_N400": JointAgent, "joint_trained_N400_jl": JointLossAgent,
+             "joint_trained_N500": JointAgent, "joint_trained_N500_jl": JointLossAgent,
+             "joint_echo_N10000": JointAgent, "joint_echo_N10000_jl": JointLossAgent,
+             "joint_echo_N200": JointAgent, "joint_echo_N200_jl": JointLossAgent,
+             "joint_echo_N500": JointAgent, "joint_echo_N500_jl": JointLossAgent,
+             "joint_echo_N2000": JointAgent, "joint_echo_N2000_jl": JointLossAgent,
              "trained_lastT": LastStepAgent, "trained_lastT_p1": LastStepP1Agent,
              "trained_p1": AllStepP1Agent}.get(net, CognitiveGridworld)
+    if lean:                                                                      # the ordinary and joint agents: others raise
+        Agent = {CognitiveGridworld: LeanAgent, JointAgent: LeanJointAgent, JointLossAgent: LeanJointLossAgent}[Agent]
     agent = Agent(**cfg, save_env=os.path.relpath(os.path.join(out, "final"), os.path.join(ROOT, "main", "DATA")),
                   external_logger=rec)
     rec._flush()
