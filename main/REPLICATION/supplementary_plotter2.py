@@ -25,6 +25,11 @@ LOAD_HARVEST = True
 HARVEST_CACHE = os.path.join(_ROOT, 'main', 'DATA', 'cache', 'supplementary_harvest.npz')
 FR_IMPLIED = os.path.join(os.environ.get('FIG1_CACHE') or os.path.join(_ROOT, 'main', 'DATA', 'experimental', 'fig1'),
                           'fr_corr_implied.npz')
+# The diagnostics figures: the two standard runs (the paper's configuration) whose checkpoints were kept, and the
+# FR-correctness correlation replayed on them with the paper's forward regret (claude_plots/fr_definition_check.py).
+TD_RUNS = os.path.join(_ROOT, 'main', 'DATA', 'experimental', 'training_dynamics')
+DIAG_RUNS, DIAG_SEED = {"Trained": "trained", "Echo": "echo"}, 20261029
+FR_REPLAY = os.path.join(_ROOT, 'main', 'DATA', 'experimental', 'fr_definition', 'fr_correct.npz')
 
 F64, I64 = np.float64, np.int64
 
@@ -136,7 +141,10 @@ def _prob_axis(ax, which, mode, lo, hi, ticks=None, margin=0.25):
 # name: (tier, kind, harvest prefix, which agent's harvest)
 # 2 x 3 calibration by context count. ctx_2 rides on the main harvest; ctx_1 and ctx_3
 # come from harvest_calib.py, which collects conf/acc/FR only.
-CAL_CTX_SRC = {1: "calibration_ctx1.npz", 2: None, 3: "calibration_ctx3.npz"}
+CAL_CTX_SRC = {1: "calibration_ctx1.npz", 2: "calibration_ctx2.npz", 3: "calibration_ctx3.npz"}   # harvest_calibration
+CAL_CTX_RUN = {1: ("/sanity/fully_trained_ctx_1", "/sanity/reservoir_ctx_1", 1000),             # trained, echo, hidden units
+               2: ("/sanity/fully_trained_ctx_2_e5", "/sanity/reservoir_ctx_2_e5", 1000),
+               3: ("/sanity/fully_trained_ctx_3", "/sanity/reservoir_ctx_3", 5000)}
 CAL_CTX_KEYS = ("joint_conf", "joint_acc", "naive_conf", "naive_acc",
                 "net_conf", "net_acc", "fr")
 # baselines drawn first so the experts land on top of them
@@ -145,7 +153,8 @@ CAL_ROW_TITLES = ["Confidence-Accuracy calibration", "Dependence on Factorizatio
 # Absolute-FR bin edges for the mediation panel. Absolute, not percentile: the whole point
 # is that the same regret means the same thing at every context count, which a per-C rank
 # would hide.
-CAL_FR_EDGES = np.array([0, .5, 1, 2, 4, 8, 16, 40])
+CAL_FR_EDGES = np.array([0, .5, 1, 2, 4, 8, 16, 32, 64])   # nats; the last bin also takes anything above (until 11-10: 16-40,
+#                                                           because the symmetric clipped regret could not pass 34.5)
 CAL_SHORT = {"Joint": "Joint", "Fully Trained": "Trained",
              "Naive": "Naive", "Echo State": "Echo"}
 CAL_MARKER = {"Exact": "o", "Trained": "^"}
@@ -252,7 +261,7 @@ CAL_AGENTS = {"Joint": ("Expert", "Exact", "joint", "trained"),
 
 AGENT_COLORS = {"Trained": "#1f77b4", "Echo": "#ff7f0e", "Joint": "#2ca02c", "Naive": "#d62728"}
 BOUND_COLORS = {"Joint": "k", "Naive": "0.5"}    # the accuracy bounds, as Figure 1 draws them
-CORR_LABEL = "Correlation over the batch"   # one test's trajectories
+CORR_LABEL = "Correlation over test trajectories"   # 10,000 fixed test trajectories, at each saved checkpoint
 # Marker outline in the calibration scatters: the two networks are outlined in red, the
 # two exact Bayesian agents in black, so a glance separates measured from computed.
 NET_EDGE, EXACT_EDGE = "#d62728", "k"
@@ -295,7 +304,11 @@ def pr_gain(agent):
 
 
 def fr_correlation(cache=FR_IMPLIED):
-    """the point-biserial r between final-step FR and final-step correctness in each test batch, through training.
+    """NOT USED BY THE FIGURES SINCE 11-10-2026 (see diagnostics_runs): the regret behind these logs is env.SII as it
+    was when the runs were made, the SYMMETRIC KL with probabilities clipped at 1e-15, not the paper's forward
+    Factorization Regret, and a logged fit cannot be converted. Valid as it stands only for runs logged, and a harvest
+    made, after env.SII became the forward KL.
+    the point-biserial r between final-step FR and final-step correctness in each test batch, through training.
     The run logged only the logistic fit of correctness on FR (env_model_data_manager: sklearn's LogisticRegression,
     with intercept, lightly L2-penalised); its fit reproduces cov(FR, correct) (exactly at the maximum-likelihood fit,
     to 5e-5 here), so r follows from the logged slope and accuracy, given FR's distribution (a task property: the
@@ -318,6 +331,46 @@ def fr_correlation(cache=FR_IMPLIED):
     os.makedirs(os.path.dirname(cache), exist_ok=True)
     np.savez(cache, trained=out["Trained"], echo=out["Echo"])
     return out
+
+
+def diagnostics_runs(replay=FR_REPLAY):
+    """(trained, echo) for the diagnostics figures: the two standard runs (training_dynamics/<run>_s20261029; the
+    paper's configuration, 114 checkpoints kept), each a Bunch with
+      test_acc_through_training (tests, T), test_model_update_dim_through_training, test_model_input_dim_through_training
+      (tests, 1000), joint_acc, naive_acc (tests,): every test of the run (8,000 trajectories, every 5th episode), from
+      its own test files;
+      fr_test, fr_r: at each saved checkpoint, the index of its test and the Pearson r between Factorization Regret at T
+      and correctness at T over 10,000 fixed test trajectories (the probe set), FR = KL(Joint || Naive) of the goal
+      belief, the paper's forward form, exact; fr_joint, fr_naive: the two observers' own r on the same trajectories
+      (built by claude_plots/fr_definition_check.py, data("fr_correct"): seconds).
+    Why replays and not the logs: a run logs only a logistic fit of correctness on env.SII, which was the symmetric
+    clipped KL when these runs and the paper's original ones were made (the submission's Fig. 13d-f printed that fit's
+    slope), and the forward correlation cannot be derived from it.
+    Runs made after 11-10-2026 log the forward r at every test (train_training_dynamics: SII_r, SII_r_joint,
+    SII_r_naive): when every test file of a run has them, they are used instead (fr_source "logged", every test) and
+    no replay is needed."""
+    import glob
+    out = []
+    for name, run in DIAG_RUNS.items():
+        A = [np.load(f) for f in sorted(glob.glob(os.path.join(TD_RUNS, f"{run}_s{DIAG_SEED}", "test_*.npz")))]
+        cat = lambda k: np.concatenate([a[k] for a in A])                               # noqa: E731
+        ep = cat("episode")
+        if all("SII_r" in a for a in A):                                                # forward r logged at every test
+            fr = dict(fr_test=np.arange(len(ep)), fr_r=cat("SII_r").astype(F64), fr_source="logged",
+                      fr_joint=float(np.nanmean(cat("SII_r_joint"))), fr_naive=float(np.nanmean(cat("SII_r_naive"))))
+        else:
+            if not os.path.exists(replay):
+                raise FileNotFoundError(f"{replay}: run main/REPLICATION/claude_plots/fr_definition_check.py --data once")
+            Z = np.load(replay)
+            it = np.searchsorted(ep, Z[f"{run}_raw"])
+            assert np.array_equal(ep[it], Z[f"{run}_raw"]), name
+            fr = dict(fr_test=it, fr_r=Z[f"{run}_fwd"].astype(F64), fr_source="replay",
+                      fr_joint=float(Z["bayes_fwd"]), fr_naive=float(Z["naive_fwd"]))
+        out.append(Bunch(test_acc_through_training=cat("acc").astype(F64),
+                         test_model_update_dim_through_training=cat("update_dim").astype(F64),
+                         test_model_input_dim_through_training=cat("input_dim").astype(F64),
+                         joint_acc=cat("joint_acc")[:, -1].astype(F64), naive_acc=cat("naive_acc")[:, -1].astype(F64), **fr))
+    return tuple(out)
 
 
 def approx_lik(b, eps=1e-99):
@@ -490,7 +543,7 @@ class Harvester:
                             ("naive", env.naive_goal_belief, env.naive_acc),
                             ("net", env.model_goal_belief, env.model_acc)):
             out[f"{tag}_conf"], out[f"{tag}_acc"] = _final_conf_acc(gb, ac)
-        out["fr"] = np.asarray(env.SII, F64)[:, -1]
+        out["fr"] = np.asarray(env.SII, F64)[:, -1]       # FR at T: KL(Joint || Naive), forward (env.SII since 11-10)
 
         # get_xcorr already reduces within each episode, so averaging the per-episode
         # results is exact; only PR's PCA basis is re-estimated per episode.
@@ -533,6 +586,50 @@ def _harvest_stamp(prm):
     return np.array([prm[k] for k in ("T_START", "T_END", "E_START", "E_END", "N_BANDS")], I64)
 
 
+class CalibrationHarvester:
+    """The calibration panels' per-trajectory reductions alone (no dynamics): each observer's confidence in its answer
+    at T and whether it was right (Joint, Naive, the network), and the trajectory's Factorization Regret at T
+    (env.SII: KL(Joint || Naive) of the goal belief, the paper's forward form, exact)."""
+
+    def __call__(self, env):
+        if not env.test_set:
+            return {}
+        out = {}
+        for tag, gb, ac in (("joint", env.joint_goal_belief, env.joint_acc),
+                            ("naive", env.naive_goal_belief, env.naive_acc),
+                            ("net", env.model_goal_belief, env.model_acc)):
+            out[f"{tag}_conf"], out[f"{tag}_acc"] = _final_conf_acc(gb, ac)
+        out["fr"] = np.asarray(env.SII, F64)[:, -1]
+        return out
+
+
+def harvest_calibration(ctx, episodes, batch_num, cuda=0, mem_fraction=None):
+    """main/DATA/cache/calibration_ctx<ctx>.npz for one context count: tr_ / ec_ {joint, naive, net}_{conf, acc} and
+    fr, (episodes * batch_num,) each, and chance. Test trajectories only (checkpoint_every=1), both saved networks of
+    that context count on their own fresh trajectories. mem_fraction caps this process's share of the GPU so that it
+    fails by itself instead of crowding out other runs on a shared card.
+    (The 09-23 files of contexts 1 and 3, made by a script that was not kept, held the symmetric clipped KL as 'fr';
+    they are kept beside the new ones as calibration_ctx<ctx>_sym_superseded.npz.)"""
+    tr_env, ec_env, hid = CAL_CTX_RUN[ctx]
+    if mem_fraction and torch.cuda.is_available():
+        torch.cuda.set_per_process_memory_fraction(mem_fraction, cuda)
+    cfg = dict(mode="SANITY", cuda=cuda, episodes=episodes, checkpoint_every=1, realization_num=10, hid_dim=hid,
+               obs_num=5, show_plots=False, batch_num=batch_num, step_num=30, state_num=500, learn_embeddings=False,
+               classifier_LR=.001, ctx_num=ctx, training=False)
+    out = {}
+    for tag, load, reservoir in (("tr", tr_env, False), ("ec", ec_env, True)):
+        agent = CognitiveGridworld(**cfg, reservoir=reservoir, load_env=load, external_logger=CalibrationHarvester())
+        out.update({f"{tag}_{k}": np.ravel(v).astype(np.float32) for k, v in agent.custom_log.items()})
+        out["chance"] = 1.0 / agent.realization_num
+        del agent
+        gc.collect()
+        torch.cuda.empty_cache()
+    path = os.path.join(_ROOT, "main", "DATA", "cache", CAL_CTX_SRC[ctx])
+    np.savez(path, **out)
+    print(f"calibration harvest saved: {path} ({len(out['tr_fr']):,} trajectories per network)")
+    return out
+
+
 def collect_or_load(cfg, prm, cache=None, load=None):
     """Harvest both agents, or re-plot from the cached harvest.
 
@@ -570,20 +667,47 @@ def collect_or_load(cfg, prm, cache=None, load=None):
 # Plotting Functions
 # ═══════════════════════════════════════════════════════════════════
 
+CKPT_MARKS = dict(lw=1.6, marker="o", ms=2.6, mec="none")   # the FR correlation exists at the saved checkpoints only
+def _ckpt_kw(agent):                                       # replayed r: dots at the checkpoints; logged r: every test, a line
+    return CKPT_MARKS if agent.get("fr_source", "replay") == "replay" else dict(lw=1.6)
+
+
+def _need_replay(agent):
+    if "fr_test" not in agent:
+        raise ValueError("this agent carries no replayed FR correlation (fr_test, fr_r): the diagnostics figures no longer "
+                         "draw the correlation implied by logged fits on env.SII, which was the symmetric KL in those "
+                         "logs; pass the Bunches of diagnostics_runs()")
+
+
+def _plot_r(ax, agent, name, lim=None):
+    """The FR correlation against testing episode (the checkpoints inside the first `lim` tests), with the two
+    observers' own correlation on the same trajectories as dotted references (once per axes)."""
+    _need_replay(agent)
+    k = slice(None) if lim is None else agent.fr_test < lim
+    ax.plot(agent.fr_test[k] + 1, agent.fr_r[k], c=AGENT_COLORS[name], zorder=3, **_ckpt_kw(agent))
+    if not getattr(ax, "_fr_refs", False):
+        ax._fr_refs = True
+        for lab, v in (("Joint", agent.fr_joint), ("Naive", agent.fr_naive)):
+            ax.axhline(v, c=BOUND_COLORS[lab], ls=":", lw=1.1, zorder=1)
+            ax.annotate(lab, (1, v), xycoords=ax.get_yaxis_transform(), xytext=(-3, 2), textcoords="offset points",
+                        color=BOUND_COLORS[lab], ha="right", va="bottom")
+
+
 def _plot_r_vs_acc(ax, agent, name):
     """The FR correlation against accuracy, as Figure 1 (e): each test's single-batch accuracy
     faint, and over it the same r against smoothed accuracy, so test noise does not scribble
     along x."""
+    _need_replay(agent)
     acc, c = agent.test_acc_through_training[:, -1], AGENT_COLORS[name]
-    ax.plot(acc, agent.fr_r, c=c, lw=.5, alpha=.35, zorder=2)
-    ax.plot(_smooth(acc, PLOT_CFG["acc_smooth_w"]), agent.fr_r, c=c, lw=1, zorder=3)
+    ax.plot(_smooth(acc, PLOT_CFG["acc_smooth_w"])[agent.fr_test], agent.fr_r, c=c, zorder=3, **_ckpt_kw(agent))
 
 
 def _plot_r_vs_pr(ax, agent, name):
     """The FR correlation against PR(RNN) -- both internal, so this asks whether they move
     together without accuracy as the intermediary."""
-    ax.plot(_smooth(pr_gain(agent), PLOT_CFG["smooth_w"]), _smooth(agent.fr_r, PLOT_CFG["smooth_w"]),
-            c=AGENT_COLORS[name], lw=1, zorder=3)
+    _need_replay(agent)
+    ax.plot(_smooth(pr_gain(agent), PLOT_CFG["smooth_w"])[agent.fr_test], agent.fr_r,
+            c=AGENT_COLORS[name], zorder=3, **_ckpt_kw(agent))
 
 
 def plot_diagnostics_full(axes, agent, name):
@@ -596,8 +720,7 @@ def plot_diagnostics_full(axes, agent, name):
     axes[0].plot(x, y, c=AGENT_COLORS[name], label=name, zorder=3)
 
     # 2. Correlation(FR, Acc.)
-    x, y = ex(agent.fr_r)
-    axes[1].plot(x, y, c=AGENT_COLORS[name], zorder=3)
+    _plot_r(axes[1], agent, name)
 
     # 3. and 4. FR correlation against accuracy and against PR(RNN)
     _plot_r_vs_acc(axes[2], agent, name)
@@ -620,8 +743,8 @@ def plot_diagnostics_early(axes, agent, name):
     axes[0, 0].plot(x, y, c=c, zorder=3)
 
     # (0,1) Correlation(FR, Acc.), early window
-    x, y = ex(agent.fr_r)
-    axes[0, 1].plot(x, y, c=c, zorder=3)
+    _plot_r(axes[0, 1], agent, name, lim)
+    axes[0, 1].set_xlim(axes[0, 0].get_xlim())
     axes[0, 1].axhline(y=0, c='k', alpha=0.5)
 
     # (0,2) PR(RNN) - PR(read-in), early window: the dimensionality the update ADDS
@@ -662,9 +785,10 @@ def mark_bounds(agents, y_axes=(), x_axes=()):
 
 def note_counts(fig, agent, y=-.005):
     """The data behind a diagnostics figure, under its lower right corner."""
-    fig.text(.995, y, f"r of FR and correctness across the {PLOT_CFG['test_batch']:,} trajectories of each "
-             "test, implied by its logistic fit; "
-             f"1 run per network, {len(agent.fr_r):,} tests", ha="right", va="top",
+    where = ("across 10,000 fixed test trajectories at each of the " f"{len(agent.fr_r)} saved checkpoints (dots)"
+             if agent.get("fr_source", "replay") == "replay" else "at every test")
+    fig.text(.995, y, f"r of FR and correctness {where};\ndotted: the observers' own r; "
+             f"1 run per network, {len(agent.test_acc_through_training):,} tests", ha="right", va="top",
              fontsize=PLOT_CFG["tick_fs"], color="0.3")
 
 
@@ -1004,6 +1128,11 @@ def draw_fr_mediation(fig, ax, data, ctxs=(2, 3)):
     distribution rather than changing what a given FR does. Exact joint Bayes is the
     control that stays pale at every regret, so the panel cannot be read as "high regret
     is simply hard".
+
+    NOTE 11-10-2026: with the forward FR (the paper's definition) the pairing is looser than
+    it was with the symmetric one: from 1 nat on, the C = 3 row is the C = 2 row moved one
+    bin right (a factor 2 in FR); ESN at 2-4 nats .44 (C = 3) against .29 (C = 2). Numbers
+    in claude_plots/fr_definition_check.py.
     """
     rows, cs = [], []
     for name in CAL_AGENTS:
@@ -1541,24 +1670,25 @@ if __name__ == "__main__":
     # 1. Prepare Data -- one agent resident at a time, then cached to HARVEST_CACHE
     trained, echo = collect_or_load(CFG, DYN_PARAMS)
     data_tr, data_ec = episode_xcorr(trained), episode_xcorr(echo)
-    corr = fr_correlation()
-    trained["fr_r"], echo["fr_r"] = corr["Trained"], corr["Echo"]
+    # the diagnostics figures: the standard runs whose checkpoints were kept, with the forward FR correlation replayed
+    # on them (the harvest's logged logistic fits are of the symmetric KL: see diagnostics_runs)
+    diag_tr, diag_ec = diagnostics_runs()
 
     # 2. Figure A1: Diagnostics over all testing episodes
     figA1, axesA1 = plt.subplots(1, 4, figsize=PLOT_CFG["figsize_A"])
-    plot_diagnostics_full(axesA1, trained, "Trained")
-    plot_diagnostics_full(axesA1, echo, "Echo")
-    mark_bounds((trained, echo), y_axes=axesA1[:1], x_axes=axesA1[2:3])
+    plot_diagnostics_full(axesA1, diag_tr, "Trained")
+    plot_diagnostics_full(axesA1, diag_ec, "Echo")
+    mark_bounds((diag_tr, diag_ec), y_axes=axesA1[:1], x_axes=axesA1[2:3])
     finalize_layout_full(axesA1)
-    note_counts(figA1, trained)
+    note_counts(figA1, diag_tr)
 
     # 2b. Figure A2: Diagnostics over early learning only
     figA2, axesA2 = plt.subplots(2, 3, figsize=PLOT_CFG["figsize_A_early"], squeeze=False)
-    plot_diagnostics_early(axesA2, trained, "Trained")
-    plot_diagnostics_early(axesA2, echo, "Echo")
-    mark_bounds((trained, echo), y_axes=(axesA2[0, 0], axesA2[1, 0]), x_axes=(axesA2[1, 1],))
+    plot_diagnostics_early(axesA2, diag_tr, "Trained")
+    plot_diagnostics_early(axesA2, diag_ec, "Echo")
+    mark_bounds((diag_tr, diag_ec), y_axes=(axesA2[0, 0], axesA2[1, 0]), x_axes=(axesA2[1, 1],))
     finalize_layout_early(axesA2)
-    note_counts(figA2, trained, y=-.05)      # below the strip left for panel letters
+    note_counts(figA2, diag_tr, y=-.05)      # below the strip left for panel letters
 
     # 2c. Figure E: the one calibration figure -- tiers as panels, C as colour, and the
     # regret that explains the trend. CAL_TIER_STYLE picks what is drawn; the kernel,

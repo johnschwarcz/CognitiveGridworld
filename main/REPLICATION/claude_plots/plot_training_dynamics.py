@@ -16,7 +16,8 @@ The per-checkpoint summaries are cached in analysis/series_<run>.npz (recomputed
                            energy, cross-band share): medians through training and their r with entanglement (tau = 0)
   td_learning.png        a gap to Bayes at T (log) intact and with the memory cut to 1, 2, 5 steps (an6), with the
                            windowed-Bayes and naive references; b accuracy at T by the goal variable's own
-                           factorization regret FR at T (quintiles; Bayes and naive per quintile at the right edge);
+                           factorization regret FR = KL(Bayes || naive) at T (quintiles; Bayes and naive per quintile
+                           at the right edge);
                            c the per-step logit increment on the Bayes ladder: coefficients on N (naive), W (within
                            step), M (memory) and R^2 (an1); d forget-gate time constants tau = 1 / (1 - mean f) per
                            unit: median and 99th percentile; e how often the network's answer at T equals naive's,
@@ -42,6 +43,22 @@ correctness with FR averaged over both variables (cross terms turned Bayes's and
 down); the "variance explained by inference step" of the overview / td_factors was the variance of the probe-averaged
 trajectory (td_analysis pool_*: each episode's own movement cancels; x read 0) and is now the within-episode share; the
 PRs were of one cloud pooled over all steps (the drift of the mean counted as dimensions) and are now per step.
+Factorization regret (11-10): FR = KL(Bayes || naive) of one variable's marginal belief, the paper's forward form,
+exact (main.utils.factorization_regret = probes.npz 'fr'). td_learning b bins the probes by the goal variable's own FR
+at T (quintile edges 0 / .072 / .27 / .74 / 2.7 / 95 nats); the overview's h, i use the mean of the two variables per
+particle-step. Until 11-10 'fr' was the symmetric KL with probabilities clipped at 1e-15 (edges 0 / .096 / .36 / 1.07 /
+4.3 / 34.4 nats; 80% of the probes are in the same quintile under both). Caches: the entries of series_<run>.npz carry
+fr_def = "forward" (an entry without it has its acc_fr recomputed; the files as they were on 11-10 are kept as
+series_<run>_sym_superseded.npz), and series_fr_<run>.npz is marked the same way (an unmarked one is set aside as
+series_fr_<run>_sym_superseded.npz, never read). Re-measured (symmetric -> forward): accuracy at T per quintile at the
+end, Trained .811 / .750 / .738 / .767 / .736 -> .829 / .772 / .737 / .749 / .715 (Bayes .825 / .764 / .748 / .776 /
+.744 -> .838 / .788 / .750 / .760 / .720), Echo .705 / .566 / .469 / .307 / .109 -> .719 / .573 / .449 / .321 / .094
+(naive .813 / .706 / .554 / .230 / .018 -> .828 / .745 / .559 / .164 / .025); the largest change of a quintile at
+any checkpoint is .041 / .021. r with FR (tau = 0) at the end, Trained: norm +.249 -> +.244, effective dim. -.079 ->
+-.040, turn -.028 -> -.018, coherence -.028 -> -.015, |dW|^2 -.196 -> -.144, dW eff. dim. -.054 -> -.047, cross-band
+-.019 -> -.010; Echo: |dW|^2 -.267 -> -.255, coherence -.059 -> -.056 (largest change at any checkpoint .062:
+Echo's |dW|^2 at 20 training episodes, -.451 -> -.389; Trained .055, |dW|^2 at 35,200). The curves keep their shape:
+the pictures read as before.
 Findings 11-01 (Trained vs Echo, 114 checkpoints each): the memory-cut curves split from intact at ~300-500 training
 episodes, when the gap to Bayes starts to fall fast; Echo's do not split (memory does not matter to it). Increments:
 Trained learns N first (~50), then W (~200), then M (~500); Echo ends on N alone (beta_N 1.05, W 0.12, M ~0). On the
@@ -73,6 +90,8 @@ X0 = 10                                                                         
 WIN = slice(16, 30)                                                                # the locked window, steps 17-30
 TAU0 = list(ga.TAU).index(0)
 N_FR = 5
+FR_DEF = "forward"            # FR = KL(Bayes || naive), exact (probes.npz 'fr' since 11-10); caches made with the
+                              # symmetric clipped KL carry no such mark: recomputed (series) or set aside (add_fr)
 FCOL = {"env": "#8c564b", "r0": "#1f77b4", "r1": "#17becf", "joint": "#9467bd", "cell": "#2ca02c", "envcell": "#ff7f0e",
         "res": "0.55"}
 FNAME = {"env": "environment (Z)", "r0": "r0", "r1": "r1", "joint": r"r0 $\times$ r1 (joint)", "cell": "cell (r0, r1)",
@@ -99,7 +118,7 @@ def summarize(f, P, fr_bin, rev):
          "w_dinit": z["w_dinit"], "prev_episode": int(z["prev_episode"]), "n_bands": int(z["n_bands"])}
     right_T = z["right"][ar, -1, P["goal"]]
     s["acc_fr"] = np.array([right_T[fr_bin == k].mean() for k in range(N_FR)])     # fr_bin: the goal's own FR at T
-    s["fr_pairing"] = "goal"
+    s["fr_pairing"], s["fr_def"] = "goal", FR_DEF
     ans = z["logq"][ar, -1, P["goal"]].astype(np.float32).argmax(-1)               # the network's answer at T
     nb_ans, jb_ans = (P[k][ar, -1, P["goal"]].argmax(-1) for k in ("log_nb", "log_jb"))
     truth = P["r"][ar, P["goal"]]
@@ -131,10 +150,11 @@ def series(run, P):
     for f in files:
         ep = int(os.path.basename(f)[3:8])
         s = old.get(ep) or summarize(f, P, fr_bin, rev)
-        if s.get("fr_pairing") != "goal":           # caches before 11-01: binned by FR averaged over both variables
+        if s.get("fr_pairing") != "goal" or s.get("fr_def") != FR_DEF:
+            # caches before 11-01: binned by FR averaged over both variables; before 11-10: by the symmetric clipped KL
             right_T = np.load(f)["right"][ar, -1, P["goal"]]
             s["acc_fr"] = np.array([right_T[fr_bin == k].mean() for k in range(N_FR)])
-            s["fr_pairing"] = "goal"
+            s["fr_pairing"], s["fr_def"] = "goal", FR_DEF
         out[ep] = s
     np.savez(cache, s=np.array(out, dtype=object))
     eps = sorted(out)
@@ -168,6 +188,7 @@ def step_pr(s, row):
 
 TIME_T = "Movement within episodes (share)\n" + r"$\langle \Vert s_{it} - \bar s_i \Vert^2 \rangle / \langle \Vert s_{it} - \bar s \Vert^2 \rangle$"
 PR_T = "PR per step, mean over steps\n" + r"$\langle (\Sigma_k \lambda_k)^2 / \Sigma_k \lambda_k^2 \rangle_t$"
+FR_T = r"FR = KL(Bayes $\Vert$ naive)"                               # the paper's forward form (probes.npz 'fr')
 
 
 def _axis(ax, title, xlabel=True):
@@ -233,7 +254,7 @@ def fig_learning(S, P):
     _axis(ax[0], "Gap to Bayes at T: Bayes $-$ accuracy")
     ax[0].set_yscale("log")
     _legend(ax[0], ws, loc="lower left", ncol=2)
-    _axis(ax[1], "Accuracy at T by the goal's own FR")
+    _axis(ax[1], "Accuracy at T by the goal's own FR\n" r"(FR = KL(Bayes $\Vert$ naive) at T, quintiles)")
     _legend(ax[1], (("Trained", "-"), ("Echo", "--")), nets=False, loc="upper left",
             extra=[Line2D([], [], color=cm(k / (N_FR - 1)), lw=2, label=f"FR quintile {k + 1}") for k in range(N_FR)]
             + [Line2D([], [], color="0.35", marker=m, ls="", label=f"{n} per quintile") for m, n in
@@ -380,8 +401,8 @@ def fig_decoding(S, P):
 
 
 def _fr_terms(f, rev_like):
-    """the locked statistic's r with FR (both variables averaged) for the activity and update measures of one checkpoint
-    file (added to the cached summaries without recomputing them)"""
+    """the locked statistic's r with FR (KL(Bayes || naive) per variable, both variables averaged) for the activity and
+    update measures of one checkpoint file (added to the cached summaries without recomputing them)"""
     z = np.load(f, allow_pickle=True)
     out = {"xc_act_fr": np.stack([_xcorr(z[k][:, WIN], rev_like[:, WIN]) for k in ("norm_u", "effdim_u", "turn_u")])}
     if "cr_coh" in z.files:
@@ -391,14 +412,24 @@ def _fr_terms(f, rev_like):
 
 
 def add_fr(S, run, P):
-    """S[run] plus "xc_act_fr" / "xc_upd_fr" (cached in analysis/series_fr_<run>.npz)"""
+    """S[run] plus "xc_act_fr" / "xc_upd_fr" (cached in analysis/series_fr_<run>.npz, marked fr_def = FR_DEF; a cache
+    without the mark was made with the symmetric clipped KL: it is set aside as series_fr_<run>_sym_superseded.npz,
+    never read)"""
     cache = os.path.join(AN, f"series_fr_{run}.npz")
-    old = dict(np.load(cache, allow_pickle=True))["s"].item() if os.path.exists(cache) else {}
+    old = {}
+    if os.path.exists(cache):
+        with np.load(cache, allow_pickle=True) as z:
+            marked = "fr_def" in z.files and str(z["fr_def"]) == FR_DEF
+            old = z["s"].item() if marked else {}
+        if not marked:
+            aside = os.path.join(AN, f"series_fr_{run}_sym_superseded.npz")
+            assert not os.path.exists(aside), f"{aside} exists: unmarked {cache} not overwritten"
+            os.replace(cache, aside)
     fr = P["fr"].mean(-1)
     out = {}
     for ep in S[run]["episode"]:
         out[ep] = old.get(ep) or _fr_terms(os.path.join(AN, run, f"ck_{ep:05d}.npz"), fr)
-    np.savez(cache, s=np.array(out, dtype=object))
+    np.savez(cache, s=np.array(out, dtype=object), fr_def=FR_DEF)
     for k in out[S[run]["episode"][0]]:
         S[run][k] = np.array([out[e][k] for e in S[run]["episode"]])
     return S[run]
@@ -473,6 +504,8 @@ def fig_overview(S, P, x_acc=False):
         a.set_yscale("log")
     for a in ax[5:]:
         a.axhline(0, color="0.7", lw=.6)
+    for a in ax[7:]:
+        a.text(.03, .97, FR_T, transform=a.transAxes, ha="left", va="top", fontsize=8.5, color="0.3")
     _legend(ax[0], loc="upper left")
     ax[0].get_legend().set(frame_on=True)
     ax[0].get_legend().get_frame().set(facecolor="white", edgecolor="none", alpha=1)

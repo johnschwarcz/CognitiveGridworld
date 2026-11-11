@@ -41,7 +41,9 @@ DEFINITIONS
     Bayes's e_v (.05 bins); it covers 99.8% of the corner var-steps on the forward set, 92.2% on the probes.
   Control 2, matched non-splits: stream-steps where neither variable is end-split, weighted to the corner splits'
     histogram of step x log10 FR of the variable (naive's error; .25 bins) x Bayes's entropy of the variable (.2
-    nats); coverage 100%.
+    nats); coverage 100%. FR = KL(Bayes || naive) of the variable's marginal belief, the paper's forward form, exact
+    (main.utils.factorization_regret: probes.npz 'fr'; the forward set's in grid_bayes.npz 'fr'). Until 11-10 it was
+    the symmetric KL with probabilities clipped at 1e-15 (CORRECTIONS 11-10).
   TV = 1/2 Sum_r |q_v(r) - pi_v(r)| per variable; averaged over variables and stream-steps afterwards.
   Corner answers at T: the 4 corner cells; answer (argmax q_0, argmax q_1) at T = the truth, an adjacent corner (one
     variable at its opposite end, the other right), the partner corner (both at their opposite ends), or other.
@@ -111,14 +113,18 @@ FINDINGS (Trained RNN unless named; training episodes; forward set unless "probe
   .880). The joint share comes later than the per-variable shares only because it needs both variables. Smaller-end mass
   (absolute): corner .028 at 880, .086 at 2,000, .184 at 5,800, .265 at the end (Bayes .279); one-variable .035 / .091 /
   .181 / .248 (Bayes .262); ESN .013 / .022.
-4 End splits approach Bayes later than equally hard non-splits, but the lag is modest in TV. TV per variable, corner /
-  one-variable / matched non-splits: .507 / .508 / .512 at 880 (the same), .385 / .378 / .314 at 2,000, .220 / .222 /
-  .153 at 5,800, .083 / .087 / .055 at the end; half-way at 2,334 (1,950-2,625) / 2,048 (1,801-2,452) / 1,701
-  (1,565-1,909); the non-splits matched to the one-variable splits 1,525 (1,391-1,641). Each split set reaches half-way
-  after its own matched control (separate intervals); corner and one-variable splits cannot be ordered. Naive .572 /
-  .509 / .696; ESN .588 / .531 / .665 (mean of the last 3). Probes: .080 / .084 / .042 (mean of the last 3; their
-  matched non-splits come from all cells and are easier than the forward set's, drawn from the same corner and
-  split-prone episodes: the control depends on the pool beyond the matched variables).
+4 End splits approach Bayes later than equally hard non-splits, but the lag is modest in TV, and its timing is
+  established for the one-variable splits only (re-measured 11-10 with the forward FR as the matching variable). TV
+  per variable, corner / one-variable / matched non-splits: .507 / .508 / .529 at 880 (all close), .385 / .378 /
+  .322 at 2,000, .220 / .222 / .154 at 5,800, .083 / .087 / .055 at the end; half-way at 2,334 (1,950-2,625) / 2,048
+  (1,801-2,452) / 1,824 (1,633-1,967); the non-splits matched to the one-variable splits 1,580 (1,464-1,705). The
+  one-variable splits reach half-way after their matched control (separate intervals). The corner splits' half-way
+  is 510 episodes after their control's, but the intervals overlap (1,967 vs 1,950; in each of the 21 bootstrap
+  seeds), so that order is not established (CORRECTIONS 11-10: with the symmetric FR it was, by 21 episodes); corner
+  and one-variable splits cannot be ordered. Naive .572 / .509 / .733; ESN .588 / .531 / .701 (mean of the last 3).
+  Probes: .080 / .084 / .044 (mean of the last 3; their matched non-splits come from all cells and are easier than
+  the forward set's, drawn from the same corner and split-prone episodes: the control depends on the pool beyond the
+  matched variables).
 5 Corner answers at T (2,400 corner episodes): truth 10 / 50 / 90% at 293 (264-324) / 1,361 (1,020-1,463) / 9,372
   (7,509-36,039); it first reaches the half-way level (.381) at 1,120 (1,018-1,447) but dips to .380 at 1,360. .762 at
   the end (mean of the last 3; Bayes .765, naive .170, ESN .136). Wrong corners are a transient of early training:
@@ -192,8 +198,9 @@ FAILED HYPOTHESES AND NULLS
     around passing naive (748, 562-893).
   - The early angle bump is not a learned direction: both networks show it (25.4 / 27.5 deg at 40), it returns to the
     initial / naive level (~16) by 1,200, and the within-step direction slope is ~0 (-.014 to .042) up to 1,200.
-  - The splits' lag behind matched non-splits is modest in TV (the same at 880, .507 / .508 / .512; half-way 2,334 /
-    2,048 vs 1,701 / 1,525). The large delay appears only in the thresholded held share, which needs both ends > .15.
+  - The splits' lag behind matched non-splits is modest in TV (.507 / .508 / .529 at 880; half-way 2,334 / 2,048 vs
+    1,824 / 1,580, the corner splits' interval overlapping its control's). The large delay appears only in the
+    thresholded held share, which needs both ends > .15.
   - ESN: null on every measure. It never holds a split (<= .8%), never moves diagonally out of one (16.5 deg = naive's
     16.6; .32 cells), its end-mass slope stays at about naive's level (<= .116), and its wrong corners settle at
     naive's adjacent-corner level. One small exception: its moves out of corner splits follow Bayes's diagonal more
@@ -265,6 +272,26 @@ CORRECTIONS (11-02, after a second re-check; no earlier number changed)
     angle; distance against one-variable holding) and says that committing's c0 / c50 bracket its half-way back by
     construction.
 
+CORRECTIONS (11-10: factorization regret is the paper's forward KL everywhere; John: "calculate factorization regret
+consistently everywhere")
+  - Control 2's matching variable FR was [KL(Bayes || naive) + KL(naive || Bayes)] / 2 with probabilities clipped at
+    1e-15 (this module's own fr_sym on the forward set, td_analysis.fr_sym on the probes). It is now KL(Bayes ||
+    naive), exact, from the float64 log beliefs (main.utils.factorization_regret). Rebuilt: grid_bayes.npz (only its
+    'fr' changed: every other field is identical, so the stored replays fwd_<run>/ stay valid), probe_<run>.npz,
+    probe_refs.npz, fwdstats_<run>.npz, fwd_refs.npz (only the matched non-splits' sums tv_ctl_* and n_w_* changed;
+    every other key is bit-identical). The old files are kept as <name>_sym_superseded.npz. timeline.npz and
+    synthesis.npz do not use the matched non-splits and are unchanged. Of the figures only panel c's dotted lines
+    moved.
+  - Matched non-splits, symmetric -> forward: TV .512 -> .529 at 880, .314 -> .322 at 2,000, .153 -> .154 at 5,800,
+    .055 -> .055 at the end; naive .696 -> .733, ESN .665 -> .701, probes .042 -> .044; half-way 1,701 (1,565-1,909)
+    -> 1,824 (1,633-1,967); matched to the one-variable splits 1,525 (1,391-1,641) -> 1,580 (1,464-1,705; naive .603
+    -> .666, ESN .585 -> .639).
+  - CHANGED: finding 4's "each split set reaches half-way after its own matched control (separate intervals)" now
+    holds for the one-variable splits only (margin 57-96 episodes over the 21 seeds). The corner splits' interval
+    (1,950-2,625) overlaps their control's (1,633-1,967) in each of the 21 seeds (margins -32 to -2); with the
+    symmetric FR the two separated by 21-41 episodes, the smallest margin of the module. order_check's claims were
+    changed accordingly (the pair is now listed with the unordered ones).
+
 CHECKS
   Original thresholds recovered from the 10-27 scratch script geom/wormhole_marginals.py; its end-of-training numbers
     reproduced on the new run (joint held .825 vs the paper's 82%, ESN .001 vs .7%, median TV .071 vs .06, ESN .565 vs
@@ -289,9 +316,12 @@ CHECKS
     per-(environment, step) sums of the raw probe beliefs) matched the export's curves, bands and per-resample
     crossings to floating-point precision.
   Orders re-checked over 21 bootstrap seeds (the module's 20261101 and 1-20; order_check, printed by numbers; the
-    module's seed reproduces every event): every "<" of the timeline and the orders of findings 1, 4, 6 and 7 hold in
-    all 21 (smallest margin, B's 5% bound minus A's 95% bound: 21 episodes, the corner splits' TV half-way after their
-    matched control); the same diagonal's 50% before the one-variable / matched holding 50% only in 8 / 7 ("~").
+    module's seed reproduces every event): every "<" of the timeline and the orders of findings 1, 6 and 7 hold in
+    all 21, and so does finding 4's for the one-variable splits (smallest margin, B's 5% bound minus A's 95% bound: 57
+    episodes, the one-variable splits' TV half-way after their matched control; 96 in the module's seed); the same
+    diagonal's 50% before the one-variable / matched holding 50% only in 8 / 7 ("~"). Since 11-10 (forward FR as the
+    control's matching variable) the corner splits' TV half-way after their matched control holds in 0 of 21 seeds
+    (margins -32 to -2); with the symmetric FR it held in all 21 with the smallest margin of the module, 21 episodes.
   Every range claim taken from the numbers command over all 58 checkpoints; pyflakes clean.
 
 CAVEATS: one seed (20261029), one world; bands and intervals are environment-bootstrap intervals (50 environments), not
@@ -372,13 +402,15 @@ Run from the repository root (CPU only):
     $PY $S synthesis                          # synthesis.npz (td_tt_gap.export), its table and checks (~5 s)
     $PY $S figure                             # both figures (~30 s)
 Caches (~316 MB): main/DATA/experimental/training_dynamics/through_training/wormholes/: grid_bayes.npz (forward set:
-indices, Bayes and naive log marginals, FR), fwd_<run>/ck_EEEEE.npz (per checkpoint: lq_tgt fp16 log marginals at the
-stream-steps with any end split, m float32 posterior means, tv8 uint8 TV x 255, lqT fp16 log marginals at T, grid
-checks), fwdstats_<run>.npz / fwd_refs.npz and probe_<run>.npz / probe_refs.npz (per-environment sums per checkpoint,
-per (environment, step) sums for the slopes, per (step, bin) sums for the maps; Bayes's and naive's references),
-timeline.npz (x, names, run, family, value / lo / hi, bayes, naive, level, half / half_lo / half_hi, level_def),
-synthesis.npz (td_tt_gap.export: names, run, family, shape, sample, paired, note, x, value / lo / hi, naive, bayes,
-frac / frac_lo / frac_hi, c0 / c50 with their intervals, crossing shares and per-resample crossings)."""
+indices, Bayes and naive log marginals, FR = KL(Bayes || naive) per variable, float64), fwd_<run>/ck_EEEEE.npz (per
+checkpoint: lq_tgt fp16 log marginals at the stream-steps with any end split, m float32 posterior means, tv8 uint8 TV
+x 255, lqT fp16 log marginals at T, grid checks), fwdstats_<run>.npz / fwd_refs.npz and probe_<run>.npz /
+probe_refs.npz (per-environment sums per checkpoint, per (environment, step) sums for the slopes, per (step, bin) sums
+for the maps; Bayes's and naive's references), timeline.npz (x, names, run, family, value / lo / hi, bayes, naive,
+level, half / half_lo / half_hi, level_def), synthesis.npz (td_tt_gap.export: names, run, family, shape, sample,
+paired, note, x, value / lo / hi, naive, bayes, frac / frac_lo / frac_hi, c0 / c50 with their intervals, crossing
+shares and per-resample crossings). <name>_sym_superseded.npz: the six FR-dependent caches and grid_bayes.npz as built
+before 11-10 with the symmetric clipped FR (kept for comparison; nothing reads them)."""
 import os
 import sys
 import glob
@@ -390,6 +422,7 @@ ROOT = os.environ.get("CGW_ROOT", "/home/johns/Desktop/CognitiveGridworld")
 sys.path[:0] = [ROOT, os.path.join(ROOT, "main", "REPLICATION"),
                 os.path.join(ROOT, "main", "REPLICATION", "claude_plots")]
 os.environ.setdefault("MPLBACKEND", "Agg")
+from main.utils import factorization_regret                                       # noqa: E402
 
 TD = os.path.join(ROOT, "main", "DATA", "experimental", "training_dynamics")
 AN = os.path.join(TD, "analysis")
@@ -450,11 +483,6 @@ def ends(b):
     return e, (e > EDGE) & (lo + hi > ENDS), e < SETTLED
 
 
-def fr_sym(p, q, eps=1e-15):
-    p, q = np.clip(p, eps, 1 - eps), np.clip(q, eps, 1 - eps)
-    return .5 * ((p * np.log(p / q)).sum(-1) + (q * np.log(q / p)).sum(-1))
-
-
 def entropy(b):
     return -(b * np.log(np.clip(b, 1e-300, 1))).sum(-1)
 
@@ -487,7 +515,8 @@ def target_sets(bB, fr, H, steps=STEPS):
     two (n, T): corner split (both of Bayes's marginals split between their ends; wormhole_marginals.py's rule);
     two_v (n, T, 2): the var-levels of corner splits; one_v (n, T, 2): one-variable end split (this variable split,
     the other settled); cand (n, T, 2): neither variable split (candidates for the matched controls);
-    w_two / w_one (n, T, 2): control weights matching the step x log10 FR x entropy histogram of two_v / one_v;
+    w_two / w_one (n, T, 2): control weights matching the step x log10 FR x entropy histogram of two_v / one_v
+    (fr (n, T, 2): each variable's FR = KL(Bayes || naive), forward, exact: main.utils.factorization_regret);
     w_one_m (n, T, 2): weights on one_v giving it two_v's step x Bayes-e_v histogram; two_cov: the two_v var-levels
     whose step x e_v bin has one-variable splits"""
     e, split, settled = ends(bB)
@@ -762,8 +791,7 @@ def grid_side():
             parts.setdefault("idx", []).append(ix[k])
             parts.setdefault("log_jb", []).append(ljb[k].astype(np.float32))
             parts.setdefault("log_nb", []).append(lnb[k].astype(np.float32))
-            parts.setdefault("fr", []).append(np.stack([fr_sym(bB[k][:, :, v], np.exp(lnb[k][:, :, v]))
-                                                        for v in range(2)], -1).astype(np.float32))
+            parts.setdefault("fr", []).append(factorization_regret(ljb[k], lnb[k], logs=True))   # KL(Bayes || naive)
         out = {k: np.concatenate(v) for k, v in parts.items()}
         idx = out["idx"]
         out.update(env=env[idx], cell=cell[idx], r=E["r"][idx], stream=stream[idx], corner_sample=keep[idx],
@@ -1315,7 +1343,8 @@ def figure():
             f"and $\\pi_v(0) + \\pi_v(9) > .6$ ({n_two:,} stream-steps); one-variable split: $v$ split, the other "
             f"variable not ($< .05$ at one of its ends; {n_one:,}).  Committed: both answers on a corner, split not "
             f"held.  "
-            f"Matched non-splits: no end split, weighted to the corner splits'\nstep x naive's error (FR, .25 log10) "
+            f"Matched non-splits: no end split, weighted to the corner splits'\n"
+            f"step x FR (KL(Bayes $\\Vert$ naive), .25 log10) "
             f"x Bayes's entropy (.2 nats).  d, e: {int(F['trained']['n_corner'].sum()):,} corner-cell episodes "
             f"(12 per corner cell and environment).  f, g: {int(F['trained']['n_out'].sum()):,} moves of Bayes's "
             f"posterior mean of $\\geq 2$ cells at $\\geq 30$ degrees out of a corner split (the step before the move "
@@ -1812,12 +1841,15 @@ ORDER_CLAIMS = (                                    # (label, the pairs (A, B) t
     ("timeline: corner answers half-way before every holding / diagonal-leaving 50%",
      _pairs(("corner truth 50%",), ("joint held 50%",) + _O50 + ("proj_out 50%", "phi_out 50%", "same_out 50%",
                                                                   "amp_out 50%", "e slope 50%", "phi slope 50%"))),
-    ("finding 4: each split set's TV half-way after its matched control",
-     (("tv_ctl_two 50%", "tv_two 50%"), ("tv_ctl_one 50%", "tv_one 50%"))),
+    ("finding 4: the one-variable splits' TV half-way after its matched control",
+     (("tv_ctl_one 50%", "tv_one 50%"),)),
     ("finding 6: distance 50% < angle 50%", (("proj_out 50%", "phi_out 50%"),)),
     ("finding 7: one-axis moves' angle 50% < diagonal moves' angle 50%", (("phi_axis 50%", "phi_diag 50%"),)))
 ORDER_NOT = (("same_out 50%", "held per var one-var 50%"),    # "~" in the timeline although these intervals do not
-             ("same_out 50%", "held per var matched 50%"))    # overlap in the module's resamples
+             ("same_out 50%", "held per var matched 50%"),    # overlap in the module's resamples
+             ("tv_ctl_two 50%", "tv_two 50%"))                # finding 4, corner splits: claimed until 11-10 (margin 21
+                                                              # with the symmetric FR as matching variable); with the
+                                                              # forward FR the intervals overlap in every seed
 
 
 def order_events(F, P, Rp, W):
@@ -1897,8 +1929,9 @@ def order_check(F, P, Rp, fixed, ref=None, seeds=ORDER_SEEDS):
     print(f"   smallest margin of any claimed order over the seeds: {low[0]:,.0f} ({low[1]} < {low[2]})")
     for a, b in ORDER_NOT:
         m = margins(a, b)
-        print(f"   '~' in the timeline: {a} < {b} in only {int((m > 0).sum())} of {len(seeds)} seeds (the module's "
-              f"seed: bounds {E[0][a][2]:,.0f} vs {E[0][b][1]:,.0f}; margins {m.min():,.0f} to {m.max():,.0f}; the "
+        print(f"   '~' (not ordered in the docstring): {a} < {b} in only {int((m > 0).sum())} of {len(seeds)} seeds "
+              f"(the module's seed: bounds {E[0][a][2]:,.0f} vs {E[0][b][1]:,.0f}; margins {m.min():,.0f} to "
+              f"{m.max():,.0f}; the "
               f"reverse order in {int((margins(b, a) > 0).sum())})")
     return E
 

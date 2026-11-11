@@ -1,0 +1,23 @@
+{
+ "counts_Z": {
+  "dim": 15,
+  "lam": 0.001,
+  "val": 0.1381,
+  "test": 0.13375,
+  "test_train": 0.134
+ },
+ "counts_xZ": {
+  "dim": 25,
+  "lam": 1e-05,
+  "val": 0.19725,
+  "test": 0.1879,
+  "test_train": 0.19215
+ },
+ "counts_xfourier": {
+  "dim": 85,
+  "lam": 1e-05,
+  "val": 0.245,
+  "test": 0.23955,
+  "test_train": 0.2487
+ }
+}

@@ -1,0 +1,30 @@
+{
+ "run": "learnmask_det_hi_f05_s20261029",
+ "cond": "det_hi",
+ "frac": 0.05,
+ "start": 600,
+ "seed": 20261108,
+ "cfg": {
+  "mode": "SANITY",
+  "cuda": 1,
+  "episodes": 1001,
+  "checkpoint_every": 5,
+  "realization_num": 10,
+  "hid_dim": 1000,
+  "obs_num": 5,
+  "show_plots": false,
+  "training": true,
+  "batch_num": 8000,
+  "step_num": 30,
+  "state_num": 500,
+  "learn_embeddings": false,
+  "classifier_LR": 0.001,
+  "ctx_num": 2,
+  "skip_training_analyses": true,
+  "reservoir": false,
+  "gpu_inference": true,
+  "micro_batch": 2000,
+  "load_env": "experimental/training_dynamics/learnmask_trunk_s20261029/ckpt_ep00600"
+ },
+ "started": "2026-11-08 23:20:46"
+}

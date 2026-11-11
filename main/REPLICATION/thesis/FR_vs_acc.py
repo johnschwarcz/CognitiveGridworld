@@ -18,6 +18,7 @@ sys.path.insert(0, path + '/main/model')
 
 from main.CognitiveGridworld import CognitiveGridworld
 from main.utils import fig_path
+from main.utils import factorization_regret
 
 # Global Font and Sizing Styles
 plt.rcParams.update({'font.family':'serif','font.size':13,'axes.labelsize':13,'axes.titlesize':16,'legend.fontsize':15})
@@ -92,7 +93,7 @@ def build_and_cache_raw_dataset(agent_ft, agent_echo, tolerance=1e-20, min_repet
             # Compute KL Divergence (per context)
             P = j_bel[:, -1]
             Q = n_bel[:, -1]
-            kl_context = np.sum(P * np.log((P + kl_eps) / (Q + kl_eps)), axis=-1) 
+            kl_context = factorization_regret(P, Q)     # KL(Joint || Naive) per context, exact (until 11-10-2026: with kl_eps added to both)
 
             # Lazy Context Accuracies (per context)
             acc_dict = {}

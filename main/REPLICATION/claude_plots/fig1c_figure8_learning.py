@@ -14,7 +14,12 @@ measure of the stream-step each belief belongs to, minus typical (the same cell'
     band pieces cancel);
     its activity effective dimension PR(u_t) (the gradflow figure's 'Effective dim.');
     the cross-band share again with the credit window fixed at 5 steps (KMAX=4; 1,000 streams per environment);
-    entanglement rev_t and factorization regret FR_t (both variables; log10).
+    entanglement rev_t and factorization regret FR_t (both variables; log10). FR: plot_fig1c_measures_movie.fr_both,
+    since 2026-11-10 the mean over the two variables of KL(the Optimal's marginal || the Naive's), the paper's forward
+    KL, exact (main.utils.factorization_regret); on 29 Oct, when the numbers below were measured, the symmetric KL
+    clipped at 1e-15. The bridge / sheet FR line (bridge_numbers prints it) was re-measured on 2026-11-10, the
+    symmetric values in square brackets; the other FR statements are marked as not re-measured. The FR panel's
+    colour limit (+-.4 log10) was set for the symmetric values: the forward FR puts the bridges at that limit.
 The ESN is not shown: its cross-band share is ~0 at every stream-step (rank-one updates; raw SD 0.006 vs 1.04 for the
 Trained RNN) and its activity dimension (SD 1.7) tracks neither the belief's spread nor novelty, so it is no contrast.
 Panels g, h: per stream-step from step 8, each network measure against how unresolved the Optimal's belief is
@@ -27,13 +32,13 @@ Measured 29 Oct (voxels of 0.05 visited by >= 30 beliefs from step 8; a bridge v
     With a fixed 5-step credit window (KMAX=4, 1,000 streams per environment): -0.16 / -0.53, 64% below.
   - Activity dimension: -2.6 / -1.9 / -0.25 (from step 4: -3.5 / -3.2).
   - ESN: cross-band share 0.00 / 0.00, activity dimension +0.06 / +0.06.
-  - Entanglement: +0.02 / +0.03 / -0.001 (not distinctive). FR: +0.26 / +0.23 / -0.003.
+  - Entanglement: +0.02 / +0.03 / -0.001 (not distinctive). FR: +0.40 / +0.40 / -0.008 [+0.26 / +0.23 / -0.003].
 - Same joint uncertainty, opposite network (MI 0.4 - 0.7, from step 8; MI only loosely matched, 0.47 vs 0.59):
   - Local splits (n 17,043): cross-band share +0.32, activity dimension +5.7.
   - Wormhole splits (n 14,502): cross-band share -0.88, activity dimension -0.9 (this -0.9 is NOT robust, below).
   - Cross-band: local > 0 and wormhole < 0 in 37 / 37 environments; dimension: wormhole < local in 34 / 37.
 - Not the regret: off the wormholes (|Cov| < 2) high FR brings no cancellation. The top FR decile has cross-band
-  +0.035 and dimension +0.6.
+  +0.035 and dimension +0.6. [symmetric FR, 29 Oct: not re-measured with the forward KL]
 - Panels g and h, per stream-step from step 8, by how unresolved the Optimal's belief is (sqrt(Var r_g + Var r_c),
   cells; bins 0-.5 / .5-1 / 1-2 / 2-3 / 3-4 / 4-4.5):
   - Every other belief (|Cov| <= 2): activity dimension -0.6 / -0.6 / +1.1 / +6.2 / +9.8 / +13.1 (n 574 in the last
@@ -61,7 +66,8 @@ scratchpad verify_fig8/):
     splits (both 93 - 95% in corner cells, similar number of cells in play, NE 3.7 vs 3.2): -1.25 vs -0.19 (dimension
     -2.4 vs +14.3; only 5 environments have >= 10 adjacent splits).
   - Not explained by step, cell, novelty or change (< 3%), the baseline, or a few environments; FR-matched wormholes
-    still give -0.83 while off-wormhole beliefs of equal or higher FR give ~0 in every environment.
+    still give -0.83 while off-wormhole beliefs of equal or higher FR give ~0 in every environment. [matched on the
+    symmetric FR, 29 Oct: not re-measured with the forward KL]
 - "Activity narrows" is NOT robust after step 10.
   - Wormhole beliefs sit at about the typical dimension: -0.06 pooled over steps 8 - 30, below typical in only 15 / 39
     environments, positive from step 13 on. They are clearly lower only early: steps 2 - 7 give -3.45, < 0 in 33 / 39.

@@ -13,6 +13,30 @@ by fr, can you please split by the entanglement of the observation. And let's co
 panel per agent)." This was measure M4 of td_tt_chaos.py, moved here on 11-02; the theory (T1-T3) and the Lyapunov
 analysis stay in td_tt_chaos.py.
 
+FACTORIZATION REGRET, 11-10 (John: "calculate factorization regret consistently everywhere": FR = KL(Bayes || naive),
+  the paper's forward form; main.utils.factorization_regret = probes.npz 'fr' since that day). In the caches of 11-02
+  and in EVERY FR NUMBER BELOW, FR is still the symmetric KL clipped at 1e-15, that day's probes 'fr': pairs_v2.npz
+  'fr', 'fr_edges' and the first figures' shuffle 'shuf_*' (its donor groups are FR thirds); pairs_combined.npz
+  'fr_edges' and its FR contrasts (fr3|..., ...|step+bin+fr). build() and combined() read probes 'fr', so a rebuild
+  switches all of them to the forward FR (rename the old caches to <name>_sym_superseded.npz first). They were not
+  rebuilt on 11-10: the kept figure, td_tt_chaos_pairs.png (td_tt_chaos_combined.py), does not use FR (its shuffle's
+  groups are entanglement fifths and distance thirds), the FR figure was dropped on 11-02, and build() would rewrite
+  the FR-independent beliefs and pair measures as well (1.4 GB, from GPU forwards).
+  Read-only check with the forward FR (the pair means of probes 'fr' on the stored units, thirds by fr_thirds, the
+  stored shuffle kept; matched() / _fr_numbers() as below; the same code with the stored FR reproduces RESULTS):
+    thirds 0 / .182 / .642 / 85.1 nats (symmetric 0 / .219 / .869 / 34.3); 89.6% of the units in the same third;
+      mean step per third 12.9 / 16.2 / 19.2.
+    highest - lowest third of Delta d_H, matched on step and d_H before: Bayes +.099 [+.081, +.119] (symmetric +.081),
+      Trained RNN +.424 [+.393, +.454] (+.402), ESN -.012 [-.022, -.002] (-.012); raw +.158 / +.414 / -.112 (+.171 /
+      +.401 / -.121); Trained RNN - Bayes on one population +.401 [+.360, +.439] (+.393).
+    40 bins: +.096 [+.078, +.116] / +.424 [+.392, +.454] / -.010 [-.020, -.001]; also matched on the entanglement
+      fifth -.002 [-.024, +.020] / +.294 [+.273, +.315] / -.020 [-.028, -.012] (symmetric -.023 [-.045, -.000] / +.271
+      / -.019). The entanglement dependence matched also on the FR third +.418 / +.523 / +.041 (+.427 / +.529 / +.042),
+      the other-variable dependence +.415 / +.658 / +.017 (+.417 / +.662 / +.017).
+  So READING 4, 6, 7 and 9 stand. Two nuances: with the entanglement matched, Bayes's FR trend is not resolved from 0
+  (it read 'slightly negative'); the ESN's small negative trend is resolved with every binning (-.010 to -.012; with
+  the symmetric FR the other binnings' intervals included 0).
+
 STATUS (11-02, round 4): done at the end of training (one checkpoint per network); corrected after three adversarial
 checks (CORRECTIONS).
 -> main/REPLICATION/figure_bin/td_tt_chaos_pairs_detail.png (command figure; the first figure, 20 bins: d_H after
@@ -35,7 +59,8 @@ DEFINITIONS
     for a shared observation is such a vector (td_tt_chaos.py T1). d_H is set by the two values with the extreme
     log-ratios, which can be values that both beliefs treat as near-impossible.
   Bulk divergences (values weighted by their probability): SKL(p, q) = [KL(p||q) + KL(q||p)] / 2 = Sigma_r (p_r - q_r)
-    log(p_r / q_r) / 2 (FR's convention); JS(p, q) = [KL(p||m) + KL(q||m)] / 2 with m = (p + q) / 2 (at most log 2).
+    log(p_r / q_r) / 2 (a symmetric KL between the pair's two beliefs; not a regret); JS(p, q) = [KL(p||m) +
+    KL(q||m)] / 2 with m = (p + q) / 2 (at most log 2).
   Common mode: both log beliefs shifted by the pair's mean log-update (Delta log p + Delta log q) / 2, then
     renormalised. This update changes both beliefs alike and leaves d_H unchanged. "Beyond the common mode" = after
     minus this counterfactual's after. Naive's update is its own common mode. "Beyond naive" = the agent's change minus
@@ -57,9 +82,10 @@ DEFINITIONS
     likelihood (one step of factorized-state Bayes), and its marginals give d_H after. Joint d_H: between the pair's
     joint posteriors over the 100 cells. The shared observation conserves it (T1), and the marginal d_H never exceeds
     it (T2).
-  FR: the pair's factorization regret before the observation, per variable: [KL(Bayes||naive) + KL(naive||Bayes)] / 2
-    of that variable's marginals, the mean of the two probes. Thirds are pooled over all units, the same for every
-    agent.
+  FR: the pair's factorization regret before the observation, per variable, the mean of the two probes. Thirds are
+    pooled over all units, the same for every agent. In the caches and numbers of 11-02: [KL(Bayes||naive) +
+    KL(naive||Bayes)] / 2 of that variable's marginals, clipped at 1e-15; after a rebuild: KL(Bayes||naive), exact
+    (FACTORIZATION REGRET, 11-10, above).
   Matched on step and distance before (the matched estimator, matched()): cells are (step t, bin of the agent's own d_H
     before), using the figure's bins and the units inside them; only cells with at least 20 units in every group (FR
     third, entanglement fifth, ...) are used. Per cell, the group's mean; cells are averaged with their unit counts as
@@ -801,7 +827,8 @@ def build(dev=None):
                 checks[f"vs old pairs.npz, {k}"] = float(max(np.abs(out[f"pre_{k}"] - Old[f"pre_{k}"]).max(),
                                                              np.abs(out[f"post_{k}"] - Old[f"post_{k}"]).max()))
     out.update(edges=edges, fr_edges=fe, check_names=np.array(list(checks)),
-               check_values=np.array(list(checks.values())))
+               check_values=np.array(list(checks.values())),
+               fr_def="forward")           # FR = KL(Bayes || naive) (probes 'fr'); the cache of 11-02 has no such mark
     np.savez(CACHE, **out)
     print(f"pairs: {len(I):,} pair-steps ({time.time() - t0:.0f} s); checks {checks}")
 
@@ -1438,6 +1465,9 @@ def numbers():
     print(f"== data: {m:,} pair-steps x 2 variables = {m * NV:,} units per agent; same-observation pairs left out for "
           f"equal counts {int(Z['n_equal_counts']):,}; distinct probe pairs "
           f"{len(np.unique(Z['I'] * 10000 + Z['J'])):,}")
+    print("   FR in this cache: " + ("KL(Bayes || naive), forward, exact" if str(Z.get("fr_def", "")) == "forward" else
+                                     "the symmetric KL clipped at 1e-15 (built before 11-10; docstring: FACTORIZATION "
+                                     "REGRET, 11-10)"))
     for k, name, _ in AGENTS:
         p = Z[f"pre_{k}"].ravel()
         print(f"  d_H before, {name:11s}: median {np.median(p):.1f} (quartiles {np.percentile(p, 25):.1f}-"

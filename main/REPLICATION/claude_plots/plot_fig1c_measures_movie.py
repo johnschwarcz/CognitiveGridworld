@@ -8,10 +8,12 @@ Measures (nine), all shown in the plane of the Trained RNN's posterior means (E[
                            figure); the error delta, the Trained RNN's read-out against the target it was trained on
                            (the Optimal's exact marginals): [KL_sym(b_g^RNN, b_g^Opt) + KL_sym(b_c^RNN, b_c^Opt)] / 2
                            (John 10-28: "the actual error, delta", replacing entanglement minus its mean so far);
-                           factorization regret, the symmetric KL divergence
-                           [KL(b_v^Opt || b_v^Naive) + KL(b_v^Naive || b_v^Opt)] / 2 between the Optimal's and the
-                           Naive's beliefs about variable v, averaged over BOTH variables v = g, c (John 10-28; the
-                           scan's stored FR is the goal variable's alone): fr_both()
+                           factorization regret, KL(b_v^Opt || b_v^Naive) of the Optimal's and the Naive's beliefs
+                           about variable v (the paper's forward KL, exact: main.utils.factorization_regret; until
+                           2026-11-10 the symmetric KL clipped at 1e-15: a median 1.05 times this at step 1, 1.28 at
+                           step 10, 1.38 at T; smaller than it at 17% of the stream-steps), averaged over BOTH
+                           variables v = g, c (John 10-28; the scan's stored FR is the goal variable's alone):
+                           fr_both()
     state                  |u_t|; the effective dimension of the network's activity u_t (participation ratio
                            (sum E)^2 / sum E^2 of E_k = ((u_t - mu) . v_k)^2 on the network's fixed 1000-d PCA basis,
                            gradflow_basis_<net>); the same for its beliefs (John 10-28, replacing the update's effective
@@ -75,7 +77,7 @@ PANELS = (("rev", "Entanglement", r"$\mathrm{rev}_t$"),
           ("err", "Error",
            r"$\delta = \frac{1}{2}\Sigma_{v = g, c}\,\mathrm{KL}_\mathrm{sym}(b^\mathrm{RNN}_v, b^\mathrm{Opt}_v)$"),
           ("fr", "Factorization regret",
-           r"$\frac{1}{2}\Sigma_{v = g, c}\,\mathrm{KL}_\mathrm{sym}(b^\mathrm{Opt}_v, b^\mathrm{Naive}_v)$"),
+           r"$\frac{1}{2}\Sigma_{v = g, c}\,\mathrm{KL}(b^\mathrm{Opt}_v \,\|\, b^\mathrm{Naive}_v)$"),
           ("l2", "Norm", r"$\|u_t\|$"),
           ("pr", "Effective dim., activity", r"$(\Sigma_k E_k)^2 / \Sigma_k E_k^2$, $E_k = ((u_t - \bar u) v_k)^2$"),
           ("bpr", "Effective dim., beliefs", r"$(\Sigma_k E_k)^2 / \Sigma_k E_k^2$, $E_k = ((b_t - \bar b) w_k)^2$"),
@@ -116,10 +118,12 @@ def _rank(A):
 
 
 def fr_both():
-    """factorization regret averaged over the two variables, [FR_g + FR_c] / 2, FR_v = fr_sym(the Optimal's marginal of
-    v, the Naive's) (plot_fig1c_all.fr_sym, nats), exact in float64 from the scan's observations (exact_bayes,
-    naive_marginals, as the scan's goal-only FR) -> (39, 5000, T); cached in round7_jumps/fr_both.npz (about 1 min);
-    the first computation checks the goal variable's against the stored FR"""
+    """factorization regret averaged over the two variables, [FR_g + FR_c] / 2, FR_v = KL(the Optimal's marginal of v
+    || the Naive's): the paper's forward KL, exact (plot_fig1c_all.fr_streams: main.utils.factorization_regret on the
+    log beliefs from the scan's observations, as the scan's goal-only FR; nats) -> (39, 5000, T); cached in
+    round7_jumps/fr_both.npz (about 1 min); the first computation checks the goal variable's against the stored FR.
+    Until 2026-11-10 FR_v was the symmetric KL clipped at 1e-15 (plot_fig1c_all.fr_sym): that cache is kept as
+    round7_jumps/fr_both_sym_superseded.npz"""
     path = os.path.join(R7, "fr_both.npz")
     if not os.path.exists(path):
         import plot_fig1c_all as fa
@@ -127,10 +131,9 @@ def fr_both():
         out, err = [], 0.
         for e in ENVS:
             obs, L, g = meta["obs"][e], meta["L"][e], int(meta["goal"][e])
-            J, Nv = fa.exact_bayes(obs, L)[1], fa.naive_marginals(obs, L)
-            fr = np.stack([fa.fr_sym(J[:, :, v], Nv[:, :, v]) for v in (0, 1)])    # raw variable order
-            err = max(err, float(np.abs(fr[g] - meta["FR"][e]).max()))
-            out.append(fr.mean(0))
+            fr = fa.fr_streams(obs, L)                                             # (n, T, 2), raw variable order
+            err = max(err, float(np.abs(fr[:, :, g] - meta["FR"][e]).max()))
+            out.append(fr.mean(-1))
         print(f"fr_both: the goal variable's FR matches the stored one to {err:.1e}", flush=True)
         np.savez(path, fr_both=np.array(out, np.float32), check=err)
     with np.load(path) as f:
@@ -139,8 +142,10 @@ def fr_both():
 
 def err_both():
     """the Trained RNN's error against its training target, averaged over the two variables, [d_g + d_c] / 2,
-    d_v = fr_sym(the network's marginal of v, the Optimal's exact one) (nats; the scan's beliefs are goal-ordered, the
-    exact marginals raw-ordered) -> (39, 5000, T); cached in round7_jumps/err_both.npz"""
+    d_v = fr_sym(the network's marginal of v, the Optimal's exact one) (the symmetric KL clipped at 1e-15, nats: an
+    error between a network and the Optimal, not a factorization regret, so unchanged when FR became the forward KL
+    on 2026-11-10; the scan's beliefs are goal-ordered, the exact marginals raw-ordered) -> (39, 5000, T); cached in
+    round7_jumps/err_both.npz"""
     path = os.path.join(R7, "err_both.npz")
     if not os.path.exists(path):
         import plot_fig1c_all as fa

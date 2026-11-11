@@ -13,14 +13,17 @@ by the SAME variable's entanglement / confidence / FR / update size, both variab
 each step (4,000 values of every step per fifth: panels a-e); whole-network measures by the split variable averaged
 over the two variables (f, h: 2,000 particles of every step per fifth; g, i: the 5,000 update-half probes, about 1,000
 per step). Versions: the first (11-01) averaged both sides over the two variables; its accuracy-by-FR flip (- to + at
-140-880) came from the cross terms (paired: high-FR steps less accurate at every checkpoint, -.02 to -.25), and its
+140-880) came from the cross terms (paired: high-FR steps less accurate at every checkpoint, -.019 to -.255), and its
 accuracy-by-entanglement flip (140-360) moves to 480-720 when paired and no longer replicates (halves agree 81%).
 Panels a and b are now the belief error by confidence and the accuracy by update size within the episode.
 Selection: flips visible in the fans (both halves agree on >= 95% of the checkpoints of both signs), and the ESN's
-memory-use flip (opposite in direction, ~5x earlier). Scan totals (halves agree >= 95%): Trained RNN 38 flips in 33
-of 112 measure x split combinations, 24 of them with geometric midpoints between 300 and 3,000 training episodes
-(around passing naive), 4 earlier, 10 later; ESN 14 flips in 13 combinations: memory use (140-260 episodes), and the
-belief error by Bayes's confidence (+1.20 -> -1.23 nats, 1,600-4,400) and by update size (-.41 -> +.45, 720-1,120).
+memory-use flip (opposite in direction, ~5x earlier). Scan totals (halves agree >= 95%): Trained RNN 36 flips in 31
+of 112 measure x split combinations, 23 of them with geometric midpoints between 300 and 3,000 training episodes
+(around passing naive), 3 earlier, 10 later; ESN 17 flips in 16 combinations, among them memory use (140-260
+episodes), and the belief error by Bayes's confidence (+1.20 -> -1.23 nats, 1,600-4,400) and by update size (-.41 ->
++.45, 720-1,120). (Totals re-scanned 11-10 with FR = KL(Bayes || naive), the paper's forward form: probes.npz 'fr'.
+With the symmetric clipped FR of 11-01 they were 38 in 33 (24 / 4 / 10) and 14 in 13; only the FR splits' series
+changed (td_flip_scan.py), and no panel here is split by FR, so the figures are as they were.)
 Flips found but not drawn: |u| by Bayes's update size (-.28 -> +.11 between 880 and 1,360), memory use by own
 entanglement within the episode (-.002 -> +.050, 400-720); the update energy by update size (-10.6 -> +10.4 between
 1,040 and 1,680) is left out: its halves agree on only 83%.

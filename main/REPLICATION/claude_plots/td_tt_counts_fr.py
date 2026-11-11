@@ -8,10 +8,12 @@ td_analysis fits the decoder on 20, chooses the penalty (lambda = c tr(G) / D, c
 the 25 and tests on the other 25 (the decoder-test environments), re-choosing c at every checkpoint. Here the same
 decoder (td_analysis's float32 solve) runs per checkpoint at every c, with per-episode predictions (CHECKS); the
 control is one fixed penalty, c = 0.1 at every checkpoint of both networks. The 5,000 decoder-test episodes are split
-into fifths of their factorization regret at T: FR_T = the mean over the two variables of [KL(Bayes || naive) +
-KL(naive || Bayes)] / 2 of the marginal beliefs at step 30 (the probes' fr = td_analysis.fr_sym, which clips the
-marginals to [1e-15, 1 - 1e-15] and so caps each variable's FR near 34.54 nats; the largest FR_T is 28.05 clipped,
-36.1 exact; CHECKS). Each fifth's part is on the total's scale (memory: split r additively): R^2_g = 1 - SSE_g / (n_g
+into fifths of their factorization regret at T: FR_T = the mean over the two variables of KL(Bayes || naive) of the
+marginal beliefs at step 30 (the paper's forward form, exact: main.utils.factorization_regret = probes.npz 'fr';
+since 11-10). Until then, and in CHECKS and RESULTS below, FR_T was the mean of the symmetric KL, [KL(Bayes || naive)
++ KL(naive || Bayes)] / 2 (td_analysis.fr_sym, which clips the marginals to [1e-15, 1 - 1e-15] and so caps each
+variable's FR near 34.54 nats; the largest FR_T was 28.05 clipped, 36.1 exact); FORWARD FR below gives the
+re-measurement. Each fifth's part is on the total's scale (memory: split r additively): R^2_g = 1 - SSE_g / (n_g
 SST / n), SST around the decoder-test mean; the five parts average (weights n_g = 1,000) to the total R^2, so a fifth
 below the total is decoded worse than the average decoder-test episode, in the same units. The top fifth's contrast
 D5 = R^2_5 - mean(R^2_1..4) = (mean MSE of fifths 1-4 - MSE_5) / (SST / n); the graded checks D4 = R^2_4 -
@@ -27,7 +29,35 @@ against .089) or the end (.050 against .052); the ESN's range over c = .01-1 exc
 the same resamples; an order is stated only with its paired difference.
 -> main/REPLICATION/figure_bin/td_tt_counts_fr.png: a, b the parts through training (chosen c); c, d D5 at the chosen
 c (band shaded) and at c = 0.1 (dashed, band between thin lines), the chosen c in a strip below. Caches
-through_training/counts_fr/decode.npz (per-episode SSE at every c) and decode64.npz (the float64 check).
+through_training/counts_fr/decode.npz (per-episode SSE at every c) and decode64.npz (the float64 check). The SSE do
+not depend on FR: load() takes FR_T from the probes and ignores decode.npz's own fr_T field, which in the cache of
+11-02 is the symmetric clipped one (a rebuild writes the forward one).
+
+FORWARD FR (11-10; numbers(), CPU, ~25 s. The figure was not redrawn: it left figure_bin with the commit of 11-05)
+  FR_T fifths 0.0032-0.30 / 0.30-0.67 / 0.67-1.4 / 1.4-4.0 / 4.0-43 nats (symmetric: 0.0032-0.42 / 0.42-1.0 / 1.0-2.4
+  / 2.4-6.9 / 6.9-28). 68.7% of the decoder-test episodes are in the same fifth under both, 793 of the 1,000 top-fifth
+  episodes are shared, rank correlation .953 (one variable's FR now reaches 85.1 nats, FR_T 42.5).
+  The four results stand. Forward-FR values (the symmetric ones are in RESULTS):
+  1. The dip is global: parts at the dip (1,120) .433 / .429 / .450 / .425 / .407 (total .429); initial .854 / .849 /
+  .856 / .839 / .837; end .906 / .893 / .901 / .898 / .908. Every fifth falls by .41-.43 (paired 5% bounds .353-.373;
+  +186 to +197 counts^2). Fifths cut within each environment .394-.453, on environment-centred log FR_T .400-.468. On
+  environment-centred raw FR_T they are .306 / .458 / .520 / .454 / .407: with the uncapped FR an environment's mean
+  is set by its largest episodes, so centring on it sorts the episodes by environment (57.8% in the same fifth as the
+  global split) and this variant no longer isolates a within-environment effect; its D5 is as the others' (-.028
+  [-.091, +.035] at the dip, -.067 at 480, -.091 at 1,920, +.009 at the end).
+  2. Initial network: D5 -.012 [-.024, -.000], D4 -.013 [-.022, -.005], T2 -.014 [-.023, -.005]. ESN: D5 -.012 to
+  -.019 up to 1,200 and -.034 to -.040 from 8,800, significant at 103 of 114 checkpoints; D4 at all 114; end minus
+  initial -.024 [-.039, -.009] (c = 0.1: -.020 [-.041, -.002]).
+  3. Trained RNN, D5: significant at 83 of 114 checkpoints (10-560, 1,360, 1,520, 1,680-23,200, 25,600); -.067 [-.105,
+  -.030] at 480, -.027 [-.100, +.045] at the dip (unresolved), -.093 [-.140, -.047] at 1,920, +.009 [-.016, +.045] at
+  the end. Paired: mean over 200-560 minus mean over 20-120 -.034 [-.056, -.014]; 1,280-8,000 minus 200-560 -.000
+  [-.025, +.025]; 8,800-24,000 minus 1,280-8,000 +.038 [+.015, +.060]; end minus initial +.021 [-.009, +.057] (c = 0.1:
+  +.006 [-.014, +.026]). Fixed c = 0.1: significant at 97 of 114. One difference: at the common penalty c = 0.1 the
+  Trained RNN's D5 is above the ESN's at 38,400 and at the end (+.027 [+.001, +.052]); with the symmetric FR it was
+  above at no checkpoint for c = 1e-3 to 1 (+.019 [-.000, +.037]). At c = .01 and c = 1 it is still unresolved at
+  the end (+.047 [-.002, +.097], +.003 [-.025, +.029]).
+  4. ESN: .854 / .849 / .856 / .839 / .837 at the start -> .797 / .793 / .798 / .772 / .754 at the end; the fifths
+  fall by .057-.084; D5 -.036 [-.055, -.019] at the end.
 
 CHECKS (numbers)
   The total R^2 at the chosen c equals td_analysis's stored dec_r2[step 30, u, counts] at all 114 checkpoints of both
@@ -43,14 +73,16 @@ CHECKS (numbers)
   .0187 (its R^2 there falls to -2.287 / -.154 in float64). No number quoted here moves by more than .001 (the c =
   .01 minimum .312 is .311 in float64); the five-c count above is 53 in float64 against 56; the Trained-RNN-minus-ESN
   runs at one common penalty and at the mixed penalties (RESULTS 3) are the same in float64.
-  Fifths: 1,000 decoder-test episodes each (5,000 distinct FR_T values, 25 environments). Clipping: one variable's FR
+  Fifths (of the symmetric FR, until 11-10): 1,000 decoder-test episodes each (5,000 distinct FR_T values, 25
+  environments). Clipping: one variable's FR
   reaches 34.40 nats clipped (the cap: log((1 - 1e-15) / 1e-15) = 34.54), 58.1 exact; FR_T 28.05 clipped (2 episodes
   within .5 nats of it), 36.1 exact (top-fifth edge 7.08 vs 6.91 clipped); 98.6% of the episodes fall in the same
   fifth, 974 of the 1,000 top-fifth episodes are shared, rank correlation .9990.
   Resampling: centring SST on each resample's own mean (the first version used the full decoder-test mean) moves D5's
   interval ends by at most .001 (significant checkpoints 85 Trained RNN / 98 ESN either way); a 25-of-25 bootstrap of
   the decoder-test environments (seed 20261104) moves them by at most .005 / .002 (85 / 95 significant).
-RESULTS (FR_T fifths 0.0032-0.42 / 0.42-1.0 / 1.0-2.4 / 2.4-6.9 / 6.9-28 nats; chosen c unless stated)
+RESULTS (measured 11-02 with the symmetric clipped FR: FR_T fifths 0.0032-0.42 / 0.42-1.0 / 1.0-2.4 / 2.4-6.9 /
+  6.9-28 nats; chosen c unless stated; the forward-FR re-measurement is above)
   1. Failed hypothesis: the dip is not concentrated where factorization fails; it is global. Trained RNN, total R^2
   .429 at its minimum (1,120 training episodes): fifths .440 / .423 / .445 / .441 / .395 (5-95% [.356, .507] /
   [.340, .495] / [.369, .505] / [.371, .497] / [.313, .468]); initial network .854 / .849 / .855 / .840 / .837; end
@@ -153,6 +185,7 @@ sys.path[:0] = [ROOT, os.path.join(ROOT, "main", "REPLICATION"),
 os.environ.setdefault("MPLBACKEND", "Agg")
 import td_tt_gap as gap                                                                       # noqa: E402
 import td_tt_intervene as ti                                                                  # noqa: E402
+from main.utils import factorization_regret                                                   # noqa: E402
 
 OUT = os.path.join(gap.TT, "counts_fr")
 RIDGE_C = (1e-4, 1e-3, 1e-2, 1e-1, 1.)                     # td_analysis.RIDGE_C: penalty = c * tr(G) / D
@@ -180,7 +213,7 @@ def _probe_side():
     env = P["env"]
     sets = {k: np.isin(env, Z[f"dec_{k}"]) for k in ("train", "val", "test")}
     counts = P["obs"].sum(1).astype(np.float32)                                          # n_T (n, 5), inclusive
-    fr_T = Z["fr"][:, -1].astype(np.float64).mean(-1)                                    # mean of the two variables
+    fr_T = Z["fr"][:, -1].astype(np.float64).mean(-1)          # KL(Bayes || naive) at T, mean of the two variables
     return P, sets, counts, fr_T
 
 
@@ -303,8 +336,16 @@ def build64(dev=None):
 # ═══════════════════════════════════════════════════════════════════
 
 def load():
+    """decode.npz, with FR_T taken from the probes (forward, exact), not from the cache: a cache built before 11-10
+    stores the mean of the two variables' symmetric clipped KL in its own 'fr_T' (kept as 'fr_T_cache'); the
+    per-episode SSE do not depend on FR, so the cache needs no rebuild"""
     with np.load(os.path.join(OUT, "decode.npz")) as z:
-        return {k: z[k] for k in z.files}
+        D = {k: z[k] for k in z.files}
+    with np.load(os.path.join(ti.AN, "probes.npz")) as Z:
+        test = np.isin(Z["env"], Z["dec_test"])
+        assert np.array_equal(Z["env"][test], D["env_test"]), "decode.npz: other decoder-test episodes than the probes'"
+        D["fr_T_cache"], D["fr_T"] = D["fr_T"], Z["fr"][test, -1].astype(np.float64).mean(-1)
+    return D
 
 
 def fifths(v):
@@ -467,22 +508,23 @@ def numbers():
     print(f"decoder-test episodes {n} in {len(np.unique(env))} environments; fifth sizes {np.bincount(g).tolist()}; "
           f"{len(np.unique(fr))} distinct FR_T values; FR_T edges (nats) " + " / ".join(f"{e:.4g}" for e in edges)
           + "; legend labels " + " / ".join(edge_label(e) for e in edges))
-    fr_var = Z["fr"][test, -1].astype(np.float64)                                        # (n, 2), clipped
+    fr_var = Z["fr"][test, -1].astype(np.float64)                                        # (n, 2), forward, exact
     assert np.array_equal(fr_var.mean(-1), fr)
-    lj, ln = Z["log_jb"][test, -1].astype(np.float64), Z["log_nb"][test, -1].astype(np.float64)
-    lj = lj - np.log(np.exp(lj).sum(-1, keepdims=True))
-    ln = ln - np.log(np.exp(ln).sum(-1, keepdims=True))
-    p, q = np.exp(lj), np.exp(ln)
-    fr_ex_var = .5 * ((p * (lj - ln)).sum(-1) + (q * (ln - lj)).sum(-1))
-    fr_ex = fr_ex_var.mean(-1)
-    g_ex, e_ex = fifths(fr_ex)
-    rk = np.corrcoef(np.argsort(np.argsort(fr_ex)), np.argsort(np.argsort(fr)))[0, 1]
-    print(f"FR clipping (fr_sym clips the marginals to [1e-15, 1 - 1e-15], which caps one variable's FR near "
-          f"log((1 - 1e-15) / 1e-15) = {np.log((1 - 1e-15) / 1e-15):.2f} nats): per-variable FR max {fr_var.max():.2f} "
-          f"clipped, {fr_ex_var.max():.1f} exact; FR_T max {fr.max():.2f} clipped ({(fr > fr.max() - .5).sum()} "
-          f"episodes within .5 nats of it), {fr_ex.max():.1f} exact; top-fifth edge {edges[4]:.2f} clipped vs "
-          f"{e_ex[4]:.2f} exact; same fifth for {(g_ex == g).mean():.1%} of the episodes, "
-          f"{((g_ex == 4) & (g == 4)).sum()} of the 1,000 top-fifth episodes shared; rank correlation {rk:.4f}")
+    fr_chk = factorization_regret(Z["log_jb"][test, -1], Z["log_nb"][test, -1], logs=True)   # from the float32 logs
+    fs_var = Z["fr_sym"][test, -1].astype(np.float64)                                    # the superseded symmetric one
+    fs = fs_var.mean(-1)
+    g_s, e_s = fifths(fs)
+    rk = np.corrcoef(np.argsort(np.argsort(fs)), np.argsort(np.argsort(fr)))[0, 1]
+    print(f"FR = KL(Bayes || naive), forward, exact (probes 'fr'; from the stored float32 log beliefs: max |d| "
+          f"{np.abs(fr_chk - fr_var).max():.1e}); the cache's own fr_T equals it: "
+          f"{bool(np.allclose(D['fr_T_cache'], fr))}, equals the symmetric clipped one: "
+          f"{bool(np.allclose(D['fr_T_cache'], fs))}")
+    print(f"against the superseded symmetric clipped FR (probes 'fr_sym', used until 11-10): per-variable FR max "
+          f"{fr_var.max():.2f} forward, {fs_var.max():.2f} symmetric (capped near {np.log((1 - 1e-15) / 1e-15):.2f}); "
+          f"FR_T max {fr.max():.2f} vs {fs.max():.2f}; mean {fr.mean():.2f} vs {fs.mean():.2f}; edges forward "
+          + " / ".join(f"{e:.4g}" for e in edges) + ", symmetric " + " / ".join(f"{e:.4g}" for e in e_s)
+          + f"; same fifth for {(g_s == g).mean():.1%} of the episodes, {((g_s == 4) & (g == 4)).sum()} of the 1,000 "
+          f"top-fifth episodes shared; rank correlation {rk:.4f}")
     m_t = W.sum(1) / gap.PER_ENV
     print(f"resamples restricted to the 25 decoder-test environments: {m_t.min():.0f}-{m_t.max():.0f} draws (mean "
           f"{m_t.mean():.2f}, sd {m_t.std():.2f})")
@@ -870,8 +912,8 @@ def figure():
             "(seed 20261029). The decoder is that of the summary figure's panel d:\nfitted on 25 of these "
             "environments, its penalty c chosen on 5 of them and re-chosen at every checkpoint (strips), tested on "
             "the other 25 = 5,000 episodes, 1,000 per FR fifth;\ndashed in c, d: c = 0.1 at every checkpoint. FR at "
-            "T = the mean of the two variables' symmetric KL between Bayes's and naive's marginals at step 30 "
-            "(clipped at 1e-15).\nBands: 5-95% over 1,000 resamples of the 25 decoder-test environments, with the "
+            r"T = the mean of the two variables' KL(Bayes $\Vert$ naive) of the marginal beliefs at step 30."
+            "\nBands: 5-95% over 1,000 resamples of the 25 decoder-test environments, with the "
             "decoder and its penalty fixed (c, d: shaded for the chosen c, between thin lines for c = 0.1).\n"
             "Dotted: the Trained RNN passes naive.")
     fig.text(.5, .062, foot, ha="center", va="center", fontsize=FL - 1, linespacing=1.55)

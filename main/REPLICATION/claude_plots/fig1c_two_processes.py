@@ -10,6 +10,12 @@ visualizations)")
    main/REPLICATION/figure_bin/fig1c_two_processes.png     figure_two_processes()
    the written synthesis: main/DATA/experimental/fig1c_compression/report_6_two_processes.md
 Caches: figdata/round8_two_processes/{lags_time,xcorr_time,timeline}.npz (small; rebuilt from the round 7 caches).
+Factorization regret (FR) here is plot_fig1c_measures_movie.fr_both: the mean over the two variables of KL(the
+Optimal's marginal || the Naive's), the paper's forward KL, exact (main.utils.factorization_regret), since 2026-11-10;
+on 28 Oct it was the symmetric KL clipped at 1e-15. That day lags_time_q10 / _q02 and xcorr_time were rebuilt (only
+their FR entries changed; the caches of 28 Oct are kept beside them as ..._sym_superseded.npz) and the FR numbers
+below re-read from them: the forward value first, the symmetric one of 28 Oct in square brackets. No other number
+changed.
 
 Data: the alias scan (39 environments x 100 cells x 50 streams x 30 steps; all agents on the same streams). Jumps:
 each step's move of an agent's posterior mean, Delta mu_t = (Delta E[r_g], Delta E[r_c]) (fig1c_crossings.jumps),
@@ -46,17 +52,19 @@ Measured 28 Oct (printed by the functions; steps are arrival steps, 1-based):
   / .02 / .03, ESN .15 / .05 / .03 / .03 / .03; the Optimal's median jump 1.21 / .46 / .23 / .11 / .07 cells.
 - PROCESS A, the step before a diagonal jump (diagonal minus one-axis, top 10%; top 2% in brackets), steps 3 / 5 / 10 /
   15 / 20 / 30: joint split I(r_g; r_c) +.22 / +.22 / +.17 / +.11 / +.09 / +.07 nats (+.22 / +.28 / +.29 / +.23 / +.19 /
-  +.11); FR +.18 / +.21 / +.15 / +.09 / +.04 / -.01 log10 (+.21 / +.24 / +.22 / +.22 / +.14 / +.03); entanglement +.12
-  / +.04 / -.00 / -.00 / -.01 / -.02 (early only; top 2% +.20 at step 3); activity eff. dim. -2.7 / -5.4 / -1.1 / -.4 /
+  +.11); FR +.20 / +.26 / +.22 / +.14 / +.08 / +.03 log10 (+.21 / +.28 / +.30 / +.31 / +.23 / +.09) [+.18 / +.21 /
+  +.15 / +.09 / +.04 / -.01 (+.21 / +.24 / +.22 / +.22 / +.14 / +.03)]; entanglement +.12 / +.04 / -.00 / -.00 /
+  -.01 / -.02 (early only; top 2% +.20 at step 3); activity eff. dim. -2.7 / -5.4 / -1.1 / -.4 /
   -.5 / +.1 dims (-4.5 / -10.4 / -7.4 / -4.3 / -1.9 / -1.3). At the jump: novelty -.62 / -.55 / -.57 / -.43 / -.35 /
   -.34 nats (diagonal jumps follow LESS surprising observations), entanglement -.09 / -.13 / -.09 / -.06 / -.03 / -.01
   log10, cross-band share +.01 / -.08 / -.30 / -.35 / -.27 / -.02 (top 2% -.03 / -.16 / -.53 / -1.07 / -.95 / -.26).
-- Rows 1 - 3 (one-axis 0 - 15 vs diagonal 40 - 45 deg): early (steps 3 - 6) joint split at t - 1 +.02 vs +.24, FR -.05
-  vs +.15, entanglement at t - 1 +.01 vs +.07 and at t +.20 vs +.09, novelty at t +.94 vs +.37, activity eff. dim. at t
-  +7.7 vs +.4; mid (7 - 16) joint split +.03 vs +.18, FR -.04 vs +.10, entanglement at t +.23 vs +.14, cross-band share
-  at t +.41 vs +.11; late (17 - 30) joint split +.02 vs +.10, FR -.03 vs -.02, entanglement at t +.24 vs +.21, novelty
-  +1.25 vs +.89, activity eff. dim. +4.4 vs +3.3, cross-band share at t +.44 vs +.25 (t - 1: -.03 vs -.12). Medians:
-  1.6 - 2.4 cells early, .67 - .94 mid, .32 - .34 late; n 78,000 / 195,000 / 273,000.
+- Rows 1 - 3 (one-axis 0 - 15 vs diagonal 40 - 45 deg): early (steps 3 - 6) joint split at t - 1 +.02 vs +.24, FR -.02
+  vs +.21 [-.05 vs +.15], entanglement at t - 1 +.01 vs +.07 and at t +.20 vs +.09, novelty at t +.94 vs +.37,
+  activity eff. dim. at t +7.7 vs +.4; mid (7 - 16) joint split +.03 vs +.18, FR -.01 vs +.18 [-.04 vs +.10],
+  entanglement at t +.23 vs +.14, cross-band share at t +.41 vs +.11; late (17 - 30) joint split +.02 vs +.10, FR
+  -.01 vs +.04 [-.03 vs -.02], entanglement at t +.24 vs +.21, novelty +1.25 vs +.89, activity eff. dim. +4.4 vs
+  +3.3, cross-band share at t +.44 vs +.25 (t - 1: -.03 vs -.12). Medians: 1.6 - 2.4 cells early, .67 - .94 mid,
+  .32 - .34 late; n 78,000 / 195,000 / 273,000.
 - Corners: the diagonal large jumps lie in the four corner 2 x 2 blocks .38 / .45 / .47 / .39 / .31 / .19 of the time at
   steps 3 / 5 / 10 / 15 / 20 / 30 (one-axis .21 - .14; all cells .16).
 - The converse: one step after a strong joint split (I in the top 10% of its environment and step) the large jumps are
@@ -81,8 +89,8 @@ Measured 28 Oct (printed by the functions; steps are arrival steps, 1-based):
   16 the cells' typical course holds 38 / 61 / 63 / 47% of a stream's variance of eff. dim., dW energy, dW eff. dim.,
   cross-band share (steps 17 - 30: 5 / 7 / 3 / 3%): that is what hides the response in the raw early series.
   Sliding 8-step windows (minus typical), centres 5.5 -> 26.5: novelty +.39 -> +.46, features changed +.22 -> +.20,
-  jump size +.32 -> +.36 -> +.33, FR +.15 -> +.07; norm +.29 -> +.37, eff. dim. +.19 -> +.28, turn +.29 -> +.24,
-  coherence +.28 -> +.32, cross-band share +.21 -> +.29 (raw +.03 -> +.29), dW eff. dim. -.14 -> -.18.
+  jump size +.32 -> +.36 -> +.33, FR +.16 -> +.06 [+.15 -> +.07]; norm +.29 -> +.37, eff. dim. +.19 -> +.28, turn
+  +.29 -> +.24, coherence +.28 -> +.32, cross-band share +.21 -> +.29 (raw +.03 -> +.29), dW eff. dim. -.14 -> -.18.
 - Beyond the observation (novelty and change fitted out of entanglement), the Trained RNN at every window: norm +.29 ->
   +.25, coherence +.15, cross-band share +.10 -> +.12, eff. dim. +.07 - .08, dW eff. dim. -.10 -> -.12; the ESN within
   +-.09 (norm -.09 -> -.06). The locked figure's FULL sensory set (patterns at lags 0 - 1, observations at lags 2 - 4,

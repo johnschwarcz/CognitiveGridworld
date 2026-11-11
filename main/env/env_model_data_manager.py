@@ -12,6 +12,7 @@ class Env_model_data_manager(Env_control_manager):
         self.test_model_update_dim, self.test_model_input_dim = [np.zeros((test_episodes, self.hid_dim_or_1k)) for _ in range(2)]
         self.classifier_loss_log, self.generator_loss_log, self.test_SII_score, self.test_SII_coef, self.readin_grad_log, self.readout_grad_log, \
                                                                                                        = [np.zeros(test_episodes) for _ in range(6)]
+        self.test_SII_r = np.full(test_episodes, np.nan)    # Pearson r of FR_T and correctness at T (since 11-10-2026)
         self.test_net_joint_DKL, self.test_net_naive_DKL, self.test_accs, self.train_accs, self.test_TPs, self.train_TPs, self.test_mses, self.train_mses \
                                                                                             = [np.zeros((test_episodes, self.step_num)) for _ in range(8)]
 
@@ -41,12 +42,14 @@ class Env_model_data_manager(Env_control_manager):
     def perform_sanity_training_analyses(self):
             self.test_net_joint_DKL[self.test_e, :] = self.DKL(self.model_goal_belief, self.joint_goal_belief)
             self.test_net_naive_DKL[self.test_e, :] = self.DKL(self.model_goal_belief, self.naive_goal_belief)
-            X = self.SII[:, -1].reshape(-1, 1)            
+            X = self.SII[:, -1].reshape(-1, 1)            # Factorization Regret at T: KL(Joint || Naive), forward (symmetric + clipped in logs made before 11-10-2026)
             Y = self.model_acc[:, -1]
 
             reg = LogisticRegression().fit(X, Y) # predict final step acc from final step SII
             self.test_SII_score[self.test_e] = reg.score(X, Y)
             self.test_SII_coef[self.test_e] = reg.coef_[0][0]
+            x, y = np.asarray(X, np.float64).ravel(), np.asarray(Y, np.float64).ravel()   # the correlation the figures plot
+            self.test_SII_r[self.test_e] = np.corrcoef(x, y)[0, 1] if x.std() > 0 and y.std() > 0 else np.nan
 
             if self.hid_dim < 10000:
                 try:
@@ -72,6 +75,7 @@ class Env_model_data_manager(Env_control_manager):
                 "test_net_naive_DKL_through_training": self.test_net_naive_DKL[:self.test_e], 
                 "test_SII_score_through_training": self.test_SII_score[:self.test_e],
                 "test_SII_coef_through_training": self.test_SII_coef[:self.test_e],
+                "test_SII_r_through_training": self.test_SII_r[:self.test_e],
                 "test_acc_through_training":  self.test_accs[:self.test_e], 
                 "train_acc_through_training": self.train_accs[:self.test_e], 
                 "gen_loss_through_training":  self.generator_loss_log[:self.test_e], 
@@ -104,6 +108,7 @@ class Env_model_data_manager(Env_control_manager):
             self.test_model_update_dim_through_training = self.skippable_load(load_dict, "test_model_update_dim_through_training")
             self.test_SII_coef_through_training = self.skippable_load(load_dict, "test_SII_coef_through_training")
             self.test_SII_score_through_training = self.skippable_load(load_dict, "test_SII_score_through_training")
+            self.test_SII_r_through_training = self.skippable_load(load_dict, "test_SII_r_through_training")
             self.test_net_joint_DKL_through_training = self.skippable_load(load_dict, "test_net_joint_DKL_through_training")
             self.test_net_naive_DKL_through_training = self.skippable_load(load_dict, "test_net_naive_DKL_through_training")
             self.train_acc_through_training = self.skippable_load(load_dict, "train_acc_through_training")

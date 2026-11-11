@@ -185,6 +185,12 @@ class Recorder:
                "naive_DKL": np.asarray(env.DKL(env.model_goal_belief, env.naive_goal_belief), np.float32),
                "XL": np.asarray(env.DKL(env.joint_goal_belief, env.model_goal_belief), np.float32)}
         X, Y = np.asarray(env.SII)[:, -1].reshape(-1, 1), np.asarray(env.model_acc)[:, -1]
+        # Pearson r of FR_T (env.SII: forward KL(Joint || Naive) since 11-10-2026) with correctness at T, for the network
+        # and for the two observers: what the diagnostics figure plots (supplementary_plotter2.diagnostics_runs)
+        x = X[:, 0].astype(np.float64)
+        for k, y in (("SII_r", Y), ("SII_r_joint", np.asarray(env.joint_acc)[:, -1]), ("SII_r_naive", np.asarray(env.naive_acc)[:, -1])):
+            y = np.asarray(y, np.float64)
+            rec[k] = np.float32(np.corrcoef(x, y)[0, 1] if x.std() > 0 and y.std() > 0 else np.nan)
         try:
             reg = LogisticRegression().fit(X, Y)
             rec["SII_score"], rec["SII_coef"] = np.float32(reg.score(X, Y)), np.float32(reg.coef_[0][0])
@@ -265,6 +271,9 @@ NETS = {"trained": dict(reservoir=False), "echo": dict(reservoir=True),
                                   reservoir_dedup=True, reservoir_fp16=True),
         "joint_echo_N10000_jl": dict(reservoir=True, output_joint=True, gpu_inference=True, hid_dim=10000, batch_num=2000, micro_batch=250,
                                      reservoir_dedup=True, reservoir_fp16=True),
+        "echo_N10000_b8k": dict(reservoir=True, gpu_inference=True, hid_dim=10000, micro_batch=250, reservoir_dedup=True, reservoir_fp16=True),
+        "joint_echo_N10000_b8k": dict(reservoir=True, output_joint=True, gpu_inference=True, hid_dim=10000, micro_batch=250, reservoir_dedup=True, reservoir_fp16=True),
+        "joint_echo_N10000_b8k_jl": dict(reservoir=True, output_joint=True, gpu_inference=True, hid_dim=10000, micro_batch=250, reservoir_dedup=True, reservoir_fp16=True),
         "trained_N300": dict(reservoir=False, gpu_inference=True, hid_dim=300),
         "joint_trained_N300": dict(reservoir=False, output_joint=True, gpu_inference=True, hid_dim=300),
         "joint_trained_N300_jl": dict(reservoir=False, output_joint=True, gpu_inference=True, hid_dim=300),
@@ -294,7 +303,8 @@ NETS = {"trained": dict(reservoir=False), "echo": dict(reservoir=True),
 LEAN = ("joint_echo_N500", "joint_echo_N2000", "joint_echo_N2000_jl",           # the one switch: Lean + LeanRecorder (11-04)
         "echo_N200", "joint_echo_N200", "joint_echo_N200_jl", "trained_N150", "joint_trained_N150", "joint_trained_N150_jl",
         "trained_N300", "joint_trained_N300", "joint_trained_N300_jl", "trained_N400", "joint_trained_N400", "joint_trained_N400_jl",
-        "trained_N500", "joint_trained_N500", "joint_trained_N500_jl", "joint_echo_N10000", "joint_echo_N10000_jl")
+        "trained_N500", "joint_trained_N500", "joint_trained_N500_jl", "joint_echo_N10000", "joint_echo_N10000_jl",
+        "echo_N10000_b8k", "joint_echo_N10000_b8k", "joint_echo_N10000_b8k_jl")
 
 
 def joint_log_posterior(env):
@@ -499,6 +509,8 @@ def main(net, gpu, episodes=50000, seed=SEED):
            "skip_training_analyses": True, **NETS[net]}
     if os.environ.get("TD_BATCH"):                                                # smoke tests only
         cfg["batch_num"] = int(os.environ["TD_BATCH"])
+    if os.environ.get("TD_MICRO"):                                                # slice size, set by bench_micro.py; recorded in run.json's cfg
+        cfg["micro_batch"] = int(os.environ["TD_MICRO"])
     if os.environ.get("TD_GPU_BAYES"):                                            # recorded in run.json's cfg
         cfg["gpu_inference"] = True
     lean = net in LEAN or os.environ.get("TD_LEAN") == "1"                        # TD_LEAN: check_lean.py only; "0" forces full
@@ -521,6 +533,7 @@ def main(net, gpu, episodes=50000, seed=SEED):
              "joint_trained_N400": JointAgent, "joint_trained_N400_jl": JointLossAgent,
              "joint_trained_N500": JointAgent, "joint_trained_N500_jl": JointLossAgent,
              "joint_echo_N10000": JointAgent, "joint_echo_N10000_jl": JointLossAgent,
+             "joint_echo_N10000_b8k": JointAgent, "joint_echo_N10000_b8k_jl": JointLossAgent,
              "joint_echo_N200": JointAgent, "joint_echo_N200_jl": JointLossAgent,
              "joint_echo_N500": JointAgent, "joint_echo_N500_jl": JointLossAgent,
              "joint_echo_N2000": JointAgent, "joint_echo_N2000_jl": JointLossAgent,

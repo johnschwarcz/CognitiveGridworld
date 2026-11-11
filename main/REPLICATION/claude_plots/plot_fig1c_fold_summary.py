@@ -10,6 +10,9 @@
 Each part is drawn by its own figure's code (the standalone figures are unchanged), from the same data:
 figdata/round4b/fig1c_distances_pairs.npz, fig1c_distances_fr.npz and updates_50k.npz. The data behind each panel are
 in the docstrings of those plotters (no captions in the figures).
+Factorization regret (b: the cells' FR bins; c: FR_t): FR_g + FR_c, each KL(the Optimal's marginal || the Naive's),
+the paper's forward KL, exact (main.utils.factorization_regret), since the two caches were rebuilt / patched on
+2026-11-10; before, the symmetric Jeffreys/2 clipped at 1e-15 (those caches: ..._sym_superseded.npz beside them).
 Run from the repository root:
     MPLBACKEND=Agg /home/johns/anaconda3/envs/eureka/bin/python main/REPLICATION/claude_plots/plot_fig1c_fold_summary.py"""
 import os

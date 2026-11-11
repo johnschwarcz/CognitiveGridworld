@@ -352,7 +352,9 @@ def fig_entanglement():
 def fig_gradient_montage(colour="entanglement", n_env=6):
     """T = 30 particles (all 100 cells x 50 streams) of n_env scan environments in each agent's Figure 1 plane, coloured
     by each stream's percentile within its environment of the summed entanglement sum_t rev_t ('entanglement') or of
-    the factorization regret FR_T ('fr'). Environments: those at evenly spaced ranks of the Naive's T = 30 accuracy
+    the factorization regret FR_T ('fr': the scan's stored FR, the goal variable's KL(Optimal || Naive), the paper's
+    forward KL, exact, since scan_meta.npz was patched on 2026-11-10; the symmetric clipped KL, now its FR_sym,
+    before). Environments: those at evenly spaced ranks of the Naive's T = 30 accuracy
     (the context-symmetric e = 2 left out) -> figure_bin/fig1c_montage_<colour>.png"""
     sys.path.insert(0, os.path.join(ROOT, "main", "REPLICATION", "claude_plots"))
     import fig1 as cf

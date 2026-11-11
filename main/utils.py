@@ -29,6 +29,40 @@ def tnp(x, to, device = None):
     return x
     
 
+def factorization_regret(joint, naive, logs=False, clip=None):
+    """Factorization Regret as the paper defines it (Sec. 4.1): FR = D_KL(Joint || Naive) = sum_r J(r) [ln J(r) - ln N(r)]
+    over the last axis, in nats, of ONE variable's marginal belief under the Joint and the Naive observer. This is the
+    forward KL: never symmetrized. Every FR in the repository goes through here (John 11-10: "calculate factorization
+    regret consistently everywhere").
+
+    joint, naive   (..., R) probabilities, numpy arrays or torch tensors; or log beliefs with logs=True (any additive
+                   constant: normalized here; use these whenever the tails matter, e.g. float32 storage or long T)
+    clip           None (the default): exact. Probabilities that have underflowed to exactly 0 are floored at the
+                   smallest positive number of their dtype, so the result stays finite (float64: a term can reach 708
+                   nats; far beyond anything reachable in 100 steps).
+                   1e-15: the paper's Fig. 2b ONLY (Collector.DKL's historical clip to [clip, 1 - clip]). It caps a
+                   term at -ln(clip) = 34.5 nats, which is what makes that figure's curves saturate at long times.
+    """
+    if isinstance(joint, torch.Tensor):
+        if logs:
+            lj, ln = torch.log_softmax(joint, -1), torch.log_softmax(naive, -1)
+            return (lj.exp() * (lj - ln)).sum(-1)
+        lo = torch.finfo(joint.dtype).tiny if clip is None else clip
+        j, n = (joint.clamp(lo, 1 - clip), naive.clamp(lo, 1 - clip)) if clip else (joint, naive.clamp_min(lo))
+        return (j * (j.clamp_min(lo).log() - n.log())).sum(-1)
+    if logs:
+        lj, ln = (np.asarray(x, np.float64) for x in (joint, naive))
+        lj, ln = (x - np.logaddexp.reduce(x, axis=-1, keepdims=True) for x in (lj, ln))
+        return (np.exp(lj) * (lj - ln)).sum(-1)
+    joint, naive = np.asarray(joint), np.asarray(naive)
+    if clip:
+        j, n = (np.clip(np.asarray(x, np.float64), clip, 1 - clip) for x in (joint, naive))
+        return (j * np.log(j / n)).sum(-1)
+    lo = max(np.finfo(x.dtype).tiny if np.issubdtype(x.dtype, np.floating) else np.finfo(np.float64).tiny for x in (joint, naive))
+    j, n = np.asarray(joint, np.float64), np.maximum(np.asarray(naive, np.float64), lo)
+    return (j * (np.log(np.maximum(j, lo)) - np.log(n))).sum(-1)
+
+
 def fig_path(name):
     """Resolve a figure filename into main/REPLICATION/figure_bin, independent of cwd."""
     d = os.path.join(os.path.dirname(os.path.abspath(__file__)), "REPLICATION", "figure_bin")

@@ -1,0 +1,22 @@
+{
+ "run": "joint_echo_N10000_b8k_jl_s20261029",
+ "net": "joint_echo_N10000_b8k_jl",
+ "seed": 20261029,
+ "cfg": {
+  "mode": "SANITY",
+  "episodes": 50000,
+  "checkpoint_every": 5,
+  "batch_num": 8000,
+  "hid_dim": 10000,
+  "reservoir": true,
+  "output_joint": true,
+  "gpu_inference": true,
+  "classifier_LR": 0.001,
+  "micro_batch": 2000,
+  "reservoir_dedup": true,
+  "reservoir_fp16": true
+ },
+ "lean": true,
+ "source": "IMPORTED 2026-11-08 from John's other machine (Downloads/in_progress_joint_loss_accs): its test_*.npz only, run in progress at episode 47,000; no weights, no progress.log; COMPLETE 2026-11-09: all 51 tests (test_050 = episode 50,000), progress.log is a stub marking DONE",
+ "imported": true
+}

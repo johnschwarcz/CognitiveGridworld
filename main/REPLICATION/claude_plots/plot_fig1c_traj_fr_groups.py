@@ -6,10 +6,14 @@ Two frames side by side, left the lowest 10% of FR, right the highest; each in f
 150 dpi: 1057 x 1132 px).
 Draw (draw_episodes): the trained harvest's first 20,000 episodes (each one stream of one cell of one environment; the
 episodes the step planes are fitted on). Eligible: distinct-variable environments, both values in {0, 3, 6, 9} (16
-cells), and FR at T = 30 (both variables: Jeffreys/2 between the Optimal's and the Naive's marginals, each clipped to
-[1e-15, 1 - 1e-15]) in the lowest / highest 10% of the eligible episodes; then 50 environments drawn uniformly without
-replacement (seed 0) and one of each environment's eligible episodes uniformly. The draws equal the research figure's
-(main/DATA/experimental/fig1c_compression/figdata/traj_fr_groups/random_draw_50_0_sub0369_fr{low,high}.npz; asserted).
+cells), and FR at T = 30 (both variables, FR_g + FR_c, each KL(the Optimal's marginal || the Naive's): the paper's
+forward KL, exact, main.utils.factorization_regret on the harvest's float64 beliefs) in the lowest / highest 10% of the
+eligible episodes; then 50 environments drawn uniformly without replacement (seed 0) and one of each environment's
+eligible episodes uniformly. The draws are asserted equal to main/DATA/experimental/fig1c_compression/figdata/
+traj_fr_groups/random_draw_50_0_sub0369_fr{low,high}.npz (rewritten on 2026-11-10 for the forward KL). Until then FR
+was the symmetric Jeffreys/2 of the two marginals, each clipped to [1e-15, 1 - 1e-15]: the research figure of 25 Oct
+shows those draws (kept beside the new ones as ..._fr{low,high}_sym_superseded.npz), so this script no longer
+reproduces that figure's particles.
 Each frame: the four agents in (c)'s 2 x 2 order (Trained RNN, ESN / Optimal, Naive), each in step 30's own PC plane
 (fig1_movie.step_planes, the pcs movie's: PCs of the 20,000 episodes' beliefs, one plane for all environments;
 the box holds every frame of the movie); each particle's whole trajectory re-drawn in that plane (Catmull-Rom between
@@ -47,20 +51,18 @@ def _data():
     return _CACHE
 
 
-def _jeffreys_half(p, q, eps=1e-15):
-    p, q = np.clip(p, eps, 1 - eps), np.clip(q, eps, 1 - eps)
-    return .5 * ((p - q) * (np.log(p) - np.log(q))).sum(-1)
-
-
 def draw_episodes(group):
     """the 50 harvest episodes of the FR group ('low' or 'high') -> episode indices (50,), the number of environments
-    holding eligible episodes, the group's FR cut (nats)"""
+    holding eligible episodes, the group's FR cut (nats). FR at T: FR_g + FR_c, each KL(the Optimal's marginal || the
+    Naive's), the paper's forward KL, exact (main.utils.factorization_regret on the harvest's float64 beliefs; the
+    movie's float32 copies BV round the Naive's smallest probabilities to 0, which the forward KL weighs)"""
+    from main.utils import factorization_regret
     D = _data()
-    cf, BV, rg, rc = D["cf"], D["BV"], D["rg"], D["rc"]
+    cf, rg, rc = D["cf"], D["rg"], D["rc"]
     n = cf.N_EP
-    ci = np.sort(cf._harvest("trained", ["ep_ctx_inds"])["ep_ctx_inds"][:n].astype(int), 1)
-    J, N = BV["Joint"][:, -1].astype(np.float64), BV["Naive"][:, -1].astype(np.float64)
-    frT = _jeffreys_half(J[:, :10], N[:, :10]) + _jeffreys_half(J[:, 10:], N[:, 10:])
+    f = cf._harvest("trained", ["ep_ctx_inds", "ep_joint_belief", "ep_naive_belief"])
+    ci = np.sort(f["ep_ctx_inds"][:n].astype(int), 1)
+    frT = factorization_regret(f["ep_joint_belief"][:n, -1], f["ep_naive_belief"][:n, -1]).sum(-1)   # both variables
     elig = (ci[:, 0] != ci[:, 1]) & np.isin(rg[:n], SUB) & np.isin(rc[:n], SUB)
     q = np.quantile(frT[elig], FR_Q if group == "low" else 1 - FR_Q)
     elig &= (frT <= q) if group == "low" else (frT >= q)

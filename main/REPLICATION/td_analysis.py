@@ -17,7 +17,10 @@ Probe set (probes() -> analysis/probes.npz, once):
   anything sensitive to the tails: jb underflows to 0 in float32 from step ~20), the naive marginals "nb" / "log_nb"
   and per-step likelihoods "npx", the per-step increments of naive (N), step-wise (SW) and Bayes (D), centred over
   values (an1 / a1_increments), entanglement per variable "ent" (float64) = step_dkl(npx, approx_lik(jb)) (the locked
-  definition; rev = its mean over the two variables), FR per variable "fr" = fr_sym(jb, nb) (John 10-28: average both),
+  definition; rev = its mean over the two variables), Factorization Regret per variable "fr" = KL(Bayes || naive) of
+  that variable's marginal (the paper's forward form, exact, from the float64 log beliefs:
+  main.utils.factorization_regret; John 10-28: average both variables; until 11-10 "fr" held the symmetric KL with
+  probabilities clipped at 1e-15, which is kept as "fr_sym" for comparisons only),
   and correctness at T of Bayes, naive, windowed Bayes w = 1 (= step-wise), 2, 5 and the factorized-state observer
   (ADF). A separate basis set (N_BASIS random test episodes, BASIS_SEED) gives each checkpoint its own PCA basis of u
   (the locked rule: bands are fixed subspaces fitted on other episodes; 2,000 episodes moved the cross-band share by
@@ -97,6 +100,7 @@ sys.path[:0] = [ROOT, os.path.join(ROOT, "main", "REPLICATION")]
 import gradflow_analysis as ga                                                    # noqa: E402  (turns TF32 off)
 import supplementary_plotter2 as sp                                               # noqa: E402
 from main.CognitiveGridworld import CognitiveGridworld                            # noqa: E402
+from main.utils import factorization_regret                                       # noqa: E402
 
 TD = os.path.join(ROOT, "main", "DATA", "experimental", "training_dynamics")
 OUT = os.environ.get("TD_OUT", os.path.join(TD, "analysis"))                    # TD_OUT: pilots elsewhere
@@ -172,6 +176,8 @@ def _cen(a):
 
 
 def fr_sym(p, q, eps=1e-15):
+    """SUPERSEDED (11-10): the symmetric clipped KL that probes.npz stored as "fr" until then; now only its "fr_sym".
+    Factorization Regret is main.utils.factorization_regret (the paper's forward KL)"""
     p, q = np.clip(p, eps, 1 - eps), np.clip(q, eps, 1 - eps)
     return .5 * ((p * np.log(p / q)).sum(-1) + (q * np.log(q / p)).sum(-1))
 
@@ -197,7 +203,8 @@ def bayes_side(obs, L, r):
     prev = np.concatenate([np.full_like(marg_lam[:, :1], np.log(R)), marg_lam[:, :-1]], 1)
     inc = {"N": _cen(lpx), "SW": _cen(np.stack([_lse(ll, 3), _lse(ll, 2)], 2)), "D": _cen(marg_lam - prev)}
     ent = sp.step_dkl(npx, sp.approx_lik(jb))                                        # (n, T, 2)
-    fr = np.stack([fr_sym(jb[:, :, v], nb[:, :, v]) for v in range(2)], -1)          # (n, T, 2)
+    fr = factorization_regret(log_jb, log_nb, logs=True)                             # (n, T, 2): KL(Bayes || naive)
+    fr_old = np.stack([fr_sym(jb[:, :, v], nb[:, :, v]) for v in range(2)], -1)      # the superseded symmetric clipped one
     right = {"bayes": jb[:, -1].argmax(-1) == r, "naive": nb[:, -1].argmax(-1) == r}
     Lam = np.concatenate([np.zeros_like(lam[:, :1]), lam], 1)                       # Lam[:, t] = sum of steps 1..t
     for w in TRUNC_W:                                                                # windowed Bayes (an3)
@@ -218,7 +225,7 @@ def bayes_side(obs, L, r):
     right["adf"] = b.argmax(-1) == r
     f32 = dict(logpost=logpost.reshape(n, T, R * R), jb=jb, log_jb=log_jb, nb=nb, log_nb=log_nb, npx=npx,
                **{f"inc_{k}": v for k, v in inc.items()})
-    return dict(**{k: v.astype(np.float32) for k, v in f32.items()}, ent=ent, fr=fr,
+    return dict(**{k: v.astype(np.float32) for k, v in f32.items()}, ent=ent, fr=fr, fr_sym=fr_old,
                 **{f"right_{k}": v for k, v in right.items()})
 
 

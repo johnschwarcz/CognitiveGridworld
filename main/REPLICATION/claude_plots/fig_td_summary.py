@@ -10,11 +10,13 @@ Trained RNN passes naive. Row 1: both networks (Trained RNN blue, ESN orange; se
 initial weights). Rows 2-3: Trained RNN above ESN. Row 4: Trained RNN.
   a accuracy at T against Bayes, memory-free (step-wise) Bayes and naive
   b on the probes where naive is wrong and Bayes right: how often the network gives naive's answer
-  c Pearson r between each variable's factorization regret at T (FR = [KL(Bayes||naive) + KL(naive||Bayes)] / 2 of its
-    marginal beliefs) and its own correctness at T, over the 10,000 probes x both variables (= the original fig1 (e),
-    which used the goal variable's, up to noise); dotted: Bayes (-.02) and naive (-.43). Averaging FR and correctness
-    over the two variables first (the 11-01 draft) adds cross terms: one variable's FR correlates +.13 to +.17 with the
-    other variable's correctness for every observer, which flipped the sign (Bayes +.12).
+  c Pearson r between each variable's factorization regret at T (FR = KL(Bayes || naive) of its marginal beliefs, the
+    paper's forward form, exact: probes 'fr'; until 11-10 the symmetric clipped KL) and its own correctness at T, over
+    the 10,000 probes x both variables (= the original fig1 (e), which used the goal variable's, up to noise); dotted:
+    Bayes (-.05) and naive (-.32) (symmetric: -.02, -.43). Ends: Trained RNN -.05, ESN -.27 (symmetric: -.02, -.33).
+    Averaging FR and correctness over the two variables first (the 11-01 draft) adds cross terms: one variable's FR
+    correlates +.12 to +.16 with the other variable's correctness for every observer, which flips the sign for Bayes
+    (+.07; with the symmetric KL +.12).
   d ridge R^2 of the counts n_t (the observations summed so far) decoded from u at step 30 (fitted on 25 environments,
     tested on the other 25)
   e memory use of each variable, per fifth of that variable's own entanglement (both variables' values ranked

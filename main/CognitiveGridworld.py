@@ -95,6 +95,12 @@ class CognitiveGridworld(Env_model_manager):
         self.save_env = init.get('save_env', None)
         self.external_logger = init.get('external_logger', None)
         self.oracle = self.mode == "oracle"
+        # the Generator's Z-flow fix (stream LayerNorms, readout-aligned Z init, skip, orthogonal downscale init) without the
+        # rest of oracle mode, e.g. under the original feedback (mode RL); defaults to oracle mode
+        self.gen_zflow = init.get('gen_zflow', self.oracle)
+        # training episodes only (2026-11): None | "low" | "high" | "half" -- joint realizations drawn from the cells where
+        # the Naive observer converges to the true goal value ("low" FR), where it does not ("high"), or a fixed random half
+        self.fr_select = init.get('fr_select', None)
         self.custom_log = {}
 
         self.trigger_simulation()

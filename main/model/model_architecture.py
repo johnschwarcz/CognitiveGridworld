@@ -17,6 +17,7 @@ class Model_architecture(Model_controller):
 
     def init_env_vars(self, kwargs):
         self.__dict__.update(kwargs)
+        self.gen_zflow = kwargs.get('gen_zflow', kwargs.get('mode') == 'oracle')
         self.ctx_range, self.batch_range, self.step_range, self.roll_V_range, self.realization_range, self.roll_realization_range, self.obs_range, self.all_K, self.all_Q =\
             tnp([self.ctx_range, self.batch_range, self.step_range, self.roll_V_range, self.realization_range, self.roll_realization_range, self.obs_range, self.all_K, self.all_Q], 'torch', self.device)
         (self.realization_range,self.ctx_range,self.batch_range,self.step_range,self.obs_range) = (x.long() for x in (self.realization_range,self.ctx_range,self.batch_range,self.step_range,self.obs_range))
@@ -88,7 +89,7 @@ class Model_architecture(Model_controller):
             self.K_downscale = nn.Linear(self.hid_dim, self.KQ_dim)
             self.Q_downscale = nn.Linear(self.hid_dim, self.KQ_dim)
             
-            if self.oracle:
+            if self.gen_zflow:
                 for L in (self.K_downscale, self.Q_downscale):
                     nn.init.orthogonal_(L.weight, gain=(self.hid_dim / self.KQ_dim)**0.5)
                     nn.init.zeros_(L.bias)
@@ -103,7 +104,7 @@ class Model_architecture(Model_controller):
             self.conf_to_hid = nn.Linear(self.ctx_num, self.hid_dim)
             self.hid_to_pobs = nn.Linear(self.hid_dim, 1)
 
-            if self.oracle:
+            if self.gen_zflow:
                 Wo = self.hid_to_pobs.weight[0].double()
                 B = torch.stack([Wo, self.gen_hid2hid.weight.double().T @ Wo], dim = 1)
                 self.gen_stream_norm = self.oracle_readin(self.Z_to_pobs.weight, B, [self.hid_dim] * 3)
@@ -119,7 +120,7 @@ class Model_architecture(Model_controller):
                         list(self.gen_hid2hid.parameters()) +        
                         list(self.hid_to_pobs.parameters()) +
                         list(self.conf_to_hid.parameters()) +
-                        (list(self.gen_stream_norm.parameters()) if self.oracle else []),
+                        (list(self.gen_stream_norm.parameters()) if self.gen_zflow else []),
                         'lr': self.generator_LR}]                
             self.generator_optim = optim.Adam(params)
             if self.embedding_grad == "both":

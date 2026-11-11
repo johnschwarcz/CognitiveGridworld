@@ -19,6 +19,11 @@ Data: the alias scan (main/DATA/experimental/fig1c_compression; 100 cells x 50 s
 out). A cell's mean belief: the mean of its 50 streams' 20 numbers. Plane: fig1.belief_geometry's T = 30 plane
 per agent (as fig1c_movie_fixed); between steps the fig1_movie._blend spline. Dashed grey: the grid of the cells'
 targets (fig1.targets: the Optimal's mean correct T = 30 belief). Joint movement: figdata/round4b/updates_50k.npz.
+Factorization regret: the scan's stored FR, the goal variable's KL(the Optimal's marginal || the Naive's), the paper's
+forward KL, exact (main.utils.factorization_regret), since scan_meta.npz was patched on 2026-11-10 (the symmetric KL
+clipped at 1e-15 before: its member FR_sym). The fr colour scale (log, .05 - 30 nats) was set for the symmetric
+values and still holds the forward ones (the cells' FR at T, mean over the 39 environments: .24 - 10.3 nats, median
+.93; symmetric .28 - 12.7, median 1.58), which sit a quarter of a decade paler.
 Run from the repository root:
     CUDA_VISIBLE_DEVICES="" MPLBACKEND=Agg /home/johns/anaconda3/envs/eureka/bin/python \\
         main/REPLICATION/claude_plots/plot_fig1c_mesh.py particles fr envs storyboard formation"""

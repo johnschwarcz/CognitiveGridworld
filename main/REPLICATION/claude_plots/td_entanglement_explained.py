@@ -3,8 +3,14 @@
 -> data main/DATA/experimental/training_dynamics/analysis/ent_explained_<run>.npz (every checkpoint; GPU 0, ~1 s each)
 
 u_it = the LSTM output (1,000 neurons) of probe episode i at step t (td_analysis's 10,000 probes), steps 2-30.
-x_it = entanglement (rev, both variables averaged) or FR (fr_sym of Bayes's and naive's marginals, both variables
-averaged), per particle-step.
+x_it = entanglement (rev, both variables averaged) or FR (factorization regret, KL(Bayes || naive) of a variable's
+marginal belief, the paper's forward form, exact: probes.npz 'fr' = main.utils.factorization_regret; both variables
+averaged), per particle-step. Until 11-10 'fr' was the symmetric KL clipped at 1e-15, and the caches of 11-01
+(ent_explained_<run>.npz without the field fr_def) hold THAT FR's curve: they were not rebuilt on 11-10 (a rebuild
+replays every checkpoint: ~1 s each on a GPU, 54 s on the CPU at 3 threads = ~1.7 h per run). Check at the last
+Trained-RNN checkpoint (CPU replay, 11-10): explained by FR, 5 / 20 bins, .1943 / .2304 forward against .1918 / .2202
+symmetric, of a total of 16.40; entanglement's .1369 / .1669 reproduced. Before rebuilding, rename the old cache to
+ent_explained_<run>_sym_superseded.npz.
   total variance       V = < || u_it - m ||^2 >  over all particle-steps (m: their mean)
   explained by x       VE_x = the variance of the state's means across the bins of x, within each step, averaged over
                        steps:  VE_x = (1/29) sum_t (1/K) sum_k || m_kt - m_t ||^2,  m_kt = the mean state of the
@@ -89,8 +95,8 @@ def run(name, dev=torch.device("cuda:0")):
             print(f"{time.strftime('%H:%M:%S')} {name} ep {ep} ({time.time() - t0:.0f} s): total {o['tot']:.3f}, "
                   f"explained (5 / 20 bins): entanglement {np.round(o['ve'][0], 4)}, FR {np.round(o['ve'][1], 4)}",
                   flush=True)
-    np.savez(path, episode=np.array(eps), vars=np.array(VARS), bins=np.array(BINS),
-             **{k: np.array(v) for k, v in res.items()})
+    np.savez(path, episode=np.array(eps), vars=np.array(VARS), bins=np.array(BINS), fr_def="forward",
+             **{k: np.array(v) for k, v in res.items()})          # fr_def: FR = KL(Bayes || naive) (probes 'fr')
     print(f"saved {path} ({time.time() - t0:.0f} s)")
 
 

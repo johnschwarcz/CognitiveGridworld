@@ -17,6 +17,14 @@ along (0, 9) - (9, 0)); uncoupled: one marginal alone. A crossing is dated to th
 Data: the alias scan (39 environments x 100 cells x 50 streams x 30 steps; all agents on the same streams); the
 measures of plot_fig1c_measures_movie (the Trained RNN's); speed = the marginals' total-variation change per step,
 (TV(b_g) + TV(b_c)) / 2. Primitives cached in figdata/round7_jumps/crossings.npz.
+Factorization regret (FR) here is plot_fig1c_measures_movie.fr_both: the mean over the two variables of KL(the
+Optimal's marginal || the Naive's), the paper's forward KL, exact (main.utils.factorization_regret), since 2026-11-10;
+on 28 Oct, when everything below was measured, it was the symmetric KL clipped at 1e-15. The FR numbers below were
+re-measured on 2026-11-10 wherever the function prints them (figure_jumps, figure_split_lags, figure_before: the
+forward value first, the symmetric one of 28 Oct in square brackets); those of figure() and figure_coupling() are not
+printed and are still the symmetric ones of 28 Oct (marked). No other measure changed (entanglement, the error and
+the network measures printed the same numbers again). movie(), movie(combined=True) and figure_amplitude_check() do
+not use FR.
 figure(): rows 1 - 2, every measure around the crossings (lags -6 .. 6 from the arrival step) as the departure from the
 same cell's other streams (same environment, same step), the Trained RNN's crossings (its read-out) and the Optimal's;
 row 3, crossing rates by step (all four agents), the split pairs' crossings around the split step, the hybrid observer.
@@ -30,7 +38,8 @@ Measured 28 Oct (CYCLE 0.25):
   the Naive 4%, the ESN 5% (their base rates). The rest split without an end-to-end move (interior aliases).
 - around a crossing (the Trained's; the Optimal's nearly identical): entanglement builds over ~4 steps and peaks at the
   update BEFORE the crossing (+0.12 log10 nats; rev[t] is the update into step t, as the crossing), near typical at
-  the crossing; factorization regret +0.27 (coupled) / +0.21 (uncoupled) log10 at -1 / 0; error +0.37 - 0.41 log10 at
+  the crossing; factorization regret +0.27 (coupled) / +0.21 (uncoupled) log10 at -1 / 0 [symmetric FR, 28 Oct: not
+  re-measured with the forward KL]; error +0.37 - 0.41 log10 at
   0; dW energy +0.39 log10 at -1 / 0; |u| +0.2 at 0 / +1; activity effective dimension: coupled -3.2 at -1 then +1.2,
   uncoupled +1.6 before and +3.9 at 0; belief effective dimension -0.6 at -1 (coupled); cross-band share -0.25 to
   -0.34 around coupled crossings (all lags), ~0 around uncoupled; coherence within +-0.03; speed 0.30 / 0.20 at 0.
@@ -51,7 +60,7 @@ binary split (both >= 0.25) cut through a continuum. By coupling decile (0 -> 9,
 - correction: P(true cell) after 0.126 -> 0.239 (non-crossing large moves 0.066); accuracy below typical before every
   crossing, above typical after the coupled ones only;
 - entanglement: uncoupled crossings at the crossing step (+0.11 log10 at lag 0), coupled ones one step BEFORE (+0.10
-  at -1, +0.01 at 0); FR +0.15 -> +0.29; |Cov| +3.6 -> +10.5 at -1;
+  at -1, +0.01 at 0); FR +0.15 -> +0.29 [symmetric FR, 28 Oct: not re-measured]; |Cov| +3.6 -> +10.5 at -1;
 - network: activity effective dimension +5.7 / +9.6 (lag -1 / 0, uncoupled) vs -3.4 / +0.4 (coupled); belief
   effective dimension +0.1 vs -0.7; cross-band share +0.03 vs -0.6 (coupled streams low at every lag); coherence +0.1
   at uncoupled crossings;
@@ -84,7 +93,8 @@ factorized agents' one; the two curves cross near 0.3 cells. The joint's split b
 grows with amplitude and coupling: at >= 2 cells 0.18 / 0.28 / 0.42 nats for 0 - 15 / 15 - 30 / 30 - 45 deg (small
 steps 0.02 - 0.08). Large jumps raise P(true cell) +0.036 / +0.039 / +0.056 (Optimal); entanglement of the jump's own
 update is high for every jump above ~0.2 cells whatever its coupling (a size effect), the update BEFORE only for large
-diagonal ones (+0.076 log10); FR after +0.01 / +0.08 / +0.17. Row 4, where the wormhole acts differently (the Trained
+diagonal ones (+0.076 log10); FR after +0.04 / +0.13 / +0.23 [+0.01 / +0.08 / +0.17]. Row 4, where the wormhole acts
+differently (the Trained
 RNN's network, the Optimal's jumps of 3.5 - 5.5 cells): diagonal corner to corner (both end-to-end flows >= 0.2; 95%
 land in a corner 2 x 2 block; n 5,306) cross-band share -0.26 / -0.21 (lag -1 / 0), activity effective dimension -2.6
 / +0.2; diagonal, the rest (n 8,637) +0.01 / +0.07, +0.4 / +3.1; along one axis (n 248) +0.03 / +0.13, +4.7 / +9.1.
@@ -132,13 +142,16 @@ stream that jumps = the one whose Optimal posterior mean moves more over the spl
 cells vs 0.7 for its partner), step 0 = its belief just after its larger one-step move (t_s 57%, t_s + 1 43%; median
 3.6 cells); top row medians over the pairs, bottom row the mean of log10 x minus the same cell's typical (the mean of
 log10 x over its 50 streams at that step); bands 5 - 95% over environments resampled (500). Factorization regret
-does NOT spike: medians -2 / -1 / 0 / +1 / +2: the jumper 1.37 / 1.76 / 2.08 / 2.42 / 2.52 nats, its partner 0.68 /
-0.83 / 0.96 / 1.11 / 1.19, all streams at the same steps 0.39 / 0.46 / 0.52 / 0.58 / 0.64; minus the cell's typical
-(log10) the jumper +0.12 / +0.14 / +0.19 / +0.19 / +0.18 (a step, then a slow decline to +0.11 at +10), the partner
-+0.08 flat, decaying to +0.02. Entanglement peaks at the jump's own update: minus typical (log10) -2 / -1 / 0 / +1 /
-+2 the jumper +0.02 / +0.08 / +0.13 / +0.05 / +0.04, the partner -0.00 / +0.03 / +0.04 / +0.03 / +0.02 (medians:
-the jumper 0.35 / 0.37 / 0.39 / 0.33 / 0.34, the partner ~0.25, all streams 0.20). Only 10% of the pairs saw the
-same observations through t_s - 1 (29% hold identical beliefs at t_s - 1: Bayes ignores the order).
+does NOT spike: medians -2 / -1 / 0 / +1 / +2: the jumper 1.07 / 1.53 / 2.15 / 2.54 / 2.72 nats [1.37 / 1.76 / 2.08 /
+2.42 / 2.52], its partner 0.56 / 0.64 / 0.72 / 0.79 / 0.81 [0.68 / 0.83 / 0.96 / 1.11 / 1.19], all streams at the
+same steps 0.30 / 0.34 / 0.38 / 0.41 / 0.44 [0.39 / 0.46 / 0.52 / 0.58 / 0.64]; minus the cell's typical (log10) the
+jumper +0.18 / +0.23 / +0.31 / +0.30 / +0.29 (rising from +0.12 at -4, its largest step at the jump, then a slow
+decline to +0.16 at +10) [+0.12 / +0.14 / +0.19 / +0.19 / +0.18: a step, then a slow decline to +0.11 at +10], the
+partner +0.09 flat, decaying to +0.03 [+0.08, to +0.02]. Entanglement peaks at the jump's own update: minus typical
+(log10) -2 / -1 / 0 / +1 / +2 the jumper +0.02 / +0.08 / +0.13 / +0.05 / +0.04, the partner -0.00 / +0.03 / +0.04 /
++0.03 / +0.02 (medians: the jumper 0.35 / 0.37 / 0.39 / 0.33 / 0.34, the partner ~0.25, all streams 0.20). Only 10%
+of the pairs saw the same observations through t_s - 1 (29% hold identical beliefs at t_s - 1: Bayes ignores the
+order).
 Later (John: "doesnt it seem like there is a meaningful phase transition at amplitude .1? or is that due to the data
 processing? ... Maybe we should be looking at measures on the step before the jump? ... a version where we combine both
 coupled and uncoupled crossings ... split the jumps by various levels of couplings"):
@@ -152,19 +165,21 @@ coupled and uncoupled crossings ... split the jumps by various levels of couplin
   falling for larger late jumps; jump sizes have one peak per step group, no gap: no natural threshold at 0.1.
 - figure_before(): the step before the jump (t - 1) beside the jump (t). Jumps >= 2 cells (Optimal 96,461; Trained
   RNN 101,260), minus typical at coupling 0 - 15 / 15 - 30 / 30 - 45 deg: entanglement at t - 1 -0.021 / -0.007 /
-  +0.059 (t - 3: +0.023 / +0.030 / +0.049), at t +0.128 / +0.134 / +0.097; factorization regret at t - 1 -0.043 /
-  -0.008 / +0.112, at t +0.007 / +0.070 / +0.152; activity dimension at t - 1 +3.1 / +1.5 / -0.3, at t +5.3 / +3.6 /
+  +0.059 (t - 3: +0.023 / +0.030 / +0.049), at t +0.128 / +0.134 / +0.097; factorization regret at t - 1 -0.025 /
+  +0.034 / +0.175 [-0.043 / -0.008 / +0.112] (t - 3: +0.034 / +0.095 / +0.168), at t +0.033 / +0.116 / +0.207
+  [+0.007 / +0.070 / +0.152]; activity dimension at t - 1 +3.1 / +1.5 / -0.3, at t +5.3 / +3.6 /
   +1.9; cross-band share at t - 1 +0.011 / +0.001 / -0.045 (t - 3: -0.089 for diagonal), at t +0.080 / +0.049 / -0.008;
   error and dW energy without a direction effect (+0.15 - 0.34). Diagonal jumps come out of a STATE that lasts >= 3
   steps (entanglement and FR up, activity dimension and cross-band share down); at the jump, entanglement is a size
   effect, largest for one-axis jumps.
 - figure_split_lags(by_coupling=True): the jumping stream of the 743 split pairs by its jump's angle (0 - 15 / 15 - 30
   / 30 - 40 / 40 - 45 deg: 56 / 89 / 164 / 434 jumps, median 1.7 / 2.1 / 3.4 / 4.3 cells). FR minus the cell's typical
-  (log10) at -1 / 0 / +2: -0.22 / -0.05 / -0.02, +0.00 / +0.04 / +0.11, +0.18 / +0.25 / +0.23, +0.19 / +0.23 / +0.20
-  (median raw at 0: 0.49 / 0.67 / 1.55 / 2.62 nats); entanglement at -2 / 0 / +1: -0.21 / +0.33 / +0.10, +0.03 / +0.22
-  / +0.10, -0.04 / +0.17 / +0.03, +0.07 / +0.08 / +0.05 (median raw 40 - 45: 0.36 - 0.44 nats at every lag, no
-  spike): the diagonal (wormhole) splits leave a sustained high-FR, high-entanglement state; the one-axis splits are a
-  transient entanglement spike with FR at or below typical. Caveat: the levels differ in jump size.
+  (log10) at -1 / 0 / +2: -0.21 / -0.00 / -0.01, +0.10 / +0.15 / +0.19, +0.33 / +0.41 / +0.34, +0.27 / +0.35 / +0.32
+  (median raw at 0: 0.42 / 0.83 / 2.01 / 2.78 nats) [-0.22 / -0.05 / -0.02, +0.00 / +0.04 / +0.11, +0.18 / +0.25 /
+  +0.23, +0.19 / +0.23 / +0.20; raw 0.49 / 0.67 / 1.55 / 2.62]; entanglement at -2 / 0 / +1: -0.21 / +0.33 / +0.10,
+  +0.03 / +0.22 / +0.10, -0.04 / +0.17 / +0.03, +0.07 / +0.08 / +0.05 (median raw 40 - 45: 0.36 - 0.44 nats at every
+  lag, no spike): the diagonal (wormhole) splits leave a sustained high-FR, high-entanglement state; the one-axis
+  splits are a transient entanglement spike with FR at or below typical. Caveat: the levels differ in jump size.
 - movie(combined=True): row 2 marks every stream (4 per cell) with any crossing so far where it is now; row 3 the grids
   by the share of each cell's streams with any crossing so far. Where crossings end up: crossings that end farther from
   the true cell than they started, Optimal 23% (n 18,166), Trained RNN 24%, Naive 49% (37,541), ESN 46%; streams with
@@ -1275,7 +1290,7 @@ def figure_split_lags(lags=np.arange(-4, 11), nboot=500, seed=0, floor=1e-3, by_
              ha="center", va="center", fontsize=FS["tick"])
     cols = (("step", "How far the Optimal's belief moves", r"$|\Delta\mu_t|$, its posterior mean", "cells"),
             ("fr", "Factorization regret",
-             r"$\mathrm{FR}_t = \frac{1}{2}\Sigma_v\,\mathrm{KL}_\mathrm{sym}(b^\mathrm{Opt}_v, b^\mathrm{Naive}_v)$",
+             r"$\mathrm{FR}_t = \frac{1}{2}\Sigma_v\,\mathrm{KL}(b^\mathrm{Opt}_v \,\|\, b^\mathrm{Naive}_v)$",
              "nats"),
             ("rev", "Entanglement", r"$\mathrm{rev}_t$, of the update into step $t$", "nats"))
     for r_, kind in enumerate(("raw", "dep")):

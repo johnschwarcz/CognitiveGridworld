@@ -10,7 +10,8 @@ Output (summary_data/grids): fwd_episodes.npz  (env, cell, r, obs; m_bayes / m_n
 Run (GPU 0 only):
   CUDA_VISIBLE_DEVICES=0 /home/johns/anaconda3/envs/eureka/bin/python main/REPLICATION/claude_plots/td_grids_fwd.py episodes
   CUDA_VISIBLE_DEVICES=0 /home/johns/anaconda3/envs/eureka/bin/python main/REPLICATION/claude_plots/td_grids_fwd.py check trained 800
-  CUDA_VISIBLE_DEVICES=0 /home/johns/anaconda3/envs/eureka/bin/python main/REPLICATION/claude_plots/td_grids_fwd.py run trained"""
+  CUDA_VISIBLE_DEVICES=0 /home/johns/anaconda3/envs/eureka/bin/python main/REPLICATION/claude_plots/td_grids_fwd.py run trained
+  ... td_grids_fwd.py extra trained echo      (EXTRA checkpoints -> fwd_<run>_extra.npz)"""
 import os
 import sys
 import time
@@ -26,6 +27,7 @@ S = 24                                     # streams per cell
 SEED = 20261111
 T, R, NO = 30, 10, 5
 EPS = (0, 75, 150, 300, 500, 600, 700, 800, 900, 1000, 1100, 1300, 1500, 2000, 3000, 5000, 10000, 20000, 49995)
+EXTRA = (125, 250, 375, 2500, 6250)          # raw episodes = 100, 200, 300, 2,000, 5,000 training episodes
 BATCH = 30000
 V = np.arange(R, dtype=np.float64)
 
@@ -98,16 +100,18 @@ def check(run, ep):
           f"argmax agreement {np.mean(lq[:, -1].argmax(-1) == st[:, -1].argmax(-1)):.4f}")
 
 
-def run(name):
+def run(name, eps_list=EPS, tag=""):
+    """eps_list / tag (11-09, John's mesh slices at 100, 200, 300, 2,000, 5,000 training episodes): replay other raw
+    checkpoints into fwd_<name><tag>.npz without touching the main file"""
     dev = torch.device("cuda:0")
     E = np.load(os.path.join(HERE, "fwd_episodes.npz"))
     n = len(E["env"])
     zin = E["Z"][E["env"]].reshape(n, -1)
-    M = np.zeros((len(EPS), n, T, 2), np.float16)
-    A = np.zeros((len(EPS), n, 2), np.int8)
-    LQ = np.zeros((len(EPS), n, 2, R), np.float16)
-    m = td.build(name, EPS[0], dev)
-    for k, ep in enumerate(EPS):
+    M = np.zeros((len(eps_list), n, T, 2), np.float16)
+    A = np.zeros((len(eps_list), n, 2), np.int8)
+    LQ = np.zeros((len(eps_list), n, 2, R), np.float16)
+    m = td.build(name, eps_list[0], dev)
+    for k, ep in enumerate(eps_list):
         t0 = time.time()
         td.load_weights(m, name, ep)
         lq = replay(m, E["obs"], zin, dev)
@@ -116,8 +120,8 @@ def run(name):
         A[k] = lq[:, -1].argmax(-1)
         LQ[k] = lq[:, -1].astype(np.float16)
         print(f"{name} {ep:5d}: accuracy at T {np.mean(A[k] == E['r']):.3f}  ({time.time() - t0:.1f} s)", flush=True)
-    eps = np.array(EPS)
-    np.savez(os.path.join(HERE, f"fwd_{name}.npz"), ep=eps, tr_ep=eps - eps // 5, m=M, a=A, lqT=LQ)
+    eps = np.array(eps_list)
+    np.savez(os.path.join(HERE, f"fwd_{name}{tag}.npz"), ep=eps, tr_ep=eps - eps // 5, m=M, a=A, lqT=LQ)
 
 
 if __name__ == "__main__":
@@ -129,3 +133,6 @@ if __name__ == "__main__":
     elif cmd == "run":
         for nm in sys.argv[2:]:
             run(nm)
+    elif cmd == "extra":                                     # the mesh slices of supp_learning_behaviour
+        for nm in sys.argv[2:]:
+            run(nm, EXTRA, "_extra")

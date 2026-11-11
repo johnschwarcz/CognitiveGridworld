@@ -775,6 +775,8 @@ def stats():
     st = {"units": U}
     for k in AG:
         st[k] = {nm: pstat(f"all|{nm}|{k}") for nm in ("dh", "shuf", "dh-shuf", "aligned", "sym")}
+        # the four contrasts that involve FR (...+fr, fr3|...) are loaded but neither drawn nor printed here; in the
+        # pairs_combined.npz of 11-02 their FR is the symmetric clipped KL (td_tt_chaos_pairs.py: FACTORIZATION REGRET)
         for nm in ("ent5|dh|step+bin", "cond3|dh|step+bin", "close|var<1|dh", "close|avg<1|dh", "ent5|dh|raw",
                    "ent5|dh|step+bin+fr", "ent5|dh|step+bin+cond3", "ent5|dh|band+bin+env", "cond3|dh|step+bin+ent5",
                    "cond3|dh|step+bin+fr", "fr3|dh|step+bin", "fr3|dh|step+bin+ent5"):

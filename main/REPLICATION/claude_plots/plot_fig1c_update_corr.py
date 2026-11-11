@@ -8,7 +8,9 @@ Update sizes of the two variables at step t: |u_v(t)| = |E_t[r_v] - E_{t-1}[r_v]
 units). Joint movement of a group of (trajectory, step) points: the covariance of the two sizes, large only when both
 beliefs move a lot in the same steps (the correlation times both sizes' spreads; grid units^2).
 Columns (20 quantile bins each):
-    FR_t: factorization regret at the step, and E_t: the step's entanglement - bins cut anew at every step, the
+    FR_t: factorization regret at the step (the cache's fr_t: FR_g + FR_c, each KL(the Optimal's marginal || the
+          Naive's), the paper's forward KL, exact, main.utils.factorization_regret; the symmetric Jeffreys/2 until
+          the cache was patched on 2026-11-10), and E_t: the step's entanglement - bins cut anew at every step, the
           covariance per step and bin, then its mean over the 30 steps;
     S:    the belief's path length over all steps (sum_t ||u(t)||; each agent binned by its own S) - per step and bin,
           then the mean over steps;

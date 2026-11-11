@@ -8,6 +8,7 @@ sys.path.insert(0, path + '/main')
 sys.path.insert(0, path + '/main/bayes')
 sys.path.insert(0, path + '/main/model')
 from main.CognitiveGridworld import CognitiveGridworld
+from main.utils import factorization_regret
 from main.REPLICATION.collection_plotters import Collection_Plotters
 
 class Sanity_Collector(Collection_Plotters):
@@ -88,7 +89,10 @@ class Sanity_Collector(Collection_Plotters):
 
                         self.accs[bayes_i,joint_i,ctx] += agent.joint_acc / rep
                         self.accs[bayes_i,naive_i,ctx] += agent.naive_acc / rep  
-                        self.joint_naive_DKL[ctx] += self.DKL(joint_belief, naive_belief) / rep
+                        # Factorization Regret (Fig. 2b): KL(Joint || Naive). clip = the printed figure's probability clip,
+                        # which caps an episode at 34.5 nats and makes its curves saturate (noted in the caption);
+                        # clip=None gives the exact, linearly growing value.
+                        self.joint_naive_DKL[ctx] += factorization_regret(joint_belief, naive_belief, clip=1e-15).mean(0) / rep
                         self.naive_joint_DKL[ctx] += self.DKL(naive_belief, joint_belief) / rep
 
                     if ctx == 1:

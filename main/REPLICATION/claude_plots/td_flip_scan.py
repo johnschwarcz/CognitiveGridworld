@@ -7,7 +7,9 @@ For every run (trained, echo), measure (per particle-step, steps 2-30, all 114 c
 steps are split into 5 fifths ranked within each step (2,000 particles of every step per fifth;
 fig_entanglement_driver.within_step) and the gradient G = mean(top fifth) - mean(bottom fifth) is taken in the
 measure's own units at every checkpoint, on all probes and separately on environments 0-24 and 25-49 (halves A, B).
-Splits: entanglement (a variable's step_dkl; rev = its mean over the two variables), factorization regret, Bayes's
+Splits: entanglement (a variable's step_dkl; rev = its mean over the two variables), factorization regret (FR =
+KL(Bayes || naive) of a variable's marginal belief, the paper's forward form, exact: probes.npz 'fr' =
+main.utils.factorization_regret; until 11-10 the symmetric KL clipped at 1e-15), Bayes's
 update size J(pi_{t-1}, pi_t) of a variable's marginal, Bayes's confidence (its max marginal posterior); each
 ranked either as is ("across": particles at the same step) or after removing its episode's and its step's means
 ("within": the same step, more or less than the episode's usual).
@@ -26,7 +28,15 @@ A flip: G is reliably of one sign (|G| > 2 sigma, sigma = the median over checkp
 RUN consecutive checkpoints and later reliably of the other sign for at least RUN consecutive checkpoints; reported
 with the checkpoints where each run ends / starts, the median G in each, and the share of those checkpoints where both
 halves have G's sign.
-Run from the repository root (CPU, ~3 min):
+Re-scanned 11-10 with the forward FR (the scan of 11-01 is kept as flip_scan_paired_sym_superseded.npz). Only the 56
+FR-split series changed; the other 170 are identical. Flips whose halves agree >= 95%, symmetric -> forward: Trained
+RNN 38 in 33 of the 112 measure x split combinations -> 36 in 31 (by FR: 6 -> 4: memory use across 1,280-1,680, |c|
+across 280-2,240, update eff. dimension across 340-1,040 and back at 6,000-11,200; lost: memory use within the
+episode and |u| across); ESN 14 in 13 -> 17 in 16 (by FR: 3 -> 6: new are the belief entropy across 240-560, the
+update error within 2,000-3,200 and credit coherence across 140-560). Accuracy by own FR (across): high-FR steps are
+less accurate at every checkpoint of both networks under both definitions (Trained RNN -.019 to -.255, was -.022 to
+-.251).
+Run from the repository root (CPU, ~8 min at 3 threads):
     /home/johns/anaconda3/envs/eureka/bin/python main/REPLICATION/claude_plots/td_flip_scan.py"""
 import os
 import sys

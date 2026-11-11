@@ -24,7 +24,9 @@ Timing: the split movie's schedule (0.6 s per step around the three split steps,
 second. Data: figdata/round4b/split_pairs.npz (plot_fig1c_split_movie.build) and the scan's beliefs.
 Trial version (John 10-28: "add a panel showing the entanglement and Factorization regret of these 6 trials ... i'll
 probably undo it"): movie(extra=True) -> fig1c_movie_split_traj_entfr.gif, a row between rows 2 and 3 with the six
-streams' entanglement and factorization regret (both variables) over the steps, each minus its environment's mean at
+streams' entanglement and factorization regret (both variables: plot_fig1c_measures_movie.fr_both, since 2026-11-10
+the mean over the two variables of the forward KL(Optimal || Naive), exact; the symmetric clipped KL before, which
+gave these six curves other shapes and another order at T) over the steps, each minus its environment's mean at
 that step (all 5,000 streams: both rise for every stream as beliefs sharpen, which hid the split on raw axes; a
 per-cell baseline would offset a pair's two streams by their cells' different typical values), styled as row 2; the
 default movie is unchanged. Only environment 15's pair saw the same observations until its split (its two lines

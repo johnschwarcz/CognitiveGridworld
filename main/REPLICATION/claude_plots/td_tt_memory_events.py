@@ -16,6 +16,28 @@ steps date shown to depend on the memoryless reference, the family comparison ma
    Bayes right / Bayes right and windowed Bayes 5 wrong per family, the network's own revisions, the clock surrogate;
    per-step gains). Every curve and resample is rebuilt from these sums in seconds (ratio()).
 
+REVISED 11-10 (factorization regret is the paper's forward KL everywhere). The matched controls' key contains the
+  variable's FR. Until 11-10 that was the probes' symmetric KL, [KL(Bayes || naive) + KL(naive || Bayes)] / 2 with
+  probabilities clipped at 1e-15; it is now KL(Bayes || naive), exact (main.utils.factorization_regret = probes.npz
+  'fr'). memuse_<run>.npz and rematch_trained.npz were rebuilt (the old ones are kept as <name>_sym_superseded.npz;
+  trunc_<run>.npz do not involve FR), the figure redrawn and every number that involves a matched control re-measured
+  (numbers()); numbers of the events themselves, of the keys without FR (step x update size, step only) and of the
+  excess at T are unchanged. What moved (symmetric -> forward):
+  - Holding: beats matched steps from 2,377 [2,026-3,258] -> 2,397 [2,042-3,310]; events - control at the end +.076
+    -> +.067; coverage .976 -> .956. Coupling: still never beats update-matched steps (-.032 -> -.036 [-.048, -.024]);
+    the step before a large move beats its control from 4,473 [3,223-6,518] -> 6,709 [5,838-16,986].
+  - CHANGED, finding 4: the most entangled fifth's stored-cut contrast turns positive for good at 388 [262-625]
+    instead of 709 [496-776], i.e. before passing naive (835) in 100% of the paired resamples under every key that
+    contains FR (387-549), where the symmetric FR gave 'just before or with' (706-744; paired share .949-.985). The
+    keys without FR still give 901 / 922 (with passing naive). The contrast is within .0035 nats of 0 at 280, 300,
+    400, 560, 640 and 720 under either FR (-.0031 to +.0002 symmetric, -.0011 to +.0033 forward), so its crossing is
+    that sensitive to the control; the finding's conclusion (the stored data do not date when memory becomes
+    relatively useful at entangled steps) stands, with a wider range of dates (60-3,705 over the memoryless
+    references, 387-922 over the matching keys).
+  - ESN, most entangled fifth: hurts slightly less than at matched steps, +.004 [+.002, +.006] -> +.008 [+.006,
+    +.010], crossing 987 [376-3,759] -> 494 [298-1,364].
+  The 11-02 independent check (CHECKS) covered the symmetric-FR numbers; it was not repeated.
+
 DATA
   analysis/ent_memcut_var_<run>.npz (trained, echo; td_entanglement_memcut.py): err_int, err_cut1 (114 checkpoints,
   10,000 probes, 30 steps, 2 variables) float16. analysis/<run>/ck_EEEEE.npz trunc_right (10,000, [w1, w2, w5, intact],
@@ -49,7 +71,10 @@ DEFINITIONS
         variables (4,000 per fifth and step): most (q5) and least (q1) entangled. Control candidates: the other fifths.
     Matched controls: candidates weighted to the event set's histogram of the key step x log10 FR of the variable
     (naive's error, .25 bins) x Bayes's entropy of the variable (.2 nats) x log10 Bayes's update size of the variable
-    (.25 bins; match_keys()). The update size was added after the check found Bayes's update 3.7x larger at the large
+    (.25 bins; match_keys()). FR = KL(Bayes || naive) of the variable's marginal belief, the paper's forward form,
+    exact (main.utils.factorization_regret = probes.npz 'fr'); until 11-10 it was the symmetric KL clipped at 1e-15
+    (REVISED 11-10 above: every number that involves a matched control was re-measured). The update size was added
+    after the check found Bayes's update 3.7x larger at the large
     moves than at their FR x entropy-matched steps; the first build's key (without it; td_tt_wormholes' control 2) and
     variants (update bins .5 / .125, step x update size only, FR and entropy bins halved / doubled, step only) are kept
     as checks. 'Beats the control' uses the covered events (events whose bin has candidates).
@@ -82,88 +107,91 @@ RESULTS (Trained RNN unless named; training episodes; [5-95%]; paired share in p
  1 Holding events (2,489 variable-steps, median step 9; Bayes's own memory use .109, update size .145). Memory HURTS
    the network's update at Bayes's splits through the answers phase: about -.24 over 320-640 (mean -.243, range -.274
    to -.231; the trough -.325 [-.381, -.261] at 300 is one checkpoint: 280 -.198, 320 -.232), -.131 (880), -.089
-   (1,120), -.032 (1,600), while at matched steps it is -.038 (400) / -.029 (640) / -.013 / -.001 / +.021. It helps
-   for good from 1,779 [1,638-2,052] (the control from 1,138 [941-1,270]), reaches half of memory-free Bayes's use
+   (1,120), -.032 (1,600), while at matched steps it is -.043 (400) / -.037 (640) / -.015 / -.002 / +.017. It helps
+   for good from 1,779 [1,638-2,052] (the control from 1,146 [937-1,336]), reaches half of memory-free Bayes's use
    (u / u_Bayes > .5) at 2,705 [2,362-3,225] (> .1: 1,993 [1,720-2,297]; half its own end value 3,234 [2,716-3,325])
-   and ends +.143 [+.116, +.166] (1.31 x Bayes's). It beats matched steps for good from 2,377 [2,026-3,258] (coverage
-   .976, update size .138 vs .136; end +.076 [+.052, +.099] over the control's +.064 [+.059, +.070]; memory-free Bayes
-   .105 vs .051, +.054); update bins .5 / .125: 2,372 [2,020-3,242] / 2,373 [2,003-3,250]; step x update size only
-   1,991 [1,675-2,339]; the first build's key 2,273 [1,942-2,534] (end +.095 [+.071, +.118]). Orders: helps after the
+   and ends +.143 [+.116, +.166] (1.31 x Bayes's). It beats matched steps for good from 2,397 [2,042-3,310] (coverage
+   .956, update size .135 vs .133; end +.067 [+.043, +.089] over the control's +.072 [+.065, +.080]; memory-free Bayes
+   .106 vs .056, +.049); update bins .5 / .125: 2,396 [2,049-3,300] / 2,392 [2,031-3,294]; step x update size only
+   1,991 [1,675-2,339]; the first build's key 2,337 [1,969-2,842] (end +.087 [+.064, +.110]). Orders: helps after the
    answers (accuracy c50; 0.000) and after the earliest holding onset (per resample [1,010-1,544]: 0.001; the
    end-mass slope row 1,166 [1,020-1,556]), with the other four onsets (held per variable .117 / .018, distance out
    .027, joint held .955), before every holding half-way (the earliest, distance out 3,021 [2,815-3,511]: 1.000) and
    the earliest coupling half-way (same-diagonal share 2,747 [2,111-3,447]: .996). Beats: after every holding onset
-   but the joint-held one (2,127 [1,930-2,509]: with, .183), with the earliest holding half-way (.878) and before the
-   other four (.997-1.000), with the earliest coupling half-way (.653). Half of Bayes's use (2,705): with the earliest
+   but the joint-held one (2,127 [1,930-2,509]: with, .141), with the earliest holding half-way (.743) and before the
+   other four (.982-1.000), with the earliest coupling half-way (.545). Half of Bayes's use (2,705): with the earliest
    holding half-way (.883), before the other four (.999-1.000), with the earliest coupling half-way (.514). What flips:
    the cut error at splits stays .16-.25 from 80 to 4,000 (.19-.25 over 400-4,000: .193 at 400, .233 at 2,000, .231 at
    4,000; .152 at the end) while the intact error falls .436 (400), .457 (640), .272 (1,600), .222 (2,000), .129
    (4,000), .012 (end): up to 4,000 every gain at Bayes's splits is carried by the state; the memoryless rerun improves
-   only late. At matched steps the intact error falls .178 (400) -> .005 and the cut error .141 -> .069. Steps 2-16 only
-   (td_tt_wormholes' window; 1,923): helps 1,760 [1,519-2,032], beats 3,204 [2,043-3,621] (first key 2,201
-   [1,928-3,209]).
+   only late. At matched steps the intact error falls .184 (400) -> .006 and the cut error .141 -> .077. Steps 2-16 only
+   (td_tt_wormholes' window; 1,923): helps 1,760 [1,519-2,032], beats 3,251 [2,089-4,450] (first key 2,353
+   [1,966-3,279]).
  2 Coupling events (6,458 variable-steps = 3,229 moves; Bayes's own memory use .145, update size .526). Same shape,
    smaller dip: the trough -.095 [-.108, -.081] at 300 is one checkpoint (280 / 320: -.061), -.081 over 320-640 (range
-   -.090 to -.061; -.080 at 400, -.083 at 640, -.048 at 1,120 vs matched steps -.022 / -.015 / +.008). Helps for good
-   from 1,974 [1,623-2,122] (the control from 978 [685-1,244]); half of memory-free Bayes's use at 3,943 [3,814-4,400]
+   -.090 to -.061; -.080 at 400, -.083 at 640, -.048 at 1,120 vs matched steps -.027 / -.023 / +.006). Helps for good
+   from 1,974 [1,623-2,122] (the control from 1,206 [809-1,256]); half of memory-free Bayes's use at 3,943 [3,814-4,400]
    (> .1: 2,175 [1,997-2,422]; half its own end value 3,986 [3,853-4,467]); end +.149 [+.144, +.156]. It NEVER beats
-   matched steps once Bayes's update size is matched: with the first build's key it beat them from 2,447 [2,090-3,212]
-   (end +.085 [+.078, +.092]), but there Bayes's update at the events is 3.7x the controls' (.526 vs .144) and
-   memory-free Bayes's need is 2.7x (.145 vs .053). Matched on update size (coverage .867; update .466 vs .435) the
-   events minus control end at -.032 [-.043, -.019] and never cross (0% of resamples), as memory-free Bayes's need is
-   lower there too (.124 vs .153, -.029; the control ends +.161 [+.152, +.171]); update bins .5: -.009 [-.019, +.002],
-   never (11%); .125: -.036 [-.049, -.023], never (0%); step x update size only: -.008 [-.026, +.010], never (26%).
+   matched steps once Bayes's update size is matched: with the first build's key it beat them from 2,554 [2,149-3,264]
+   (end +.081 [+.074, +.088]), but there Bayes's update at the events is 3.7x the controls' (.526 vs .144) and
+   memory-free Bayes's need is 2.6x (.145 vs .055). Matched on update size (coverage .853; update .466 vs .435) the
+   events minus control end at -.036 [-.048, -.024] and never cross (0% of resamples), as memory-free Bayes's need is
+   lower there too (.123 vs .155, -.032; the control ends +.165 [+.155, +.175]); update bins .5: -.017 [-.027, -.007],
+   never (0%); .125: -.038 [-.050, -.026], never (0%); step x update size only: -.008 [-.026, +.010], never (26%).
    Memory use at large moves exceeds FR x entropy-matched steps only because Bayes's update is larger there. Orders
    (helps): after accuracy c50 (0.000) and the jump-coupling onsets (same-diagonal 213, >= 4 cells 740, G 1,046: 0.000;
    the excess angle's 1,032 [735-1,684] overlaps: with, .009), before the angle-out and direction-slope onsets (2,609,
    3,255: .994 / 1.000), with the earliest coupling half-way (same-diagonal share 2,747 [2,111-3,447]: .992) and before
    the other five (1.000). Half of Bayes's use (3,943): after the earliest holding and coupling half-ways (0.000).
    Intact .539 (400) -> .327 (2,000) -> .020 (end); cut .458 -> .329 -> .170 (here the memoryless rerun improves too,
-   more slowly). The step before the move (3,972): helps 1,957 [1,641-2,170], beats matched steps from 4,473
-   [3,223-6,518] (first key 3,212 [2,130-3,271]); end +.022 [+.012, +.031] (memory-free Bayes .101 vs .083).
+   more slowly). The step before the move (3,972): helps 1,957 [1,641-2,170], beats matched steps from 6,709
+   [5,838-16,986] (first key 3,267 [3,201-4,465]); end +.014 [+.005, +.023] (memory-free Bayes .099 vs .086).
  3 FAILED (coupling-specific memory): at Bayes's large ONE-AXIS moves (1,152 variable-steps; Bayes's own .168, update
    size .435) memory turns helpful on the same schedule (2,299 [1,784-2,963] vs 1,974) and ends as high (+.157 [+.139,
-   +.178] vs +.149). With the first build's key it also beat its control (2,893 [1,986-3,944]; end +.105 vs diagonal
-   +.085); matched on update size (coverage .907; .401 vs .368) the contrast vanishes as at diagonal moves: +.004
-   [-.018, +.025] at the end, crossing in only 66% of resamples (update bins .5: +.031 [+.008, +.054], 12,385
-   [6,616-24,928] (99% cross); .125: -.008 [-.029, +.012], never (30%); step x update size: +.020 [-.001, +.042],
+   +.178] vs +.149). With the first build's key it also beat its control (3,214 [2,040-4,050]; end +.104 vs diagonal
+   +.081); matched on update size (coverage .905; .400 vs .367) the contrast vanishes as at diagonal moves: +.003
+   [-.018, +.024] at the end, crossing in only 63% of resamples (update bins .5: +.027 [+.006, +.049], 15,511
+   [7,436-29,711] (98% cross); .125: -.004 [-.024, +.017], never (40%); step x update size: +.020 [-.001, +.042],
    19,388 [11,842-39,767] (95% cross)). Memory becomes useful at Bayes's large moves of any direction, and not beyond
    matched steps of the same Bayes update size.
- 4 Entangled steps (q5 115,998, q1 116,000 variable-steps; Bayes's own memory use .054 / .007, controls .018 / .020;
+ 4 Entangled steps (q5 115,998, q1 116,000 variable-steps; Bayes's own memory use .054 / .007, controls .019 / .020;
    Bayes's update size .077 / .031). The stored-cut contrast at the most entangled fifth (events minus matched steps)
-   turns positive for good at 709 [496-776] (the first build's key: 729 [627-792]), just before or with passing naive
-   (835 [798-876]), depending on the matching: before it by the interval rule with the primary key (.980), the first key
-   (.985), update bins .5 (706 [465-774], .976) and FR / entropy bins halved (719 [483-788], .982); with it under update
-   bins .125 (727 [595-808], .957), FR / entropy bins doubled (744 [649-878], .949), step x update size (901 [792-974],
-   .114), step only (922 [836-1,008], .016) and the control re-matched in every resample (709 [478-812], .955;
-   build_rematch()). That DATE IS SET BY THE START-STATE CUT'S STEP-1 GAIN, not by an improvement of the intact network:
-   from 400 to 880 the contrast rises from -.0027 [-.0050, -.0005] to +.0025 [+.0006, +.0043] because the cut's error
-   gap (q5 minus matched steps) grows by +.0106 (.0147 -> .0252) while the intact gap grows too, by +.0053 (the intact
-   network gets relatively worse there; .0174 -> .0227; first key: cut gap .0375 -> .0446, +.0071; intact gap .0421 ->
-   .0420 (.0439 at 720), -.0001; contrast -.0046 [-.0073, -.0020] -> +.0025 [+.0006, +.0043]). The cut's gap follows the
-   step-1 linear rule's within .0026 nats over 280-2,080 (first key .0039), and the network's step-1 gain on naive's
+   turns positive for good at 388 [262-625] (the first build's key: 424 [281-639]), before passing naive (835
+   [798-876]) by the interval rule under every key that contains FR: the primary key (paired share 1.000), the first
+   key (1.000), update bins .5 (387 [261-580], 1.000) and .125 (390 [273-634], 1.000), FR / entropy bins halved (423
+   [325-655], 1.000) and doubled (549 [388-716], 1.000) and the control re-matched in every resample (388 [270-663],
+   1.000; build_rematch()); with it under the keys without FR: step x update size (901 [792-974], .114) and step only
+   (922 [836-1,008], .016). (With the symmetric FR, until 11-10, the FR keys gave 706-744, 'just before or with passing
+   naive': REVISED 11-10.) The contrast is small and flat where it crosses (+.0005 [-.0012, +.0022] at 400, +.0022
+   [-.0002, +.0045] at 560, +.0033 [+.0010, +.0057] at 720), so the date moves with the matching (387-922 over the
+   keys). It IS ALSO SET BY THE START-STATE CUT'S STEP-1 GAIN, not by an improvement of the intact network:
+   from 400 to 880 the contrast rises from +.0005 [-.0012, +.0022] to +.0047 [+.0026, +.0067] because the cut's error
+   gap (q5 minus matched steps) grows by +.0098 (.0144 -> .0242) while the intact gap grows too, by +.0057 (the intact
+   network gets relatively worse there; .0138 -> .0195; first key: cut gap .0351 -> .0422, +.0070; intact gap .0357 ->
+   .0367 (.0373 at 720), +.0010; contrast -.0005 [-.0026, +.0016] -> +.0055 [+.0036, +.0073]). The cut's gap follows the
+   step-1 linear rule's within .0028 nats over 280-2,080 (first key .0030), and the network's step-1 gain on naive's
    increment (single-regressor slope, ck reg_*) rises with the later steps' gains (.215 -> .405 vs .514 -> .704 for
    steps 2-30 over 400-880; the step-1 deficit stays about -.30). Against the other memoryless references the date
-   moves: clock-matched rule 64 [52-71], step-1 rule 696 [504-786], stored cut 709, the cut gap frozen at its 400 level
-   4,175 [3,182-5,460] (first key: 309 [103-400], 871 [735-946], 729, 1,457 [1,148-1,768]). So the stored data do not
+   moves: clock-matched rule 60 [40-66], step-1 rule 408 [281-664], stored cut 388, the cut gap frozen at its 400 level
+   3,705 [2,694-4,873] (first key: 91 [76-114], 643 [438-737], 424, 1,171 [725-1,625]). So the stored data do not
    date when memory becomes relatively useful at entangled steps; the date is deferred to the donor-state memory cuts of
    td_tt_memcuts.py (in progress 11-02). The earlier flip scan of memory use by entanglement used the same stored cut
    and carries the same caveat. Memory at q5 helps for good from 1,163 [1,061-1,306] (with accuracy c50; earlier in 100%
    of the paired resamples), reaches half of memory-free Bayes's use at 2,238 [2,079-2,418] (> .1: 1,350 [1,245-1,435];
-   half its own end value 2,471 [2,323-2,698]) and ends +.063 [+.058, +.068] vs control +.022 [+.021, +.024] (+.038
-   [+.034, +.041]); q5 intact .108 (400) -> .005, cut .085-.099 from 400 to 6,400 (.067 at the end). The least entangled
-   fifth never beats its control (-.015 [-.016, -.013] at the end; 0% of resamples; first key -.022 [-.023, -.020]) and
-   helps only from 5,213 [4,419-5,783] (end +.009; control +.023).
+   half its own end value 2,471 [2,323-2,698]) and ends +.063 [+.058, +.068] vs control +.024 [+.023, +.026] (+.034
+   [+.031, +.037]); q5 intact .108 (400) -> .005, cut .085-.099 from 400 to 6,400 (.067 at the end). The least entangled
+   fifth never beats its control (-.014 [-.015, -.013] at the end; 0% of resamples; first key -.021 [-.022, -.020]) and
+   helps only from 5,213 [4,419-5,783] (end +.009; control +.022).
  5 ESN: memory hurts for good from 174-205 at every event set (splits 174 [161-188], diagonal moves 192 [177-206],
    one-axis 205 [170-417], q5 184 [174-198]; q1 1,844 [190-2,313]) and more and more (end: splits -.128 [-.157,
    -.102], diagonal moves -.104, one-axis -.054, q5 -.015, q1 -.004); it never helps for good (0% of resamples). Its
    intact error at splits RISES .197 (400) -> .349 (end) (cut .166 -> .221). Matched on update size, its memory hurts
-   slightly less at the most entangled fifth than at matched steps (+.004 [+.002, +.006] at the end; crossing 987
-   [376-3,759]; first key +.001 [-.001, +.004], 3,710 in 82% of resamples); at q1 -.001 [-.002, -.000], never (2%).
+   slightly less at the most entangled fifth than at matched steps (+.008 [+.006, +.010] at the end; crossing 494
+   [298-1,364]; first key +.006 [+.004, +.008], 940 [285-3,677]); at q1 -.002 [-.002, -.001], never (0%).
  6 At the end the Trained RNN's memory use follows memory-free Bayes's need for memory (u / u_Bayes at the end: splits
-   1.31, diagonal moves 1.03, q5 1.17, q1 1.23), and so do the matched contrasts on the covered events: splits +.140 vs
-   control +.064 (memory-free Bayes .105 vs .051), diagonal moves +.130 vs +.161 (-.032; Bayes .124 vs .153), q5 +.060
-   vs +.022 (.052 vs .018), q1 +.008 vs +.023 (.007 vs .020). The network's memoryless reads err more than memory-free
+   1.31, diagonal moves 1.03, q5 1.17, q1 1.23), and so do the matched contrasts on the covered events: splits +.138 vs
+   control +.072 (memory-free Bayes .106 vs .056), diagonal moves +.128 vs +.165 (-.036; Bayes .123 vs .155), q5 +.058
+   vs +.024 (.051 vs .019), q1 +.008 vs +.022 (.007 vs .020). The network's memoryless reads err more than memory-free
    Bayes's (at splits .152 vs .109), as its w1 excess at T ends at +.134.
  7 The long-memory excess at T (w5). Trained RNN: rises just after passing naive (half its peak first reached at 905
    [845-1,071]: with passing naive by the interval rule, after it in 99% of the paired resamples (P(rise earlier)
@@ -232,11 +260,12 @@ RESULTS (Trained RNN unless named; training episodes; [5-95%]; paired share in p
  the memoryless rerun from 1,779 / 1,974, with the holding onsets and before holding is half-way; that is a
  behaviour-referenced crossing (see CAVEATS), and against the network's own linear memoryless rules it comes later
  (splits 2,790 / 3,567, large moves 3,383 / 4,704). Matched on Bayes's update size, memory at splits beats matched
- steps from 2,377 (with the earliest holding half-way) and reaches half of memory-free Bayes's use at 2,705; at large
+ steps from 2,397 (with the earliest holding half-way) and reaches half of memory-free Bayes's use at 2,705; at large
  diagonal moves it never beats update-matched steps. The excess long-memory dependence relaxes while holding and
- coupling complete (6,698). At entangled steps the stored-cut contrast turns positive just before or with passing
- naive (709), but its date is set by the cut's step-1 gain (64-4,175 against other memoryless references); dating it
- is left to the donor-state cuts.
+ coupling complete (6,698). At entangled steps the stored-cut contrast turns positive before passing naive under the
+ FR-matched controls (388; 387-549 over the FR keys) and with it under the controls without FR (901-922), and its
+ date is set by the cut's step-1 gain (60-3,705 against other memoryless references); dating it is left to the
+ donor-state cuts.
 
 START-STATE CONFOUND (and what a donor-state cut adds)
   Every stored cut restarts the cell from the trained start state: the cut state at step t is the state of steps 1..w
@@ -270,8 +299,9 @@ START-STATE CONFOUND (and what a donor-state cut adds)
 
 CHECKS
   The event sets reproduce the preliminary read (2,489 split variable-steps, median step 9; -.241 at 640, +.139 at the
-  end). The first build's key reproduces its control weights exactly (identical per-environment counts) and its
-  crossings (2,273 / 2,447 / 729). At step 1 cut = intact (max |diff| 9.8e-04, fp16 storage). trunc 'intact' = right
+  end). With the symmetric FR (until 11-10) the first build's key reproduced its control weights exactly (identical
+  per-environment counts) and its crossings (2,273 / 2,447 / 729); with the forward FR its crossings are 2,337 /
+  2,554 / 424. At step 1 cut = intact (max |diff| 9.8e-04, fp16 storage). trunc 'intact' = right
   at T at every checkpoint (asserted). Accuracy c50 from the stored trunc answers equals td_tt_timeline's accuracy row
   in every resample (max |diff| 1.2e-11). The check's independent code (session scratch verify_memory_events, 11-02)
   reproduces the update-matched holding 2,377 [2,026-3,258], coupling -.032 [-.043, -.019] (never), q5 709 [496-776],
@@ -279,14 +309,16 @@ CHECKS
   references to within one training episode (its rank-based fifths differ from the quantile ones by 2 variable-steps),
   the ceiling-free revision contrasts and the enrichment. Re-matching the update-matched controls inside every
   resample (build_rematch()) gives holding 2,377 [2,030-3,245], coupling never (-.032 [-.040, -.018]), q5 709
-  [478-812].
+  [478-812]. (These matched numbers are the symmetric-FR ones the 11-02 check saw; it was not repeated for the
+  forward FR, whose re-matched values are holding 2,397 [2,075-3,296], coupling never (-.036 [-.044, -.023]), q5 388
+  [270-663].)
 
 CAVEATS
   One seed and one probe world; intervals resample environments, not seeds. The per-step memory cut is stored only for
   the Trained RNN and the ESN; the other runs have the cut at T only. The update error applies the network's increment
   to Bayes's belief (a local error), not to the network's own belief. Only the answer at T is stored under the w-cuts,
   so the behaviour rows cannot be recomputed under the cut. Event sets are Bayes-defined; the update-matched controls
-  cover 87-98% of the events (diagonal moves .867) with effective sizes 1,915 (one-axis moves) to 122,007. Circularity:
+  cover 85-97% of the events (diagonal moves .853) with effective sizes 1,982 (one-axis moves) to 124,155. Circularity:
   memory use at Bayes's splits and the holding rows both measure the network's quality at Bayes's splits. With the cut's
   error nearly flat at splits (and falling more slowly than the intact error at large moves), 'memory helps for good' at
   splits (1,779) and at large moves (1,974) marks when the intact network's local update at those steps beats the
@@ -1681,7 +1713,8 @@ def figure(S=None):
         f"Events (variable-steps, steps 2-30, defined on Bayes's beliefs): end splits {nh:,.0f}; large diagonal moves "
         f"{nc:,.0f} ({nc / 2:,.0f} moves; one-axis {m['axis']['n_ev']:,.0f}); entanglement fifths about "
         f"{round(nq, -3):,.0f} each.\n"
-        "Matched controls: other variable-steps weighted to the events' histogram of step x log10 FR x Bayes's entropy "
+        "Matched controls: other variable-steps weighted to the events' histogram of step x log10 FR (KL(Bayes "
+        r"$\Vert$ naive)) x Bayes's entropy "
         f"x log10 Bayes's update size (coverage {min(covs):.0%}-{max(covs):.0%}). Bands and bars: 5-95% over 1,000 "
         "resamples of the 50 environments, paired with the timeline's behaviour rows.\n"
         r"err = Jeffreys/2 between Bayes's belief at $t-1$ moved by the network's step-$t$ increment and Bayes's "

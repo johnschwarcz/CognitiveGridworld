@@ -13,7 +13,11 @@ steps 2-30; mu_ec over 20 reference trajectories of environment e and latent pai
 Explained by x (td_entanglement_explained.py; every checkpoint): the variance of the state's means across 20 bins of x
 at the same step (x ranked within its step, 500 particles per bin), averaged over steps, minus the bins' sampling noise.
 x = FR or entanglement (both variables averaged). These are not further parts: they overlap the four. Fifths instead of
-20 bins give ~20% less (they resolve x more coarsely).
+20 bins give ~20% less (they resolve x more coarsely). FR = KL(Bayes || naive) of a variable's marginal belief (the
+paper's forward form: probes.npz 'fr') in caches that carry fr_def = "forward"; the caches of 11-01 do not: their FR
+curve was computed with the symmetric clipped KL (td_entanglement_explained.py; not rebuilt on 11-10, it needs the
+networks) and is then labelled so in the figure. At the last Trained-RNN checkpoint the two differ by 5% (.2304
+forward against .2202, 20 bins).
 Run from the repository root (CPU, seconds):
     MPLBACKEND=Agg /home/johns/anaconda3/envs/eureka/bin/python main/REPLICATION/claude_plots/fig_variance_parts.py"""
 import os
@@ -54,9 +58,12 @@ def parts(run, P):
 
 
 def explained(run):
+    """td_entanglement_explained.py's cache; "fr_forward": does its FR curve use the forward KL(Bayes || naive) (caches
+    written since 11-10 say so; older ones used the symmetric clipped KL)"""
     z = np.load(os.path.join(fd.AN, f"ent_explained_{run}.npz"))
     names = list(z["vars"])
     return {"x": fd.train_x(z["episode"]), "tot": z["tot"],
+            "fr_forward": "fr_def" in z.files and str(z["fr_def"]) == "forward",
             **{v: z["ve"][:, names.index(v), K20] for v in names}}
 
 
@@ -72,6 +79,9 @@ def figure():
     P = dict(np.load(os.path.join(fd.AN, "probes.npz")))
     cross = fd.passes_naive(P)
     fig, axs = plt.subplots(2, 2, figsize=(13, 9))
+    fwd = all(explained(run)["fr_forward"] for run in fd.RUNS)
+    if not fwd:
+        print("NOTE: ent_explained_<run>.npz predates 11-10: its FR curve uses the symmetric clipped KL (labelled so)")
     for i, run in enumerate(fd.RUNS):
         pa, ex = parts(run, P), explained(run)
         for j, share in enumerate((False, True)):
@@ -99,7 +109,9 @@ def figure():
     axs[0, 1].set_title(r"b   Share of the total  $\langle \Vert d \Vert^2 \rangle\, /\, \langle \Vert u_{it} - \bar\mu "
                         r"\Vert^2 \rangle$", loc="left", fontsize=12.5)
     h = [Line2D([], [], color="k", lw=2.4, label=r"total  $u_{it} - \bar\mu$")]
-    h += [Line2D([], [], color=col, lw=2.2, ls=ls, label=f"{name}  {formula}") for _, name, formula, col, ls in LINES]
+    fr_note = r" = KL(Bayes $\Vert$ naive)" if fwd else " (symmetric KL: cache of 11-01)"
+    h += [Line2D([], [], color=col, lw=2.2, ls=ls, label=f"{name}{fr_note if key == 'fr' else ''}  {formula}")
+          for key, name, formula, col, ls in LINES]
     h += [Line2D([], [], color="0.55", lw=1, ls=":", label="Trained RNN passes naive")]
     fig.legend(handles=h, loc="lower center", bbox_to_anchor=(.5, -.075), ncol=3, frameon=False, fontsize=10)
     fig.text(.5, -.1, "10,000 probe episodes (50 environments x 100 latent pairs x 2 trajectories), steps 2-30; squared "

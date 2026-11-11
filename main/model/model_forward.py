@@ -256,12 +256,12 @@ class Model_forward(Model_backward):
         s = self.sample_to_hid(sample_emb).unsqueeze(1)
         c = self.conf_to_hid(conf).unsqueeze(1)
         z = self.Z_to_pobs(self.generator_Z())
-        if self.oracle:
+        if self.gen_zflow:
             s, c, z = self.get_layer_norm(self.gen_stream_norm, (s, c, z))
 
         pre = s + c + z
         x = self.gen_hid2hid(torch.relu(pre))
-        x = self.hid_to_pobs(torch.relu(pre + x if self.oracle else x))
+        x = self.hid_to_pobs(torch.relu(pre + x if self.gen_zflow else x))
         self.pred_pobs = torch.sigmoid(x).squeeze()
 
     def get_layer_norm(self, norm, inps):

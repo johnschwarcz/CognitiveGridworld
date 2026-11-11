@@ -18,6 +18,11 @@ Dotted: 0. Data: the alias scan's 39 environments x 5,000 streams (all 50 per ce
 John 10-28; the earlier 1,000-stream version's cache is measures_assoc.npz). Computed once into
 main/DATA/experimental/fig1c_compression/figdata/round7_jumps/measures_assoc_ns50.npz (from
 plot_fig1c_measures_movie.data()); delete it to recompute.
+The factorization regret panel: plot_fig1c_measures_movie.fr_both, since 2026-11-10 the mean over the two variables
+of the forward KL(Optimal || Naive), exact (main.utils.factorization_regret); the symmetric clipped KL before. The
+cache was recomputed that day (only its fr curves changed; the file of 28 Oct is kept beside it as
+measures_assoc_ns50_sym_superseded.npz). The older measures_assoc.npz (1,000 streams; no code builds it any more)
+still holds the symmetric FR's curves.
 Run from the repository root:
     MPLBACKEND=Agg /home/johns/anaconda3/envs/eureka/bin/python \\
         main/REPLICATION/claude_plots/plot_fig1c_measures_jumps.py"""

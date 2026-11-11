@@ -1,4 +1,4 @@
-import numpy as np; import torch; from main.utils import print_time; 
+import numpy as np; import torch; from main.utils import print_time, factorization_regret; 
 from main.env_plotting.plotters_EP import Plotters
 
 class Bayes_inference(Plotters):
@@ -86,7 +86,10 @@ class Bayes_inference(Plotters):
         return est, GB, acc, TP, mse
 
     def log_outcomes(self):
-        self.SII = self.DKL(self.joint_goal_belief, self.naive_goal_belief, avg_over_batch=False, sym = True)
+        # Factorization Regret of every episode and step, (batch, step): KL(Joint || Naive) of the goal belief, the paper's
+        # forward form, exact (main.utils.factorization_regret). Until 11-10-2026 this was the symmetric KL with
+        # probabilities clipped at 1e-15, so SII scores / coefficients logged before then are of that quantity.
+        self.SII = factorization_regret(self.joint_goal_belief, self.naive_goal_belief)
         self.agent_beliefs = [self.joint_belief, self.naive_belief]
         self.mse_diff = self.joint_mse - self.naive_mse
         self.agent_ests = [self.joint_est, self.naive_est]

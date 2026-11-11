@@ -18,8 +18,21 @@ the beliefs over time -> main/REPLICATION/figure_bin/ (or --out DIR).
                                                      environments' trajectories (figure_split)
 Groups: stills = summary traj_fr; movies = pcs envdist sweep split; all = both (the default). Minutes: all six in one
 process on the CPU of a shared 24-core machine with the caches present, 7.1 min in all (about one core, 2.3 GB at
-most); every output byte-identical to the kept file in figure_bin (27 Oct 2026). Each figure sets its own complete
-matplotlib state (plotting_helpers.style), so the order in which the figures run does not matter.
+most); on 27 Oct 2026 every output was byte-identical to the file then kept in figure_bin. Since 2026-11-10 the
+outputs that use factorization regret differ from those files, because FR became the paper's forward KL (next
+paragraph): fig1c_summary_fold.png (b: the cells' FR bins and the FR axis), fig1c_summary_updates.png (c: the FR_t
+bins), fig1c_traj_FR_groups_T30.png (the two FR groups hold other episodes) and
+fig1c_movie_hybrid_sweep_combined.gif (the top row's edge colours). pcs, envdist and split do not use FR.
+Each figure sets its own complete matplotlib state (plotting_helpers.style), so the order in which the figures run
+does not matter.
+Factorization regret (FR), everywhere in this file: FR_v = KL(the Optimal's marginal of variable v || the Naive's),
+the paper's forward KL (Sec. 4.1), in nats, exact and unclipped, through main.utils.factorization_regret alone:
+fr_streams from a stream's observations and its table (log beliefs), episodes_fr from the harvest's float64 beliefs.
+Which variable: the scan's FR and sweep100's fr are the goal variable's; distances_fr, updates_50k's fr_t and the
+traj_fr groups use FR_g + FR_c. Until 2026-11-10 FR was the symmetric KL [KL(J || N) + KL(N || J)] / 2 with the
+probabilities clipped at 1e-15 (fr_sym, plotting_helpers.jeffreys_half; a median 1.3 - 1.4 times the forward KL at
+T); every cache of that definition is kept beside the new one as <name>_sym_superseded.<ext>, and scan_meta.npz keeps
+it as its member FR_sym. Entanglement (rev) is a Jeffreys/2 divergence by definition and did not change.
 Not made here: fig1c_evidence_geometry.png (the evidence's geometry, a separate direction), the measures movies and
 their still (fig1c_movie_measures*.gif, fig1c_measures_rings.png; exploratory) and the master figure (fig1_master.*).
 Agents: Joint = the Optimal (exact joint) Bayes observer, Naive = the Naive (factorized) Bayes observer, Trained = the
@@ -62,17 +75,21 @@ figure first needs it (ensure), after the caches it reads; builders write throug
     scan_*.npz           the alias scan: the first 40 of scan_envs x 100 goal-ordered cells x 50 streams (seed
                          1000 + e); scan_<agent>.npz: beliefs (40, 5000, 30, 20) f16, answer (40, 5000, 30, 2) int8;
                          scan_meta.npz: eps, goal, table_id, seed, pert_seed, sigma, M, cells, cell_of, L, Lpert, obs,
-                         rev, FR, naive_inf(_gap), pert_inf(_gap), recreate_maxdiff, alias_answer_mismatch
+                         rev, FR (the goal variable's, forward KL), FR_sym (the symmetric clipped KL: "FR" until
+                         2026-11-10), naive_inf(_gap), pert_inf(_gap), recreate_maxdiff, alias_answer_mismatch
     distances_fr.npz     per scan environment (e = 2 left out), cell and step: the mean distance of the posterior means
-                         from the true cell, binned by the cell's FR at T: dist_t{10,20}, fr_median{10,20}, FRb, agents
+                         from the true cell, binned by the cell's FR at T (FR_g + FR_c): dist_t{10,20},
+                         fr_median{10,20}, FRb, agents
     distances_pairs.npz  110 environments x 100 cells x 10 streams (seed 7,000,000 + episode): the distance between the
                          estimates of every pair of streams, averaged per true distance: ymean (110, 4, 2, 30, 51), n,
                          xs, eps, agents, estimators
     updates_50k.npz      every distinct-variable episode's per-step update of the posterior means (u_<agent>) and of the
-                         beliefs' total variation (tv_<agent>); rev, fr_t, env, rg, rc, check_trained, check_echo
+                         beliefs' total variation (tv_<agent>); rev, fr_t (FR_g + FR_c at every step), env, rg, rc,
+                         check_trained, check_echo
     split_pairs.npz      the scan's stream pairs that stay together and then split, and the three shown
     sweep100.npz         the hybrid observer's cell means at T with the joint evidence at the p% least / most entangled
-                         stream-steps, 100 environments x 100 cells x 50 streams: cm, thr, fr, eps, seeds, sweep
+                         stream-steps, 100 environments x 100 cells x 50 streams: cm, thr, fr (the cells' goal-variable
+                         FR at T), eps, seeds, sweep
 The primary is record.npz: the random draws of the trained network's gradflow harvest (main/DATA/cache/
 gradflow_trained.npz: 50,000 test episodes from numpy's global generator, which was never seeded, so no seed redraws
 them). With the two checkpoints (main/DATA/sanity/fully_trained_ctx_2_e5_net.pth, reservoir_ctx_2_e5_net.pth) and
@@ -100,10 +117,10 @@ The split pairs are selected without a draw; shown: scan environment 15 (episode
 (episode, goal and contextual variables, stream seed) to seeds.json in the data folder; a copy is kept beside this
 script, fig1c_seeds.json.
 
-Regenerating: a full regeneration from record.npz alone (--data DIR, DIR holding only record.npz; or --rebuild-all in
-place) took 37 min of wall time on the CPU at the script's defaults on 27 Oct 2026: scan 14.4, distances_pairs 7.0
-(6 workers), updates 2.6, sweep100 1.9, beliefs 1.5, beliefs_steps 1.4, alias_traj 0.6, split_pairs 0.4, then the
-six targets ~11. Against the seeded files:
+Regenerating (this paragraph: the test of 27 Oct 2026, when FR was still the symmetric KL): a full regeneration from
+record.npz alone (--data DIR, DIR holding only record.npz; or --rebuild-all in place) took 37 min of wall time on the
+CPU at the script's defaults on 27 Oct 2026: scan 14.4, distances_pairs 7.0 (6 workers), updates 2.6, sweep100 1.9,
+beliefs 1.5, beliefs_steps 1.4, alias_traj 0.6, split_pairs 0.4, then the six targets ~11. Against the seeded files:
     byte for byte  beliefs, scan_meta, scan_Joint, scan_Naive, distances_pairs, sweep100 (whole files); episodes,
                    scan_envs (eps, goal), alias_traj's Joint, Naive, rev, cells; updates_50k's Bayes members;
                    split_pairs' selection (every pair, and the three shown); --seeds (the environments)
@@ -116,6 +133,24 @@ The figures drawn from the regenerated caches: sweep byte for byte; summary_fold
 (<= 2/255); traj_FR 2078 pixels (<= 2/255); pcs <= 196, envdist <= 368, split <= 4754 pixels per frame (<= 0.25%): the
 network panels' points and lines move, and so do a few entries of the GIFs' median-cut palettes (by one unit), which
 re-maps anti-aliased pixels in the other panels by <= 30/255.
+2026-11-10, FR -> the forward KL (nothing that replays a network was rebuilt):
+    scan_meta.npz    "FR" replaced in place, the old values kept as "FR_sym": fr_streams and fr_sym reproduce the two
+                     members bit for bit (float32) on all 40 environments, and np.savez of the members in build_scan's
+                     order and dtypes reproduces the file byte for byte
+    distances_fr     rebuilt by build_distances_fr; FRb equals twice the cell means of the research cache fr_both at T
+                     to 5e-7; 65% of the cells changed their bin of 20
+    sweep100         rebuilt by build_sweep100: cm, thr, eps, seeds, sweep bit for bit as before; fr equals the scan's
+                     stored FR (cell means at T) on the 39 shared environments to 3e-7
+    updates_50k      fr_t replaced by update_arrays' (episodes_fr); its other 15 members untouched; update_arrays' u_
+                     and tv_ of the two Bayes observers equal the stored ones bit for bit
+    traj_fr draws, seeds.json   rewritten (seeds.json: only its traj_fr entries changed)
+    the files of the symmetric FR are kept as <name>_sym_superseded.<ext>
+The six targets on that day (--out a scratch folder; 3 BLAS threads beside other jobs: summary 0.2, traj_fr 0.1, pcs
+3.4, envdist 4.1, sweep 1.3, split 1.6 min): pcs and envdist byte-identical to the outputs of 27 Oct, split to the
+kept figure_bin/supp gifs/fig1c_movie_split_traj.gif; summary_fold differs in panel b only (a: no pixel),
+summary_updates in panel c only (a, b, d, e: no pixel); traj_FR shows other episodes (10 and 7 of 50 in common with the
+old low and high groups); sweep's top-row edge colours a fifth of a decade paler (<= 38/255) and, through the GIF's
+median-cut palette, 10% of the pixels elsewhere re-mapped (<= 64/255; 0.04% by more than 30).
 The replays are op for op the gradflow harvest's hand-written fp32 LSTM (lstm_input, forward_states, then the read-out;
 belief_t = per-context softmax of the summed read-out logits in float64), so at equal thread counts they equal the
 original replay code bit for bit; weights are read straight from the checkpoints.
@@ -178,6 +213,7 @@ from matplotlib.colors import LinearSegmentedColormap, LogNorm, SymLogNorm, to_r
 from matplotlib.lines import Line2D                                               # noqa: E402
 from PIL import Image                                                             # noqa: E402
 import plotting_helpers as ph                                                     # noqa: E402
+from main.utils import factorization_regret                                       # noqa: E402  (THE FR: forward KL)
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -202,7 +238,8 @@ CELLS = ((0, 2), (5, 8), (9, 3), (9, 7))                                        
 ALIAS_M, ALIAS_SEED = 2000, 1                                                     # streams per cell, seed
 SCAN_N_ENV, SCAN_M, SCAN_SEED0, SCAN_PSEED0 = 40, 50, 1000, 100                   # environments, streams per cell,
                                                                                   # seeds
-SCAN_SIGMA, SCAN_CLIP, FR_EPS = .8, 1e-6, 1e-15                                   # the perturbed table; FR's clip
+SCAN_SIGMA, SCAN_CLIP, FR_EPS = .8, 1e-6, 1e-15                                   # the perturbed table; the clip of
+                                                                                  # fr_sym (the superseded FR_sym)
 SCAN_CELLS = [(g, c) for g in range(N_R) for c in range(N_R)]                     # goal-ordered, k = 10 r_g + r_c
 SCAN_AGENTS = ("Joint", "Naive", "Trained", "Echo")
 SCAN_FILES = ("scan_meta.npz",) + tuple(f"scan_{a}.npz" for a in SCAN_AGENTS)
@@ -431,6 +468,17 @@ def episodes(key):
     return npz_member(ensure("episodes"), key)
 
 
+def episodes_fr(rows=slice(None)):
+    """factorization regret of the harvest's episodes rows at every step, summed over the two variables: FR_g + FR_c
+    (len(rows), T) float64, nats, FR_v = KL(the Optimal's marginal of v || the Naive's): the paper's forward KL, exact
+    (main.utils.factorization_regret on episodes.npz's float64 beliefs: within 2e-12 nats of the log-space value from
+    the observations and tables, checked on 8,000 episodes with FR up to 104 nats. A float32 copy of the beliefs will
+    not do: it rounds the Naive's smallest probabilities to 0, which the forward KL weighs; on the 50,000 episodes 54
+    of the 1.5 million episode-steps then change by more than 1e-3 nats, the largest by 54 nats)"""
+    J, Nv = (np.asarray(episodes(k)[rows], np.float64) for k in ("ep_joint_belief", "ep_naive_belief"))
+    return factorization_regret(J, Nv).sum(-1)                                    # (n, T, 2) -> FR_0 + FR_1
+
+
 # ═══════════════════════════════════════════════════════════════════
 # Data: network replays (gradflow_analysis' hand-written LSTM on the checkpoints' weights)
 # ═══════════════════════════════════════════════════════════════════
@@ -559,6 +607,27 @@ def _entanglement(px, joint):
                      np.stack([_approx_lik(joint[:, :, k]) for k in (0, 1)], 2)).mean(-1)
 
 
+def _lse(a, axis):
+    """log-sum-exp of a along axis (shifted by the maximum first), the axis dropped"""
+    m = a.max(axis=axis, keepdims=True)
+    return (m + np.log(np.exp(a - m).sum(axis=axis, keepdims=True))).squeeze(axis)
+
+
+def _log_marginals(lw):
+    """joint log weights lw (..., R, R; raw order [r0, r1]) -> the two variables' log marginals (..., 2, R), each up to
+    the same additive constant (_lse over the other variable)"""
+    return np.stack([_lse(lw, -1), _lse(lw, -2)], -2)
+
+
+def fr_streams(obs, L):
+    """factorization regret of each variable at every step of streams obs (n, T, 5) under the table L -> (n, T, 2)
+    float64, raw context order, nats: FR_v = KL(the Optimal's marginal of v || the Naive's), the paper's forward KL,
+    exact (main.utils.factorization_regret on the log beliefs: the Optimal's from its cumulative joint log likelihood,
+    the Naive's its cumulative log likelihood of v's averaged table; no probability is formed or clipped)"""
+    lJ, _, lp = exact_bayes(obs, L)
+    return factorization_regret(_log_marginals(np.cumsum(lJ, 1)), np.cumsum(lp, 1), logs=True)
+
+
 def _env_table(EP):
     """harvest episode EP's likelihood table (5, R, R) float64 and goal context"""
     return np.array(episodes("ep_joint_likelihood")[EP], np.float64), int(record()["ep_goal_ind"][EP])
@@ -641,8 +710,11 @@ def pert_table(L, e):
 
 
 def fr_sym(bj, bn, eps=FR_EPS):
-    """factorization regret (the run's SII): [KL(bj || bn) + KL(bn || bj)] / 2 over the last axis, both clipped to
-    [eps, 1 - eps], nats"""
+    """SUPERSEDED for factorization regret (2026-11-10): FR is KL(Joint || Naive), forward and exact
+    (main.utils.factorization_regret; here fr_streams, episodes_fr). This is the symmetric KL
+    [KL(bj || bn) + KL(bn || bj)] / 2 over the last axis, both clipped to [eps, 1 - eps], nats: what the scan stored
+    as "FR" until then (the run's SII of that time) and now keeps as "FR_sym". Still the symmetric KL of
+    plot_fig1c_measures_movie.err_both (the Trained RNN's error against the Optimal: not a regret)"""
     x, y = np.clip(bj, eps, 1 - eps), np.clip(bn, eps, 1 - eps)
     return .5 * ((x * np.log(x / y)).sum(-1) + (y * np.log(y / x)).sum(-1))
 
@@ -681,8 +753,9 @@ def pert_asymptote(L, Lp, goal, cells=SCAN_CELLS):
 
 def scan_env(e, EP, threads=None):
     """scan environment e (harvest episode EP): SCAN_M streams per cell, seed SCAN_SEED0 + e; the Optimal and the
-    (log-space) Naive exactly, the networks replayed, rev, FR, the asymptotes and the cross-checks -> the environment's
-    rows of every scan_meta / scan_<agent> member (float16 beliefs, answers from full precision)"""
+    (log-space) Naive exactly, the networks replayed, rev, FR (the goal variable's, fr_streams: the forward KL) and
+    FR_sym (fr_sym: the symmetric clipped KL stored as "FR" until 2026-11-10), the asymptotes and the cross-checks ->
+    the environment's rows of every scan_meta / scan_<agent> member (float16 beliefs, answers from full precision)"""
     L, goal = _env_table(EP)
     out, cell_of, rev, obs, J = simulate_cells(EP, SCAN_CELLS, SCAN_M, SCAN_SEED0 + e, threads=threads)
     Nv = naive_marginals(obs, L)
@@ -693,7 +766,8 @@ def scan_env(e, EP, threads=None):
     n_inf, n_gap = naive_asymptote(L, goal)
     p_inf, p_gap = pert_asymptote(L, Lp, goal)
     full = {"Joint": Jg, "Naive": Ng, "Trained": out["Trained"], "Echo": out["Echo"]}
-    part = {"obs": obs, "rev": rev, "FR": fr_sym(J[:, :, goal], Nv[:, :, goal]).astype(np.float32), "Lpert": Lp,
+    part = {"obs": obs, "rev": rev, "FR": fr_streams(obs, L)[:, :, goal].astype(np.float32),
+            "FR_sym": fr_sym(J[:, :, goal], Nv[:, :, goal]).astype(np.float32), "Lpert": Lp,
             "naive_inf": n_inf, "naive_inf_gap": n_gap, "pert_inf": p_inf, "pert_inf_gap": p_gap,
             "recreate_maxdiff": [float(dJ), float(dN)],
             "alias_answer_mismatch": [int((scan_answers(out[a]) != scan_answers(full[a])).any(-1).sum())
@@ -706,9 +780,12 @@ def scan_env(e, EP, threads=None):
 def build_scan(threads=None, folder=None):
     """scan_meta.npz and scan_{Joint,Naive,Trained,Echo}.npz (keys as the seeded files; the perturbed-table agent's
     beliefs, scan_Pert.npz, are not rebuilt, its table and asymptotes are): scan_env for the first SCAN_N_ENV of
-    scan_envs. The seeded networks were replayed on GPU 0 (a CPU rebuild: Bayes, obs, rev, FR bit for bit; network
+    scan_envs. The seeded networks were replayed on GPU 0 (a CPU rebuild: Bayes, obs, rev, FR_sym bit for bit; network
     float16 beliefs within one float16 step, answers differ in 0-1 of an environment's 150,000 stream-steps). 400
-    replay batches plus the exact observers: 30-65 s per environment at 2 threads (20-45 min), peak ~2.5 GB"""
+    replay batches plus the exact observers: 30-65 s per environment at 2 threads (20-45 min), peak ~2.5 GB.
+    FR: since 2026-11-10 the goal variable's forward KL (fr_streams); the kept scan_meta.npz was patched in place that
+    day (its old "FR" became "FR_sym"), and fr_streams reproduces the patched "FR" bit for bit (float32; checked on
+    all 40 environments from the stored obs and L)"""
     with load_cache("scan_envs") as S:
         eps, goal_s = S["eps"][:SCAN_N_ENV].astype(int), S["goal"][:SCAN_N_ENV]
     G = record()["ep_goal_ind"].astype(int)
@@ -724,8 +801,9 @@ def build_scan(threads=None, folder=None):
                 pert_seed=SCAN_PSEED0 + np.arange(len(eps)), sigma=np.float64(SCAN_SIGMA), M=np.int64(SCAN_M),
                 cells=np.array(SCAN_CELLS), cell_of=np.repeat(np.arange(len(SCAN_CELLS)), SCAN_M),
                 L=np.stack([_env_table(int(EP))[0] for EP in eps]), Lpert=np.stack([p["Lpert"] for p in parts]))
-    for k, dt in (("obs", bool), ("rev", np.float32), ("FR", np.float32), ("naive_inf", np.int8),
-                  ("naive_inf_gap", np.float64), ("pert_inf", np.int8), ("pert_inf_gap", np.float64)):
+    for k, dt in (("obs", bool), ("rev", np.float32), ("FR", np.float32), ("FR_sym", np.float32),
+                  ("naive_inf", np.int8), ("naive_inf_gap", np.float64), ("pert_inf", np.int8),
+                  ("pert_inf_gap", np.float64)):
         meta[k] = np.stack([p[k] for p in parts]).astype(dt)
     meta["recreate_maxdiff"] = np.array([p["recreate_maxdiff"] for p in parts])
     meta["alias_answer_mismatch"] = np.array([p["alias_answer_mismatch"] for p in parts])
@@ -758,27 +836,29 @@ def scan_cell_means(agent, envs):
 # ═══════════════════════════════════════════════════════════════════
 
 def _fr_both_T(L, goal, cells, obs):
-    """per stream: FR_g + FR_c after all T steps, exact from the counts (L raw order, cells goal-ordered)"""
+    """per stream: FR_g + FR_c after all T steps, FR_v = KL(the Optimal's marginal of v || the Naive's), the forward
+    KL, exact (main.utils.factorization_regret on the log beliefs, which the counts give: the Optimal's the log-sum-exp
+    of the cells' log likelihoods over the other variable, the Naive's the log likelihood of v's averaged table;
+    L raw order, cells goal-ordered). Until 2026-11-10 the Jeffreys/2 divergence of the two marginals, floored at
+    1e-15"""
     r0, r1 = (cells[:, 1], cells[:, 0]) if goal == 1 else (cells[:, 0], cells[:, 1])
     P = np.clip(L[:, r0, r1].T, 1e-12, 1 - 1e-12)
     n = obs.sum(1).astype(np.float64)
-    ll = n @ np.log(P).T + (N_T - n) @ np.log(1 - P).T
-    post = np.exp(ll - ll.max(1, keepdims=True))
-    post = (post / post.sum(1, keepdims=True)).reshape(-1, 10, 10)
-    fr = 0.
-    for opt, Pv in ((post.sum(2), P.reshape(10, 10, 5).mean(1)), (post.sum(1), P.reshape(10, 10, 5).mean(0))):
+    ll = (n @ np.log(P).T + (N_T - n) @ np.log(1 - P).T).reshape(-1, 10, 10)        # the cells' log likelihoods
+    fr = 0.                                                                         # [r_g, r_c]
+    for lopt, Pv in ((_lse(ll, 2), P.reshape(10, 10, 5).mean(1)), (_lse(ll, 1), P.reshape(10, 10, 5).mean(0))):
         lv = n @ np.log(Pv).T + (N_T - n) @ np.log(1 - Pv).T
-        q = np.exp(lv - lv.max(1, keepdims=True))
-        fr = fr + ph.jeffreys_half(opt, q / q.sum(1, keepdims=True), clip_top=False)
+        fr = fr + factorization_regret(lopt, lv, logs=True)
     return fr
 
 
 def build_distances_fr(folder=None):
     """distances_fr.npz: per scan environment (e = 2 left out), cell and step, the mean over the cell's streams of the
     distance of the posterior means (E[r_g], E[r_c]) (float16 beliefs, each marginal renormalized) from the true cell;
-    each cell's FR_g + FR_c at T (exact, float64), the cells ranked by it within the environment into 10 and 20
-    equal-count bins (stable sort). Bit for bit except FRb / fr_median (~1e-14: MKL's rounding of the count-table
-    products depends on its thread count; the seeded file's is unknown, 1 and 2 threads both differ); about 5 s"""
+    each cell's FR_g + FR_c at T (_fr_both_T: the forward KL of each variable, exact, float64; mean over the cell's
+    streams), the cells ranked by it within the environment into 10 and 20 equal-count bins (stable sort). About 5 s.
+    FRb's last bits (~1e-14) follow MKL's thread count (the count-table products). The file of 25 Oct 2026, binned by
+    the symmetric FR (Jeffreys/2), is kept as distances_fr_sym_superseded.npz"""
     with np.load(ensure("scan")[0]) as m:
         cells, cell_of, L, goal, obs = m["cells"], m["cell_of"], m["L"], m["goal"], m["obs"]
     n_env, n = obs.shape[:2]
@@ -968,13 +1048,13 @@ def update_beliefs(rows, threads=6):
     return B
 
 
-def update_arrays(B, keep):
-    """fr_t and the per-step updates u_<agent> (posterior means, E_0 = 4.5) and tv_<agent> (total variation, b_0
-    uniform) of the kept episodes, from goal-ordered float32 beliefs B {agent: (n, T, 20)}"""
+def update_arrays(B, keep, fr):
+    """fr_t (fr (n, T), the episodes' FR_g + FR_c: episodes_fr) and the per-step updates u_<agent> (posterior means,
+    E_0 = 4.5) and tv_<agent> (total variation, b_0 uniform) of the kept episodes, from goal-ordered float32 beliefs
+    B {agent: (n, T, 20)}. Until 2026-11-10 fr_t was the Jeffreys/2 divergence of B's float32 Bayes beliefs, clipped
+    to [1e-15, 1 - 1e-15]"""
     out, R = {}, N_R
-    J, Nv = B["Joint"].astype(np.float64), B["Naive"].astype(np.float64)
-    fr = ph.jeffreys_half(J[..., :R], Nv[..., :R]) + ph.jeffreys_half(J[..., R:], Nv[..., R:])    # FR_g + FR_c
-    out["fr_t"] = fr[keep].astype(np.float32)
+    out["fr_t"] = np.asarray(fr)[keep].astype(np.float32)
     Rv = np.arange(R)
     for a in AGENTS4:
         b = B[a][keep].astype(np.float64).reshape(keep.sum(), N_T, 2, R)
@@ -989,9 +1069,11 @@ def update_arrays(B, keep):
 def build_updates(threads=6, folder=None):
     """updates_50k.npz (deflate): every distinct-variable episode's per-step updates of the four agents (update_beliefs
     for all 50,000 episodes; the networks' episodes 20,000-49,999 replayed at `threads`: the seeded file used 6), rev,
-    fr_t, env (index of the variable pair), rg, rc; check_trained / check_echo: max |diff| of a replay of episodes
-    0-999 against beliefs_steps.npz. 62 replay batches plus the numpy and the compression: about 5 min at 2 threads,
-    peak ~2 GB"""
+    fr_t (episodes_fr: FR_g + FR_c, the forward KL, exact), env (index of the variable pair), rg, rc; check_trained /
+    check_echo: max |diff| of a replay of episodes 0-999 against beliefs_steps.npz. 62 replay batches plus the numpy
+    and the compression: about 5 min at 2 threads, peak ~2 GB. The kept file's fr_t was replaced on 2026-11-10 by
+    this builder's (no replay: every other member as seeded); the file with the symmetric fr_t is kept as
+    updates_50k_sym_superseded.npz"""
     rec = record()
     goal, ar = rec["ep_goal_ind"][:N_ALL].astype(int), np.arange(N_ALL)
     B = update_beliefs(range(0, N_ALL), threads)
@@ -1005,7 +1087,7 @@ def build_updates(threads=6, folder=None):
     out = dict(env=np.unique(ci[keep], axis=0, return_inverse=True)[1].ravel(), rg=ctx[ar, goal][keep],
                rc=ctx[ar, 1 - goal][keep], rev=np.array(episodes("rev")[:N_ALL])[keep].astype(np.float32),
                agents=np.array(AGENTS4), check_trained=checks["Trained"], check_echo=checks["Echo"])
-    out.update(update_arrays(B, keep))
+    out.update(update_arrays(B, keep, episodes_fr(slice(0, N_ALL))))
     return _save(data_path("updates_50k.npz", folder), compressed=True, **out)
 
 
@@ -1042,7 +1124,8 @@ def sweep_env(EP, seed):
     the joint likelihood at the selected stream-steps and the Naive's factorized one elsewhere) with the joint evidence
     at the SWEEP % least (w = 0) / most (w = 1) entangled of the environment's stream-steps (nested sets) -> cell means
     of its goal-ordered beliefs at T (2, len(SWEEP), 100, 20) float32, the entanglement at each selection's edge
-    (2, len(SWEEP)), each cell's goal-variable FR at T (100,)"""
+    (2, len(SWEEP)), each cell's goal-variable FR at T (100,): the mean over its streams of KL(the Optimal's marginal
+    || the Naive's), the forward KL, exact (fr_streams' arithmetic at the last step; until 2026-11-10 fr_sym)"""
     K, M, T, R = len(SCAN_CELLS), SWEEP_M, N_T, N_R
     L, g = _env_table(EP)
     obs, cell_of = cell_streams(L, g, SCAN_CELLS, M, int(seed))
@@ -1050,10 +1133,9 @@ def sweep_env(EP, seed):
     lN = lp[:, :, 0][..., :, None] + lp[:, :, 1][..., None, :]
     n = len(lJ)
     px = np.exp(lp)
-    naive = np.cumprod(px, 1)
-    naive /= naive.sum(-1, keepdims=True)
     rev = _entanglement(px, joint)
-    frc = fr_sym(joint[:, -1, g], naive[:, -1, g]).reshape(K, M).mean(1)
+    frc = factorization_regret(_log_marginals(np.cumsum(lJ, 1)[:, -1])[:, g], np.cumsum(lp, 1)[:, -1, g],
+                               logs=True).reshape(K, M).mean(1)
     Dflat = (lJ - lN).reshape(n * T, R, R)
     base = lN.sum(1)
     flat = rev.ravel()
@@ -1081,7 +1163,9 @@ def sweep_env(EP, seed):
 
 def build_sweep100(n_env=SWEEP_N_ENV, folder=None):
     """sweep100.npz: sweep_env for sweep_environments(n_env): cm (2, levels, E, 100, 20), thr (2, levels, E),
-    fr (E, 100), eps, seeds, sweep. numpy only, bit for bit; 1.6 s per environment (~3 min)"""
+    fr (E, 100), eps, seeds, sweep. numpy only, bit for bit; 1.6 s per environment (~3 min). Rebuilt on 2026-11-10
+    for fr (the forward KL; cm, thr, eps, seeds, sweep came out bit for bit as before); the file with the symmetric fr
+    is kept as sweep100_sym_superseded.npz"""
     eps, seeds = sweep_environments(n_env)
     cm = np.zeros((2, len(SWEEP), len(eps), len(SCAN_CELLS), 20), np.float32)
     thr = np.full((2, len(SWEEP), len(eps)), np.nan)
@@ -1280,18 +1364,21 @@ def alias_trajectories():
         return {a: f[a] for a in ("Trained", "Echo", "Joint", "Naive")}, f["cell_of"], cells, f["rev"]
 
 
-def fr_group_episodes(group, BV=None, rg=None, rc=None):
+def fr_group_episodes(group, rg=None, rc=None):
     """the FR_GROUP_N episodes of FR group 'low' or 'high': among the first N_EP, distinct-variable episodes with both
-    values in FR_GROUP_SUB and FR_g + FR_c at T (Jeffreys/2 between the Optimal's and the Naive's marginals, clipped to
-    [1e-15, 1 - 1e-15]) in the lowest / highest FR_GROUP_Q of them; FR_GROUP_N variable pairs drawn without replacement
-    (default_rng(FR_GROUP_SEED)), one of each pair's episodes uniformly -> episodes, the pairs available, the FR cut.
-    BV, rg, rc: beliefs_every_step()'s, if at hand. Checked against traj_fr_draw_<group>.npz when it is there"""
-    if BV is None:
-        BV, rg, rc = beliefs_every_step()
+    values in FR_GROUP_SUB and FR_g + FR_c at T (episodes_fr: each variable's KL(the Optimal's marginal || the
+    Naive's), the forward KL, exact, from episodes.npz's float64 beliefs) in the lowest / highest FR_GROUP_Q of them;
+    FR_GROUP_N variable pairs drawn without replacement (default_rng(FR_GROUP_SEED)), one of each pair's episodes
+    uniformly -> episodes, the pairs available, the FR cut. rg, rc: beliefs_every_step()'s, if at hand. Checked against
+    traj_fr_draw_<group>.npz when it is there. Until 2026-11-10 the groups were cut by the symmetric FR (Jeffreys/2 of
+    the float32 beliefs, clipped to [1e-15, 1 - 1e-15]): those draws are kept as traj_fr_draw_<group>_sym_superseded.npz
+    (cuts 0.44 and 26.8 nats, 265 pairs available in each group; forward: 0.32 and 27.2 nats, 262 and 246 pairs; 10
+    and 7 of the 50 episodes of a group are in both draws)"""
+    if rg is None:
+        _, rg, rc = beliefs_every_step()
     n = N_EP
     ci = np.sort(record()["ep_ctx_inds"][:n].astype(int), 1)
-    J, N = BV["Joint"][:, -1].astype(np.float64), BV["Naive"][:, -1].astype(np.float64)
-    frT = ph.jeffreys_half(J[:, :10], N[:, :10]) + ph.jeffreys_half(J[:, 10:], N[:, 10:])
+    frT = episodes_fr(slice(0, n))[:, -1]
     elig = (ci[:, 0] != ci[:, 1]) & np.isin(rg[:n], FR_GROUP_SUB) & np.isin(rc[:n], FR_GROUP_SUB)
     q = np.quantile(frT[elig], FR_GROUP_Q if group == "low" else 1 - FR_GROUP_Q)
     elig &= (frT <= q) if group == "low" else (frT >= q)
@@ -1600,9 +1687,9 @@ def figure_summary_fold(out_dir=None):
        the Euclidean distance of the posterior means from the true cell (grid units; per particle, so split clouds
        do not cancel), mean over the alias scan's 39 environments (40 environments x 100 cells x 50 streams; e = 2,
        an exactly symmetric table, left out). Cells binned by their FR within each environment, 20 bins of 5
-       cells; a cell's FR: the mean over its streams of FR_g + FR_c at T = 30, the Jeffreys/2 divergence between the
-       Optimal's and the Naive's marginal of each variable (nats); the FR axis is labelled with the median over
-       environments of each bin's median FR.
+       cells; a cell's FR: the mean over its streams of FR_g + FR_c at T = 30, FR_v = KL(the Optimal's marginal of
+       v || the Naive's) (the forward KL, exact: main.utils.factorization_regret; nats; the symmetric Jeffreys/2
+       until 2026-11-10); the FR axis is labelled with the median over environments of each bin's median FR.
        The Optimal and the Trained RNN run from t = 1 to 30 to the right, the Naive and the ESN from t = 1 to 30 to
        the left, so each bin's curves meet at t = 1, where all agents start alike. Colour: the cell's FR bin (grey
        to dark red); dashed: theory (Naive left, Optimal right); thin solid, slightly darkened: the networks (ESN
@@ -1651,8 +1738,9 @@ def figure_summary_updates(out_dir=None):
     c-e   Joint movement of the two beliefs: the covariance of the two update sizes, Cov(|u_g(t)|, |u_c(t)|), over a
           group of points, large only when both beliefs move a lot in the same steps (the correlation times both
           sizes' spreads; grid units^2); 20 quantile bins each:
-          c  by FR_t, the factorization regret at the step (FR_g + FR_c, Jeffreys/2 between the Optimal's and the
-             Naive's marginals), and d  by E_t, the step's entanglement (Jeffreys/2 between the Naive's likelihood
+          c  by FR_t, the factorization regret at the step (FR_g + FR_c, each KL(the Optimal's marginal || the
+             Naive's): the forward KL, exact, main.utils.factorization_regret; the symmetric Jeffreys/2 until
+             2026-11-10), and d  by E_t, the step's entanglement (Jeffreys/2 between the Naive's likelihood
              of the step and the Optimal's update b_t / b_{t-1} of each marginal, mean over the two variables): bins
              cut anew at every step, the covariance per step and bin, then its mean over the 30 steps;
           e  by the belief's path length S = sum_t ||u(t)|| (each agent binned by its own S; x: the bin's median,
@@ -1764,7 +1852,7 @@ def traj_fr_group(group, BV, rg, rc, S, home):
     particles' beliefs V (50, T, 20) float64, their Catmull-Rom paths P20 (50, len(tt), 20) at MOVIE_SUB points per
     step tt, the 16 cells' targets home (16, 20) -> per-agent data, and the colours and the draw. BV, rg, rc:
     beliefs_every_step()"""
-    eps, n_avail, fr_cut = fr_group_episodes(group, BV, rg, rc)
+    eps, n_avail, fr_cut = fr_group_episodes(group, rg, rc)
     cell = np.stack([rg[eps], rc[eps]], 1).astype(int)
     hc = np.array([(g, c) for g in FR_GROUP_SUB for c in FR_GROUP_SUB])
     tt = np.linspace(0, N_T - 1, (N_T - 1) * MOVIE_SUB + 1)
@@ -1889,10 +1977,11 @@ def figure_traj_fr(out_dir=None):
     movie in the pcs movie's layout (7.05 x 7.55 in at 150 dpi: 1057 x 1132 px).
     Draw (fr_group_episodes): the trained harvest's first 20,000 episodes (each one stream of one cell of one
     environment; the episodes the step planes are fitted on). Eligible: distinct-variable environments, both values
-    in {0, 3, 6, 9} (16 cells), and FR at T = 30 (FR_g + FR_c, each half the Jeffreys divergence between the Optimal's
-    and the Naive's marginal of the variable, both clipped to [1e-15, 1 - 1e-15]; nats) in the lowest / highest 10% of
-    the eligible episodes; then 50 environments drawn uniformly without replacement (default_rng(0)) and one of each
-    environment's eligible episodes uniformly.
+    in {0, 3, 6, 9} (16 cells), and FR at T = 30 (FR_g + FR_c, each KL(the Optimal's marginal of the variable || the
+    Naive's): the forward KL, exact, main.utils.factorization_regret on the harvest's float64 beliefs; nats) in the
+    lowest / highest 10% of the eligible episodes; then 50 environments drawn uniformly without replacement
+    (default_rng(0)) and one of each environment's eligible episodes uniformly. (Until 2026-11-10 the groups were cut
+    by the symmetric FR, Jeffreys/2 clipped at 1e-15, so the kept figure of 27 Oct shows other episodes.)
         panels     2 x 2: Trained RNN and ESN over Optimal Bayes and Naive Bayes, each in its own step-30 plane, the
                    pcs movie's (step_planes: of the PCA of the agent's goal-ordered beliefs at the step on all 20,000
                    episodes, the 2 of PCs 1-3 holding the most latent variance, turned so that the ridge decoder of
@@ -2411,10 +2500,11 @@ def figure_sweep(out_dir=None):
     from one p to the next in 4 frames of 70 ms, with holds of 1.2 s at 0% and 2 s at 100%.
         top row     the environments' average grid: each cell's posterior means (E[r_g], E[r_c]) at T = 30 (of its
                     mean belief over its 50 streams), averaged over the environments and joined to its grid
-                    neighbours; each edge coloured by the FR of its two cells (their geometric mean; a cell's FR: half
-                    the Jeffreys divergence between the Optimal's and the Naive's goal-variable marginals at T, mean
-                    over its streams and the environments, floored at 1e-6; nats, log scale .05-30, the same in every
-                    frame); dashed grey: the true lattice (r_g, r_c)
+                    neighbours; each edge coloured by the FR of its two cells (their geometric mean; a cell's FR:
+                    KL(the Optimal's goal-variable marginal || the Naive's) at T, the forward KL, exact
+                    (main.utils.factorization_regret; the symmetric KL until 2026-11-10), mean over its streams and
+                    the environments, floored at 1e-6; nats, log scale .05-30, the same in every frame); dashed grey:
+                    the true lattice (r_g, r_c)
         bottom row  each environment's grid, each edge coloured by its distance from the environments' average grid
                     (black): the mean over its two cells of their distance from their place in the average grid
                     (grid units, 0-3)

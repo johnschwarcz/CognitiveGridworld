@@ -399,7 +399,11 @@ def posterior_means(b, normalize="after"):
 
 def jeffreys_half(p, q, eps=1e-15, clip_top=True):
     """half the Jeffreys divergence between distributions p and q over the last axis, .5 sum (p - q)(log p - log q)
-    (nats), p and q clipped to [eps, 1 - eps] first (clip_top False: only from below)"""
+    (nats), p and q clipped to [eps, 1 - eps] first (clip_top False: only from below): a symmetric KL.
+    SUPERSEDED for factorization regret (2026-11-10): FR is KL(Joint || Naive), forward and exact, through
+    main.utils.factorization_regret alone. plot_fig1c_all.py called this for FR until then; it has no caller left
+    there (entanglement, a Jeffreys/2 by definition, is plot_fig1c_all._step_dkl). Kept as a helper for divergences
+    that are meant to be symmetric; never for FR"""
     if clip_top:
         p, q = np.clip(p, eps, 1 - eps), np.clip(q, eps, 1 - eps)
     else:

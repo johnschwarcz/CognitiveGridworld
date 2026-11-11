@@ -10,8 +10,12 @@ Stored per agent and step t = 1..30:
     u_<a>   the particle's update, (E_t[r_g] - E_{t-1}[r_g], E_t[r_c] - E_{t-1}[r_c]), posterior means, E_0 = 4.5
     tv_<a>  the full belief's update per variable: total variation 1/2 sum_r |b_t(r) - b_{t-1}(r)| (the share of
             probability mass that moved), b_0 = uniform
-and per episode: rev (house entanglement per step), fr_t (factorization regret per step: FR_g + FR_c, the house
-Jeffreys/2 between the Optimal's and the Naive's marginals, clipped at 1e-15), env, rg, rc.
+and per episode: rev (house entanglement per step), fr_t (factorization regret per step: FR_g + FR_c, each
+KL(the Optimal's marginal || the Naive's), the paper's forward KL, exact: main.utils.factorization_regret on the
+harvest's float64 beliefs), env, rg, rc.
+fr_t until 2026-11-10: the symmetric Jeffreys/2 of the float32 beliefs, clipped at 1e-15. That day the stored file's
+fr_t was replaced by the forward one without the replays (every other member unchanged); the file with the symmetric
+fr_t is kept beside it as updates_50k_sym_superseded.npz.
 Run from the repository root (about 10 min on CPU, the replays):
     CUDA_VISIBLE_DEVICES="" OMP_NUM_THREADS=6 /home/johns/anaconda3/envs/eureka/bin/python \\
         main/REPLICATION/claude_plots/fig1c_update_cache.py"""
@@ -25,12 +29,14 @@ sys.path[:0] = [ROOT, os.path.join(ROOT, "main", "REPLICATION"), os.path.join(RO
 OUT = os.path.join(ROOT, "main", "DATA", "experimental", "fig1c_compression", "figdata", "round4b", "updates_50k.npz")
 AG = ("Joint", "Trained", "Naive", "Echo")
 N_ALL, N_DONE, T, R = 50000, 20000, 30, 10
-EPS = 1e-15
 
 
-def jeffreys_half(p, q):
-    p, q = np.clip(p, EPS, 1 - EPS), np.clip(q, EPS, 1 - EPS)
-    return .5 * ((p - q) * (np.log(p) - np.log(q))).sum(-1)
+def fr_steps(f, n=N_ALL):
+    """FR_g + FR_c at every step of the harvest's first n episodes (n, T) float64: each variable's KL(the Optimal's
+    marginal || the Naive's), forward, exact (main.utils.factorization_regret on the harvest f's float64 beliefs)"""
+    from main.utils import factorization_regret
+    return factorization_regret(np.asarray(f["ep_joint_belief"][:n], np.float64),
+                                np.asarray(f["ep_naive_belief"][:n], np.float64)).sum(-1)
 
 
 def load():
@@ -71,8 +77,7 @@ def build():
     out = dict(env=np.unique(ci[keep], axis=0, return_inverse=True)[1].ravel(), rg=ctx[ar, goal][keep],
                rc=ctx[ar, 1 - goal][keep], rev=f["rev"][:N_ALL][keep].astype(np.float32), agents=np.array(AG),
                check_trained=checks["Trained"], check_echo=checks["Echo"])
-    J, Nv = B["Joint"].astype(np.float64), B["Naive"].astype(np.float64)
-    out["fr_t"] = (jeffreys_half(J[..., :R], Nv[..., :R]) + jeffreys_half(J[..., R:], Nv[..., R:]))[keep].astype(np.float32)
+    out["fr_t"] = fr_steps(f)[keep].astype(np.float32)
     Rv = np.arange(R)
     for a in AG:
         b = B[a][keep].astype(np.float64).reshape(keep.sum(), T, 2, R)

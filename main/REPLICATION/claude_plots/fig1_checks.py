@@ -43,6 +43,7 @@ sys.path.insert(0, _here())
 from fig1 import (ga, plt, matplotlib, pe, PCA, Ridge, RC, FS_TICK, FS_LAB, FS_TITLE, NAME, COL,  # noqa: E402
                          N_EP, N_R, STEPS, CACHE_DIR, REPLAY, _harvest, _beliefs, collect_beliefs, belief_geometry,
                          alias_trajectories, _align, _geometry_panel, _title2, _clean)
+from main.utils import factorization_regret                                       # noqa: E402  (the root: fig1's path)
 
 BELIEFS_ALL = os.path.join(CACHE_DIR, "beliefs_alltime.npz")
 BELIEF_TIME = os.path.join(CACHE_DIR, "belief_time.npz")
@@ -248,8 +249,10 @@ def forgetting():
     """per-episode forgetting on the trained harvest's first 20,000 episodes: p_t = b_t(r_g*), each agent's belief in
     the true goal value (networks from beliefs_alltime, Bayes observers from the harvest). An episode has forgotten at
     t when its belief once reached twice the prior (max_{s <= t} p_s >= 0.2) and has since lost half of it (p_t <=
-    max_{s <= t} p_s / 2). Also the summed entanglement sum_t rev_t and the factorization regret FR_T = [KL(b*_T || b_T)
-    + KL(b_T || b*_T)] / 2 between the joint and naive goal beliefs (the run's SII), per episode"""
+    max_{s <= t} p_s / 2). Also the summed entanglement sum_t rev_t and the factorization regret FR_T = KL(b*_T || b_T)
+    of the joint goal belief b*_T from the naive one b_T (the paper's forward KL, exact:
+    main.utils.factorization_regret, as the run's SII since 2026-11-10; until then the symmetric [KL(b*_T || b_T) +
+    KL(b_T || b*_T)] / 2), per episode"""
     BA = beliefs_alltime()
     f = np.load(ga.CACHE.format("trained"))
     N = len(BA["Trained"])
@@ -264,8 +267,7 @@ def forgetting():
     for a, p in P.items():
         run = np.maximum.accumulate(p, 1)
         out[a] = (run >= .2) & (p <= .5 * run)                                       # (N, T) forgotten at t
-    lj, ln = np.log(np.maximum(Bj[:, -1], 1e-300)), np.log(np.maximum(Bn[:, -1], 1e-300))
-    FR = ((Bj[:, -1] - Bn[:, -1]) * (lj - ln)).sum(-1) / 2                         # (KL + KL) / 2
+    FR = factorization_regret(Bj[:, -1], Bn[:, -1])                                # KL(joint || naive), float64
     E = np.asarray(f["rev"][:N], np.float64).sum(1)
     return P, out, FR, E
 
@@ -346,7 +348,8 @@ def fig_forgetting():
 
 def entanglement_checks():
     """on the trained harvest's first 20,000 episodes: per episode the summed entanglement E = sum_t rev_t, its peak
-    max_t rev_t, the factorization regret FR_T ((KL + KL) / 2 between the joint and naive goal beliefs at T), the joint
+    max_t rev_t, the factorization regret FR_T (KL(joint || naive) of the goal beliefs at T: the paper's forward KL,
+    exact, main.utils.factorization_regret; (KL + KL) / 2 until 2026-11-10), the joint
     observer's information gain (2 log 10 - H of both final marginals) and the grid distance of the truth to the
     nearest border d = min(r_g, 9 - r_g, r_c, 9 - r_c); each agent's final correctness (goal); and the lag curves (g-row
     method, steps 17-30: within-episode z-scores, mean of a[t + tau] rev[t]) of two per-step changes, the log belief
@@ -367,7 +370,7 @@ def entanglement_checks():
     lg = lambda x: np.log(np.maximum(x, 1e-300))
     bj, bn = V["Joint"][:, -1, :10], V["Naive"][:, -1, :10]
     H = lambda b: -(b * lg(b)).sum(-1)
-    out = {"E": rev.sum(1), "peak": rev.max(1), "FR": ((bj - bn) * (lg(bj) - lg(bn))).sum(-1) / 2, "rg": rg, "rc": rc,
+    out = {"E": rev.sum(1), "peak": rev.max(1), "FR": factorization_regret(bj, bn), "rg": rg, "rc": rc,
            "info": 2 * np.log(10) - H(V["Joint"][:, -1, :10]) - H(V["Joint"][:, -1, 10:]),
            "d": np.minimum.reduce([rg, 9 - rg, rc, 9 - rc])}
     L = np.clip(np.asarray(f["ep_joint_likelihood"][:N], np.float64), 1e-9, 1 - 1e-9).reshape(N, 5, 100)

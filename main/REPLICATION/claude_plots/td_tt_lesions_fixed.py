@@ -34,8 +34,13 @@ RESULTS (numbers(); specific effect = target - the mean of its two variance-matc
   simple_figure (td_tt_lesions_simple.png; fix5, share of the naive-to-Bayes gap lost beyond the random controls):
   corner answers lose the most, from ~1,600 episodes (.14) to .55-.58 from 8,000 on (per-step lesion .46-.52); the
   other answers .10-.25 up to ~2,000, then down to .06; holding .46 and coupling .39 at the end. By FR at the last
-  step (thirds of the probes): goal accuracy lost is largest in the high-FR third (+5 pp at 800, +10-11 at 1,600-5,600,
-  +6 at the end), the middle third peaks at +5 (1,600), the low third <= +4 and +.4 at the end.
+  step (thirds of the probes; FR = KL(Bayes || naive) of a variable's marginal belief, the paper's forward form,
+  exact: main.utils.factorization_regret = probes.npz 'fr'; the mean of the two variables; third edges .48 / 1.86
+  nats): goal accuracy lost is largest in the high-FR third (+5.5 pp at 800, +9.3 to +10.6 at 1,600-5,600, +6.3 at
+  the end), the middle third peaks at +5.3 (1,600), the low third <= +4.7 and +.7 at the end.
+  (Re-measured 11-10 with the forward FR. Until then 'fr' was the symmetric KL clipped at 1e-15: edges .67 / 2.98
+  nats, 85% of the probes in the same third; high third +5 at 800, +10-11 at 1,600-5,600, +6 at the end; middle
+  peak +5; low <= +4 and +.4 at the end. Same picture.)
 """
 import os
 import sys
@@ -338,7 +343,8 @@ def row_loss(L, name="fix5"):
 
 
 def fr_loss():
-    """goal accuracy at T lost beyond the random controls, per third of FR (at T, both variables): x, (3, K, 1 + B)"""
+    """goal accuracy at T lost beyond the random controls, per third of FR (at T, the mean of the two variables; FR =
+    KL(Bayes || naive), forward, exact: probes.npz 'fr' = main.utils.factorization_regret): x, (3, K, 1 + B)"""
     import td_tt_lesions as tl
     import td_tt_intervene as ti
     import td_tt_chaos_combined as cc
@@ -383,7 +389,10 @@ def simple_figure(path=None):
         ax[1].plot(np.log10(xf), 100 * v, color=tc[j], lw=2.4, label=lab[j])
     ax[1].set_ylabel("goal accuracy at T lost (percentage points)")
     ax[1].set_title("b  Does the need depend on factorization regret (FR)?", loc="left", fontsize=12)
-    ax[1].legend(frameon=False, fontsize=10, loc="upper left", title="episodes split by FR at the last step")
+    lo_, hi_ = ax[1].get_ylim()
+    ax[1].set_ylim(lo_, hi_ + .07 * (hi_ - lo_))                      # headroom: the legend's title clears the bands
+    ax[1].legend(frameon=False, fontsize=10, loc="upper left", alignment="left",
+                 title=r"episodes split by FR = KL(Bayes $\Vert$ naive) at the last step")
     for a in ax:
         a.axhline(0, color="k", lw=.7)
         a.set_xticks([2, 3, 4])

@@ -25,6 +25,7 @@ CASES = (("echo_N200", {}), ("joint_trained_N100", {}), ("joint_trained_N100_jl"
          ("joint_echo_N500", dict(hid_dim=200)), ("joint_echo_N500_jl", dict(hid_dim=200)),
          ("joint_echo_N500", dict(hid_dim=200, micro_batch=128)), ("joint_echo_N500_jl", dict(hid_dim=200, micro_batch=128)),
          ("joint_echo_N500", dict(hid_dim=200, micro_batch=100)), ("joint_echo_N500_jl", dict(hid_dim=200, micro_batch=100)),
+         ("echo_N200", dict(micro_batch=128, reservoir_dedup=True, reservoir_fp16=True)),
          ("joint_echo_N500", dict(hid_dim=200, micro_batch=128, reservoir_dedup=True, reservoir_fp16=True)),
          ("joint_echo_N500_jl", dict(hid_dim=200, micro_batch=128, reservoir_dedup=True, reservoir_fp16=True)))
 

@@ -25,8 +25,8 @@ coherence, activity effective dimension and turn; PuOr, purple above typical, or
 orange at 0 to purple at 1; the first test used PuOr_r and inverted the legend, caught on the test frame).
 Measured 29 Oct (stream-steps, minus typical; wormhole splits vs top-10% entangled steps that are not wormholes):
 - Steps 8 - 30: error +0.62 vs +0.02 (log10); update size +0.72 vs +0.06; cross-band share -0.83 vs +0.32; coherence
-  -0.03 vs +0.12; activity dimension -0.06 vs +1.95; turn +0.03 vs +0.11; FR +0.26 vs +0.03; belief effective
-  dimension -0.53 vs -0.03.
+  -0.03 vs +0.12; activity dimension -0.06 vs +1.95; turn +0.03 vs +0.11; FR +0.26 vs +0.03 [the symmetric FR of
+  29 Oct; not re-measured with the forward KL, see below]; belief effective dimension -0.53 vs -0.03.
 - Steps 2 - 7: error +0.32 vs +0.10; update size +0.35 vs +0.04; cross-band +0.04 vs +0.08; activity dimension -3.45 vs
   +2.48; coherence -0.01 vs +0.05.
 - Overlap: 29% of wormhole stream-steps are top-10% entangled (2.9x chance); only 2.6% of the top-10% entangled steps
@@ -40,7 +40,11 @@ Measured 29 Oct (stream-steps, minus typical; wormhole splits vs top-10% entangl
   widening, no coherence rise. Most entanglement (97%) never involves a wormhole and runs all episode. So this is not
   one process seen early and late.
 movie_particles() (local means; kept, not used): every particle coloured by the mean of its 48 nearest beliefs. That
-dilutes the sparse bridges; hard to read.
+dilutes the sparse bridges; hard to read. Its factorization regret panel is the only place FR enters this file
+(plot_fig1c_measures_movie.fr_both: since 2026-11-10 the mean over the two variables of the forward KL(Optimal ||
+Naive), exact; the symmetric clipped KL before). Its cache figure8_particles.npz was rebuilt that day for its member
+fr (the file of 29 Oct is kept beside it as figure8_particles_sym_superseded.npz); the panel's colour limit (+-.3
+log10) was set for the symmetric values. movie_surface(), movie_processes() and movie() do not use FR.
 
 movie() (particles; kept, not the default): every belief of the Optimal as a particle moving through the evidence
 geometry over the 30 steps, coloured by what the trained network does at that stream-step. Single stream-steps vary

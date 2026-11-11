@@ -21,7 +21,12 @@ cell state, the network's memory).
        labels (the networks never see which slot is the goal; FR mapped to those labels). Raw PRs: the within-cell
        noise is under 3% of the interaction's variance (noise-corrected PR at T 61.9 vs raw 63.8 for the Trained u,
        figdata/round6_hidden/hidden_interference.npz).
-Cache: figdata/round6_hidden/lowdim_story.npz (build(), about 3 min CPU).
+Factorization regret (a's edge colours; the fifths of cells in d, e): the scan's stored FR, the goal variable's
+KL(the Optimal's marginal || the Naive's), the paper's forward KL, exact (main.utils.factorization_regret), mean over
+a cell's streams; until 2026-11-10 the symmetric KL clipped at 1e-15.
+Cache: figdata/round6_hidden/lowdim_story.npz (build(), about 3 min CPU; rebuilt on 2026-11-10 for its members fr,
+fifth_<net> and <net>_<view>_pr_fifth; the file binned by the symmetric FR is kept beside it as
+lowdim_story_sym_superseded.npz).
 Run from the repository root:
     CUDA_VISIBLE_DEVICES="" MPLBACKEND=Agg OMP_NUM_THREADS=4 /home/johns/anaconda3/envs/eureka/bin/python \\
         main/REPLICATION/claude_plots/plot_fig1c_lowdim_story.py"""

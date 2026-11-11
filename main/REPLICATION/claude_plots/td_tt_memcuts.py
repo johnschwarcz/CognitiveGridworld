@@ -303,10 +303,12 @@ RESULTS (Trained RNN unless named; training episodes; [5-95%]; w = 5 unless name
  7 ESN (null): its answers lose at most .009 (start), .005 (random), |.003| (same cell) to a 5-step cut, and at most
    .038 / .119 at w = 2; no transient. It holds and couples nothing to lose.
  8 Memory at the most entangled steps (td_tt_memory_events deferred its date 'q5 beats its control from 709-729' to
-   these cuts). What the donor cuts can say: they have no 1-step window (that date uses the 1-step start cut), no source
-   removes the content while keeping the clock (RESULTS 3), and their q5 contrast is step-matched only. With those
-   limits: the q5 contrast turns positive for good at 723 [624-754] (w = 2) and 754 [676-824] (w = 5) under the start
-   state, as memory_events' 1-step stored cut (709-729), and under a random cell at 586 [462-653] / 542 [441-723]
+   these cuts; that date is 388-424 since 11-10, when the FR in its control's matching key became the forward KL(Bayes
+   || naive), and 901-922 under its keys without FR). What the donor cuts can say: they have no 1-step window (that
+   date uses the 1-step start cut), no source removes the content while keeping the clock (RESULTS 3), and their q5
+   contrast is step-matched only. With those limits: the q5 contrast turns positive for good at 723 [624-754] (w = 2)
+   and 754 [676-824] (w = 5) under the start state, as memory_events' 1-step stored cut with the symmetric FR in its
+   control's key (709-729; forward FR 388-424, no FR 901-922), and under a random cell at 586 [462-653] / 542 [441-723]
    (all four before the accuracy c50 1,394 [1,285-1,489]): whenever the old content is removed or replaced by another
    cell's; under the same cell's other trajectory (content kept, trajectory changed) it turns positive only at 1,620
    [1,098-1,949] (w = 2) / 1,632 [1,015-2,005] (w = 5) and stays near 0 through 2,080 (+.0001 [-.0007, +.0009] at

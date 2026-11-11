@@ -113,7 +113,9 @@ def credit(run):
 
 
 def fr_acc(run):
-    """per checkpoint: Pearson r between each variable's factorization regret at T and its own correctness at T, over
+    """per checkpoint: Pearson r between each variable's factorization regret at T (the paper's forward KL(Bayes ||
+    naive), exact: probes 'fr' since 11-10; before then the symmetric clipped KL, kept as fr_acc_own_<run>_sym_superseded)
+    and its own correctness at T, over
     the 10,000 probes x both variables (20,000 judgements; the original fig1 (e) used the goal variable's: the same up
     to noise). Averaging FR and correctness over the two variables first (10-31's version) adds cross terms - one
     variable's FR correlates +.13 to +.17 with the OTHER variable's correctness for every observer - which pushed the

@@ -26,10 +26,11 @@ Data
                              streams). Per scan environment (e = 2, an exactly symmetric table, left out), cell and step:
                              the mean over the cell's 50 particles of the Euclidean distance of the estimated position
                              from the true cell (scan beliefs, float16, each marginal renormalized). Each cell's FR =
-                             mean over its streams of FR_g + FR_c at T = 30, Jeffreys/2 between the Optimal's and the
-                             Naive's marginal of each variable (clip 1e-15), recomputed exactly (float64) from the scan's
-                             observations and tables. Cells ranked by FR within their environment into 10 and 20
-                             equal-count bins (stable sort).
+                             mean over its streams of FR_g + FR_c at T = 30, FR_v = KL(the Optimal's marginal of v ||
+                             the Naive's): the paper's forward KL, exact (main.utils.factorization_regret on the float64
+                             log beliefs from the scan's observations and tables; until 2026-11-10 the symmetric
+                             Jeffreys/2, clip 1e-15: that file is kept as fig1c_distances_fr_sym_superseded.npz). Cells
+                             ranked by FR within their environment into 10 and 20 equal-count bins (stable sort).
                              keys: dist_t{10,20} (4 agents, 39 environments, nbin, 30 steps), fr_median{10,20} (nbin,)
                              (median over environments of each bin's median FR, nats), FRb (39, 100), agents
   fig1c_distances_pairs.npz  build_pair_data(), from the trained network's gradflow harvest (main/DATA/cache/
@@ -66,7 +67,7 @@ sys.path[:0] = [p for p in (ROOT,) if p not in sys.path]
 import matplotlib.pyplot as plt                                                   # noqa: E402
 from matplotlib.colors import LinearSegmentedColormap, ListedColormap             # noqa: E402
 from matplotlib.lines import Line2D                                               # noqa: E402
-from main.utils import apply_fig_style, fig_path                                  # noqa: E402
+from main.utils import apply_fig_style, factorization_regret, fig_path            # noqa: E402
 
 FS = apply_fig_style()
 plt.rcParams["mathtext.fontset"] = "cm"                                           # math in Computer Modern, as the text
@@ -86,25 +87,25 @@ R = np.arange(10, dtype=np.float64)
 # data
 # ═══════════════════════════════════════════════════════════════════
 
-def _jeffreys2(p, q):
-    p, q = np.clip(p, 1e-15, None), np.clip(q, 1e-15, None)
-    return .5 * ((p - q) * (np.log(p) - np.log(q))).sum(-1)
+def _lse(a, axis):
+    """log-sum-exp of a along axis (shifted by the maximum first), the axis dropped"""
+    m = a.max(axis=axis, keepdims=True)
+    return (m + np.log(np.exp(a - m).sum(axis=axis, keepdims=True))).squeeze(axis)
 
 
 def _fr_both_T(L, goal, cells, obs):
-    """per stream: FR_g + FR_c after all NT steps, exact (float64) from the counts. L (5, 10, 10) raw order, goal (0/1),
-    cells (100, 2) goal-ordered (r_g, r_c), obs (n, NT, 5) bool"""
+    """per stream: FR_g + FR_c after all NT steps, FR_v = KL(the Optimal's marginal of v || the Naive's): the paper's
+    forward KL, exact (main.utils.factorization_regret on the float64 log beliefs, which the counts give; as
+    plot_fig1c_all._fr_both_T). L (5, 10, 10) raw order, goal (0/1), cells (100, 2) goal-ordered (r_g, r_c), obs
+    (n, NT, 5) bool. Until 2026-11-10 FR_v was the Jeffreys/2 divergence of the two marginals, floored at 1e-15"""
     r0, r1 = (cells[:, 1], cells[:, 0]) if goal == 1 else (cells[:, 0], cells[:, 1])
     P = np.clip(L[:, r0, r1].T, 1e-12, 1 - 1e-12)                                  # (100 cells, 5) goal-ordered
     n = obs.sum(1).astype(np.float64)                                              # (n, 5) counts at T
-    ll = n @ np.log(P).T + (NT - n) @ np.log(1 - P).T
-    post = np.exp(ll - ll.max(1, keepdims=True))
-    post = (post / post.sum(1, keepdims=True)).reshape(-1, 10, 10)                 # [r_g, r_c]
-    fr = 0.
-    for opt, Pv in ((post.sum(2), P.reshape(10, 10, 5).mean(1)), (post.sum(1), P.reshape(10, 10, 5).mean(0))):
+    ll = (n @ np.log(P).T + (NT - n) @ np.log(1 - P).T).reshape(-1, 10, 10)        # the cells' log likelihoods
+    fr = 0.                                                                        # [r_g, r_c]
+    for lopt, Pv in ((_lse(ll, 2), P.reshape(10, 10, 5).mean(1)), (_lse(ll, 1), P.reshape(10, 10, 5).mean(0))):
         l = n @ np.log(Pv).T + (NT - n) @ np.log(1 - Pv).T                         # the Naive: averaged table
-        q = np.exp(l - l.max(1, keepdims=True))
-        fr = fr + _jeffreys2(opt, q / q.sum(1, keepdims=True))
+        fr = fr + factorization_regret(lopt, l, logs=True)
     return fr
 
 

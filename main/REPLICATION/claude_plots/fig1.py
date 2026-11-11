@@ -29,7 +29,8 @@ Figure caches, built on first use in main/DATA/experimental/fig1/ (or in the dir
 names). A cold build takes about 9-10 min on the CPU, 7-8 of them in sp.fr_correlation's root-finds, and peaks at
 ~4.6 GB of RAM; a warm render takes ~5 s and ~1.3 GB:
     beliefs.npz                            the networks' beliefs at t = 1 and T = 30 (collect_beliefs)
-    fr_corr_implied.npz                    the FR-correctness correlation through training (sp.fr_correlation)
+    fr_corr_implied.npz                    SUPERSEDED 11-10: the correlation implied by the logged fits on the
+                                           symmetric env.SII; (e) now replays the forward FR (training_series)
     band_energy_r.npz                      each band's activity energy against entanglement (band_energy_r)
     alias_traj_1434_2000_02_58_93_97.npz   (c)'s trajectories, 2000 streams per cell (alias_trajectories)
 A rebuild reproduces fr_corr_implied.npz and band_energy_r.npz byte for byte, and beliefs.npz too when torch runs on
@@ -187,14 +188,21 @@ def _title2(ax, name, formula):
 # ═══════════════════════════════════════════════════════════════════
 
 def training_series():
-    """(d-f)'s data, from supplementary_plotter2's harvest (no smoothing, as there): per network the final-step
-    accuracy of every test batch through training, the FR-correctness correlation and the participation-ratio gain;
-    the Optimal and Naive bounds; the testing episode where the trained network first passes the Naive bound"""
-    Hc, corr = np.load(sp.HARVEST_CACHE), sp.fr_correlation(FR_IMPLIED)
+    """(d-f)'s data (no smoothing): per network the final-step accuracy of every test batch through training, the
+    FR-correctness correlation and the participation-ratio gain; the Optimal and Naive bounds; the testing episode
+    where the trained network first passes the Naive bound.
+    Since 11-10-2026 from supplementary_plotter2.diagnostics_runs(): the two standard runs whose checkpoints were kept
+    (seed 20261029, the paper's configuration), because the correlation must use the paper's forward Factorization
+    Regret, KL(Joint || Naive), and that exists only where a checkpoint can be replayed (114 per network: Pearson r
+    over 10,000 fixed test trajectories). "corr" is those values linearly interpolated over the tests between
+    checkpoints, so (e) is smoother than a per-test series would be. Until then (d-f) read the harvest of the paper's
+    original runs and "corr" was sp.fr_correlation, the r implied by each test's logged logistic fit on env.SII, which
+    was the symmetric clipped KL (fr_corr_implied.npz; no longer read)."""
     out = {}
-    for lab, tag in (("Trained", "tr_"), ("Echo", "ec_")):
-        A = sp.Bunch({k[len(tag):]: Hc[k] for k in Hc.files if k.startswith(tag)})
-        out[lab] = {"acc": A.test_acc_through_training[:, -1].astype(np.float64), "corr": corr[lab],
+    for lab, A in zip(("Trained", "Echo"), sp.diagnostics_runs()):
+        n = len(A.test_acc_through_training)
+        out[lab] = {"acc": A.test_acc_through_training[:, -1].astype(np.float64),
+                    "corr": np.interp(np.arange(n), A.fr_test, A.fr_r),
                     "pr": sp.pr_gain(A), "joint": float(np.mean(A.joint_acc)), "naive": float(np.mean(A.naive_acc))}
     joint = np.mean([out[l]["joint"] for l in out])
     naive = np.mean([out[l]["naive"] for l in out])

@@ -2,7 +2,10 @@
     left    supplementary_plotter2's diagnostics_panel_early (e): the logged logistic slope, first 800 tests
     middle  the same slope over all 10,001 tests
     right   fig1's (e): r implied by that slope (supplementary_plotter2.fr_correlation), all tests, smoothed accuracy on x
-Reads supplementary_harvest.npz and fig1's fr_corr_implied.npz -> figure_bin/fr_panel_e_compare.png"""
+Reads supplementary_harvest.npz and fig1's fr_corr_implied.npz -> figure_bin/fr_panel_e_compare.png
+HISTORICAL (11-05): all three curves are of env.SII as these runs logged it, the symmetric KL clipped at 1e-15, not
+the paper's forward Factorization Regret. Since 11-10 both figures draw the forward correlation replayed on the kept
+checkpoints (supplementary_plotter2.diagnostics_runs; fr_definition_check.py panel e shows what the submission printed)."""
 import os
 import sys
 import numpy as np

@@ -10,8 +10,12 @@ Event-aligned grid at relative step tau: each cell's mean over its aligned strea
 numbers), averaged over the 39 environments; control: the same with every stream replaced by another stream of the
 same cell and environment read at the same absolute steps (so the control has the event's timing but not its event).
 Drawn in panel (c)'s fixed T = 30 plane of each agent (fig1.belief_geometry); dashed: the targets' grid; thin
-grey: the control's grid; edges: factorization regret of the edge's cells at T.
-Cache: main/DATA/experimental/fig1c_compression/figdata/round6_hidden/event_unfold.npz (build: about 3 min CPU).
+grey: the control's grid; edges: factorization regret of the edge's cells at T (the scan's stored FR: the goal
+variable's KL(the Optimal's marginal || the Naive's), the paper's forward KL, exact, main.utils.factorization_regret;
+mean over the cell's streams and the 39 environments; also the FR fifths of cells in the curves).
+Cache: main/DATA/experimental/fig1c_compression/figdata/round6_hidden/event_unfold.npz (build: about 3 min CPU;
+rebuilt on 2026-11-10 for its member fr, until then the symmetric KL clipped at 1e-15: that file is kept beside it as
+event_unfold_sym_superseded.npz).
 Run from the repository root:
     CUDA_VISIBLE_DEVICES="" MPLBACKEND=Agg /home/johns/anaconda3/envs/eureka/bin/python \\
         main/REPLICATION/claude_plots/plot_fig1c_event_unfold.py [unfold|ent] [movie]"""

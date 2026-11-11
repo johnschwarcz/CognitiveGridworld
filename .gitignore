@@ -15,3 +15,21 @@ main/REPLICATION/figure_bin/**/*.gif
 *.pid
 *.tmp.npz
 /cov30_echo.txt
+fr_theory_cache/
+fr_theory_inspect/
+
+# archives of figure_bin (made for sending; ~400 MB) and cluster run logs: not for git (11-10)
+main/REPLICATION/figure_bin*.zip
+main/REPLICATION/figure_bin/**/*.zip
+/runs/
+
+# manuscript sources and drafts (LyX / LaTeX / BibTeX, response drafts): kept local, not in the public repo (11-11)
+*.lyx
+*.lyx.emergency
+*.tex
+*.bib
+*.bbl
+*.blg
+*.aux
+*.synctex.gz
+/*_draft.md

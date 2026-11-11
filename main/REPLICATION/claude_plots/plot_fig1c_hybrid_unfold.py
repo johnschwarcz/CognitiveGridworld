@@ -13,6 +13,12 @@ beliefs to float16 rounding, 2.4e-4). Steps selected per stream, k of 30:
 Grid: each cell's mean posterior means (E[r_g], E[r_c]) at T over its 50 streams, averaged over the 39 environments
 of the alias scan, joined to the grid neighbours; dashed: the true lattice (r_g, r_c). Unfolded share: (d_Naive -
 d) / (d_Naive - d_Optimal), d = mean distance of the cells from their true positions (grid units).
+Edge colours and the "highest-FR fifth of cells": each cell's factorization regret at T, the goal variable's
+KL(the Optimal's marginal || the Naive's), the paper's forward KL, exact (main.utils.factorization_regret; from the
+scan's stored FR, or the sweep100 caches' fr), mean over the cell's streams and the environments, on a fixed log
+scale .05 - 30 nats. Until 2026-11-10 FR was the symmetric KL clipped at 1e-15 (a median 1.3 - 1.4 times larger at
+T); the scale was set for those values and still holds the forward ones (100 environments: .26 - 10.7 nats per cell,
+median 1.03; symmetric .32 - 13.5, median 1.70), which sit a fifth of a decade paler.
 Cache: main/DATA/experimental/fig1c_compression/figdata/round6_hidden/hybrid.npz (build: about 9 min CPU).
 Time control of the sweep (28 Oct 2026; John: "Most entangled steps are happening later. Can we make sure that both
 columns are sampling timesteps equally?"): entanglement is ~0 at step 1 by construction (from the flat prior the
@@ -37,6 +43,7 @@ sys.path[:0] = [ROOT, os.path.join(ROOT, "main", "REPLICATION"), os.path.join(RO
 import matplotlib.pyplot as plt                                                   # noqa: E402
 from matplotlib.collections import LineCollection                                 # noqa: E402
 from matplotlib.colors import LogNorm, to_rgb                                             # noqa: E402
+from main.utils import factorization_regret                                       # noqa: E402
 
 SCAN = os.path.join(ROOT, "main", "DATA", "experimental", "fig1c_compression")
 CACHE = os.path.join(SCAN, "figdata", "round6_hidden", "hybrid.npz")
@@ -219,7 +226,10 @@ def _sweep_env(job):
     """one environment of build_sweep100: job = (EP, seed, timed) -> cm (2, levels, K, 20), thr (2, levels), fr (K,).
     timed False: the p% least / most entangled of all the environment's stream-steps; timed True: at EVERY step the p%
     least / most entangled streams at that step (John 10-28: "Most entangled steps are happening later ... make sure
-    that both columns are sampling timesteps equally"), thr then the median over steps of each step's cut"""
+    that both columns are sampling timesteps equally"), thr then the median over steps of each step's cut.
+    fr: each cell's goal-variable factorization regret at T, the mean over its streams of KL(the Optimal's marginal ||
+    the Naive's): the paper's forward KL, exact (main.utils.factorization_regret on the log beliefs, the arithmetic of
+    plot_fig1c_all.fr_streams; until 2026-11-10 the symmetric KL clipped at 1e-15)"""
     import fig1 as cf
     ga = cf.ga
     EP, sd, timed = job
@@ -240,15 +250,16 @@ def _sweep_env(job):
     post = np.exp(cum - cum.max((-1, -2), keepdims=True))
     post /= post.sum((-1, -2), keepdims=True)
     joint = np.stack([post.sum(-1), post.sum(-2)], 2)                              # (n, T, 2, R) slot order
+    lw = cum[:, -1]                                                                # (n, R, R) joint log weights at T
+    mx = lw.max(-1 - g, keepdims=True)                                             # the Optimal's log marginal of the
+    lopt = (mx + np.log(np.exp(lw - mx).sum(-1 - g, keepdims=True))).squeeze(-1 - g)   # goal variable (slot g) at T
     del cum, post
     Lb = (L.mean(2), L.mean(1))
-    px = np.exp(np.stack([o @ np.log(Lb[k]) + (1 - o) @ np.log1p(-Lb[k]) for k in (0, 1)], 2))
-    naive = np.cumprod(px, 1)
-    naive /= naive.sum(-1, keepdims=True)
+    lp = np.stack([o @ np.log(Lb[k]) + (1 - o) @ np.log1p(-Lb[k]) for k in (0, 1)], 2)   # the Naive's step log lik.
+    px = np.exp(lp)
     rev = ga.sp.step_dkl(px / px.sum(-1, keepdims=True),
                          np.stack([ga.sp.approx_lik(joint[:, :, k]) for k in (0, 1)], 2)).mean(-1)   # (n, T)
-    x, y = np.clip(joint[:, -1, g], 1e-15, 1 - 1e-15), np.clip(naive[:, -1, g], 1e-15, 1 - 1e-15)
-    frc = (.5 * ((x * np.log(x / y)).sum(-1) + (y * np.log(y / x)).sum(-1))).reshape(K, M).mean(1)
+    frc = factorization_regret(lopt, np.cumsum(lp, 1)[:, -1, g], logs=True).reshape(K, M).mean(1)   # forward KL at T
     Dflat = (lJ - lN).reshape(n * T, R, R)
     base = lN.sum(1)
     flat = rev.ravel()
@@ -287,7 +298,11 @@ def build_sweep100(n_env=100, timed=False, workers=1):
     simulated as alias_sim does (its observations, house entanglement rev and FR reproduce the scan's exactly for the
     scan's environments: checked), the hybrid observer at the p% least / most entangled stream-steps (timed: at every
     step the p% least / most entangled streams) -> CACHE_SWEEP100 (CACHE_SWEEP100_TIMED): cm (2, levels, E, K, 20),
-    thr (2, levels, E), fr (E, K) the cells' goal-variable FR at T, eps, seeds"""
+    thr (2, levels, E), fr (E, K) the cells' goal-variable FR at T (forward KL: _sweep_env), eps, seeds. Both caches
+    were rebuilt on 2026-11-10 for fr (cm, thr, eps, seeds, sweep came out bit for bit as before; fr equals the scan's
+    stored forward FR, as cell means at T, to 3e-7 on the 39 shared environments, and plot_fig1c_all.build_sweep100's
+    fr bit for bit); the files with the symmetric fr are kept beside them as
+    hybrid_sweep100{,_timed}_sym_superseded.npz"""
     eps, seeds = _environments100(n_env)
     jobs = [(int(EP), int(sd), timed) for EP, sd in zip(eps, seeds)]
     if workers > 1:

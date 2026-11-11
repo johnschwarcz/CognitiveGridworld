@@ -21,7 +21,7 @@ ANSWER (seed-20261029 runs, 3,000 training-distribution episodes, 0-40k training
   there is no entanglement-specific deficit from ~320 on (320-1,600 +.007 +- .005; pooled 80-40k +.002 +- .002), only
   early: a steady deficit in every window that starts before 180 (40-80 -.078 +- .023, 80-160 -.066 +- .011, 160-260
   -.031 +- .009, 160-320 -.018 +- .008), gone at 180-320 (-.003). A small surplus at 1,600-4,000 (+.026 +- .007;
-  probes +.033 +- .009) holds only when matched on naive's loss (5 / 20 strata +.022 / +.027, FR +.034): it is absent
+  probes +.033 +- .009) holds only when matched on naive's loss (5 / 20 strata +.022 / +.027, FR +.030): it is absent
   at matched naive's loss x Bayes's entropy (-.007 +- .007). Matching on Bayes's entropy leaves the whole deficit
   (80-40k -.057 +- .003): the ESN's shortfall follows naive's error, not Bayes's uncertainty. Matching on naive's loss
   x Bayes's entropy leaves a small late deficit (4,000-15,200 -.020 +- .007), so "no specific deficit" depends on the
@@ -41,7 +41,7 @@ ANSWER (seed-20261029 runs, 3,000 training-distribution episodes, 0-40k training
   -.069 +- .013), as a fraction of each network's learning and in loss units (40-160: -.0015 vs -.0097 per q5 item and
   value).
   Trained RNN, later: a small extra draw on entangled steps at 320-1,040 when matched on naive's loss (+.011 +- .002;
-  5 / 20 strata +.011 / +.010, FR +.009; probes +.006 +- .003) that is absent at matched naive's loss x Bayes's
+  5 / 20 strata +.011 / +.010, FR +.014; probes +.006 +- .003) that is absent at matched naive's loss x Bayes's
   entropy (+.001 +- .001) and reverses at matched Bayes's entropy (-.006 +- .002); and one at 4,000-15,200, the only
   stretch robust to every matching (+.011 to +.022; naive's loss +.013 +- .002, probes +.015 +- .002). None at
   1,040-4,000 (1,600-4,000 -.003 +- .002) or after 15,200 (-.000 +- .002). The late raw surplus (1,600-9,600 +.008 +-
@@ -102,9 +102,12 @@ Within-step Spearman(goal entanglement, naive's per-item loss) .296 (mean over s
 MATCHED CONTROL. The same fifths of the goal variable's entanglement, but ranked INSIDE 10 strata of naive's per-item
 loss within each step (union of M and G: 300 items per stratum and step, 60 per matched fifth). The matched fifths have
 naive losses 0.1742-0.1776 per item and value (raw 0.1165-0.2458) while their mean entanglement still runs .039 ->
-.689 (raw .029 -> .723). Variants (numbers): 5 and 20 strata; FR (td_analysis.fr_sym, the symmetric KL between
-Bayes's and naive's goal marginals: the same comparison as naive's loss without the per-value square root, so not an
-independent control); Bayes's goal entropy, a difficulty that does not involve naive (its matched fifths keep naive's
+.689 (raw .029 -> .723). Variants (numbers): 5 and 20 strata; FR (factorization regret of the goal variable, KL(Bayes
+|| naive) of its marginal belief, the paper's forward form, exact: main.utils.factorization_regret through
+td_analysis.bayes_side; it compares the same two beliefs as naive's loss, so it is not an independent control. Until
+11-10 it was the symmetric KL clipped at 1e-15, i.e. naive's loss without the per-value square root; the FR numbers
+below were re-measured on 11-10: only the "fr" variant changed, episodes_<set>.npz 'fr' and match_<run>.npz
+'blk_fr', the old files kept as <name>_sym_superseded.npz); Bayes's goal entropy, a difficulty that does not involve naive (its matched fifths keep naive's
 gradient, 0.114-0.255); naive's loss x Bayes's entropy (5 x 5 strata). Naive's loss at t is the error that the
 entanglement of steps <= t has left in the factorized marginal, so matching on it asks whether the CURRENT step's
 entanglement draws learning beyond the error naive already makes there. It can remove part of a genuine entanglement
@@ -220,10 +223,11 @@ item and value; B / (A - B)].
   ties only values within .015 of 0 change sign: the trained RNN's raw -.008 -> +.015 at 120 and matched -.001 -> +.002
   at 960). In loss units per q5 item and value: 80-180 +.0147, 160-260 -.0049, 180-320 -.0058. Across matchings 80-160
   is +.066 (naive's loss), -.041 (Bayes's entropy), +.028 (naive's loss x entropy).
-  Matching variants (q5 excess): 5 / 20 strata within .008 of 10 strata in every window; FR within .015 (80-160
-  +.081). 320-1,040: naive's loss +.011 (.002), 5 / 20 strata +.011 / +.010, FR +.009, Bayes's entropy -.006 (.002),
-  naive's loss x entropy +.001 (.001) (320-1,600: -.008 / -.003). 4,000-15,200: +.011 to +.022 under all six (naive's
-  loss +.013, 5 / 20 strata +.014 / +.014, FR +.012, entropy +.022, naive's loss x entropy +.011, each SE .002).
+  Matching variants (q5 excess): 5 / 20 strata within .008 of 10 strata in every window; FR within .018 (20-40
+  -.001 against +.017; 80-160 +.076). 320-1,040: naive's loss +.011 (.002), 5 / 20 strata +.011 / +.010, FR +.014,
+  Bayes's entropy -.006 (.002), naive's loss x entropy +.001 (.001) (320-1,600: -.008 / -.003). 4,000-15,200: +.011 to
+  +.022 under all six (naive's loss +.013, 5 / 20 strata +.014 / +.014, FR +.013, entropy +.022, naive's loss x
+  entropy +.011, each SE .002). (With the symmetric FR until 11-10: within .015 (80-160 +.081), +.009, +.012.)
   Bayes's entropy keeps the early raw deficits (0-20 -.052, 40-80 -.097, 80-160 -.041, 1,040-1,600 -.021); naive's
   loss x entropy: 40-80 -.043, 1,040-4,000 -.015 to -.007 (pooled 1,600-9,600 -.000).
   Edges shifted (numbers): the early matched values swing with the checkpoint-scale oscillation (40-60 -.107, 60-80
@@ -265,10 +269,11 @@ item and value; B / (A - B)].
   +.0044.
   Early windows, matched (numbers): negative in every window that starts before 180 (-.016 to -.078; 160-260 -.031
   (.009), 160-280 -.018, 160-300 -.029), 180-320 -.003, 200-320 +.002; probes -.007 to -.066 except 60-100 (+.007).
-  Variants, 80-40k: 5 / 20 strata -.000 / +.004, FR +.007, Bayes's entropy -.057 (every window from 20 on -.036 to
+  Variants, 80-40k: 5 / 20 strata -.000 / +.004, FR +.006, Bayes's entropy -.057 (every window from 20 on -.036 to
   -.128), naive's loss x entropy -.008 (.002) (40-160 -.046, 4,000-15,200 -.020 (.007), 15,200-40k -.038 (.011)).
-  1,600-4,000: naive's loss +.026 (.007), 5 / 20 strata +.022 / +.027, FR +.034, Bayes's entropy -.100 (.009), naive's
-  loss x entropy -.007 (.007).
+  1,600-4,000: naive's loss +.026 (.007), 5 / 20 strata +.022 / +.027, FR +.030, Bayes's entropy -.100 (.009), naive's
+  loss x entropy -.007 (.007). (FR = KL(Bayes || naive) since 11-10; with the symmetric FR +.007 and +.034; the ESN's
+  FR variant is within .022 of naive's loss in every window, largest at 15,200-24,800: +.028 against +.006.)
   Ceiling reference (the verifier's): the q5 share of the loss ABOVE naive's level at the window's start vs the realized
   q5 share: 80-9,600 .135 vs .148, 160-320 .143 vs .136, 1,600-9,600 .135 vs .171, 4,000-6,400 .104 vs .164 (for the
   trained RNN the loss is below naive's on every fifth from ~1k, so this reference is empty).
@@ -1087,8 +1092,8 @@ GROUPING_LABEL = {"none": "raw entanglement fifths", "naive": "matched on naive'
 def match_vars():
     """per item (i, t) of the union (N_EP, T): the goal variable's own entanglement "ent" and the matching variables:
     naive's per-item loss "naive" (naive's goal marginal in place of the network's belief, the same loss), the goal
-    variable's FR "fr" (td_analysis.fr_sym: the symmetric KL between Bayes's and naive's goal marginals, i.e. the same
-    comparison as naive's loss without the per-value square root) and Bayes's goal entropy "H" (nats)"""
+    variable's FR "fr" (KL(Bayes || naive) of its marginal, forward, exact: main.utils.factorization_regret through
+    td_analysis.bayes_side; the same two beliefs as naive's loss compares) and Bayes's goal entropy "H" (nats)"""
     M, G = episodes("main"), episodes("grad")
     nl_m, nl_g = naive_loss()
     goal = np.concatenate([M["goal"], G["goal"]])
@@ -1747,8 +1752,8 @@ def figure_checks():
             "change per item and value; the end point is that pair's actual / first-order ratio.  b, c: first-order "
             "and gradient terms on the 1,000-episode gradient set (pairs to 9.6k only); GD windows whose two "
             "500-episode half estimates differ by an SE above 0.05 are not drawn.  d: entanglement fifths ranked "
-            "within strata of each difficulty variable, within each step (FR = symmetric KL between Bayes's and "
-            "naive's goal marginals).  e: the plotted excesses (raw / matched) differ between the main and the "
+            "within strata of each difficulty variable, within each step (FR = KL(Bayes || naive) of the goal "
+            "marginal).  e: the plotted excesses (raw / matched) differ between the main and the "
             f"gradient set by at most {_dis_text(dis, 'MG')}, and between the training episodes and the probes by at "
             f"most {_dis_text(dis, 'TP')}; probes = 10,000 probe episodes (50 test environments x 100 cells x 2 streams, "
             "never trained), from the beliefs stored at every checkpoint.\n" + DATA_LINE, y=-.085, width=250)
