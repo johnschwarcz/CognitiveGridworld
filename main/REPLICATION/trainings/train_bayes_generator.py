@@ -99,6 +99,29 @@ ZTASKS += [("joint", S, d, 0, "both") for d in (10, 20, 90) for S in ZS_S]      
 ZTASKS += [("joint", S, d, s, arm) for arm in ("env", "both") for d in (10, 20, 90) for s in (1, 2)
            for S in ZS_EXTRA[d]]                                                                   # 193-228
 ZTASKS += [("joint", S, d, s, "none") for d in (20, 30, 90) for s in (1, 2) for S in ZS_EXTRA_NONE[d]]   # 229-252
+# 11-14 23:25 IST (John: "kill runs that have already converged and spend that compute elsewhere"): tasks 253-262 =
+# scaled d_E 10 below |S| 50, where the bootstrap rule puts its threshold (|S|* 25-32): |S| 20 / 25 / 30 / 40 x seeds
+# 0-1, and seeds 3-4 at unscaled d_E 20 |S| 1000 (seed 0 failed there, against the law)
+ZTASKS += [("joint", S, 10, s, "env") for S in (20, 25, 30, 40) for s in (0, 1)]          # 253-260
+ZTASKS += [("joint", 1000, 20, s, "none") for s in (3, 4)]                               # 261-262
+# 11-14 21:45 UTC (John, theory-review session: "yes, let's run these unseen cells"): cells that test the bootstrap rule
+# (theory note of 11-14, claude_plots/zscale_proxy.py: a cell transfers, n >= .2, when the proxy r >= r*, .37 < r* <= .45;
+# the level was read off the seed-0 cells of tasks 123-171). Predictions fixed before any of these ran, r in brackets:
+#   263-274  A: d_E 30 at |S| 80 / 85 / 90 / 95 (.37 / .40 / .41 / .42), seeds 0-2. 80 sits on the band's lower edge,
+#            85-95 inside it (open): the first size that transfers pins r*.
+#   275-292  B: a second z0, z0^2 = 1/20 (z x sqrt(d_E / 20)), seeds 0-1. d_E 10: no transfer at |S| 50, 75 (.21, .30),
+#            open at 100, 125 (.39, .44), transfer at 250 (.72). d_E 30: no transfer at 125, 250 (.17, .33), transfer at
+#            500, 1000 (.59, .81; 1000 shares z0 and |S| with the rule's one miss, unscaled d_E 20 at 1000).
+#   253-260  (above) scaled d_E 10 at |S| 20 / 25 / 30 / 40 (.31 / .37 / .43 / .52): no transfer at 20 and 25, open at 30,
+#            transfer at 40 (only 2-4 held-out variables: 3-10 novel environments per run).
+#   293-306  d_E 60, seed 0 (not approved yet). Scaled: no transfer at |S| 50-125 (.00 / .11 / .23 / .30), transfer from
+#            250 (.52 / .73 / .88). Unscaled: no transfer at 50 (.01; 45 partners < d_E) and 75 (.35, just under the
+#            band), transfer from 100 (.57 / .66 / .87 / .95 / .98).
+# A six-tuple's last entry is 1 / z0^2 (--z-ref-dim; it is part of the run's name: _zenv20).
+ZTASKS += [("joint", S, 30, s, "none") for s in (0, 1, 2) for S in (80, 85, 90, 95)]                 # 263-274
+ZTASKS += [("joint", S, 10, s, "env", 20.) for s in (0, 1) for S in (50, 75, 100, 125, 250)]         # 275-284
+ZTASKS += [("joint", S, 30, s, "env", 20.) for s in (0, 1) for S in (125, 250, 500, 1000)]           # 285-292
+ZTASKS += [("joint", S, 60, 0, arm) for arm in ("env", "none") for S in ZS_S]                         # 293-306
 TASKS += ZTASKS
 EPISODES_FROM_20 = 8000
 EPISODES, TEST_EVERY, BATCH, LR = 6000, 500, 10000, 1e-3
@@ -133,6 +156,8 @@ def main():
         a.label, a.S, a.d, a.seed, *arm = TASKS[a.task]
         if arm:
             a.zscale = arm[0]
+        if len(arm) > 1:
+            a.z_ref_dim = arm[1]
         if a.task >= 20:
             a.episodes = EPISODES_FROM_20
     B, episodes, test_every = (256, 6, 3) if a.smoke else (a.batch, a.episodes, a.test_every)
