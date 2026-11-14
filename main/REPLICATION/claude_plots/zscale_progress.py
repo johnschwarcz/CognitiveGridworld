@@ -6,19 +6,23 @@ factor is 1, so its unscaled runs stand for every arm.
 
 Analytic thresholds (11-14, John: "put analytical predictions on this figure"). A thick vertical line on a panel's left edge:
 the law puts |S|* for that colour's z just left of this panel, so its runs should transfer from here rightwards (on the
-last panel's right edge: beyond the grid). A tinted panel lies inside the threshold's uncertainty. The law has one anchor,
-the d_E 30 row (no transfer at |S| 75, transfer at 100: 3 seeds, bayes_gen_arch_plot.py), and no other constant:
-    |S|*(d_E, Var z) = (d_E / 30) |S|*_30 R(Var z) / R(1/30),      R(v) = (e^{8 pi^2 v} - 1) / (8 pi^2 v) - 1
-R = fold / linear variance of a product of two sinusoids of z ~ N(0, v), the likelihood's logit (uniform phases; the exact
-likelihood's ratio is within 10% wherever it decides a cell). Scaled runs have Var z = 1/30 at every d_E, so their
-|S|* = (d_E / 30) |S|*_30: the theory chat's H1; "H2" marks the cell where its alternative (a Var z-only barrier near 100
-plus spanning) puts the first transfer. Unscaled d_E 90 falls below the spanning bound and is FITTED to its own row (partial
-at 125, transfers at 250), not predicted. Not covered: an upper limit on |S| (the law says unscaled d_E 20 transfers at
-1000; it does not) and the time course (no formula for the onset or the plateau).
+last panel's right edge: beyond the grid). rho(v) = (e^{8 pi^2 v} - 1) / (8 pi^2 v) - 1 is the fold ratio: the variance of
+a product of two sinusoids of z ~ N(0, v) (the likelihood's logit, uniform phases) that a linear function of z cannot
+carry, over the variance it can. It is not the gridworld's R, the number of realizations. The exact likelihood's ratio is
+within 10% wherever it decides a cell. Two laws (--law):
+  free    (default; John 11-14: "can we do without any fitting?") nothing measured: |S|* = max(d_E rho(Var z), d_E / 0.9),
+          the idealized detection bound for a rank-d_E signal in fold noise (constant 1), and at least d_E training
+          partners (10% of the variables are held out). Scaled runs have Var z = 1/30, so their |S|* = 3.9 d_E.
+  anchor  one measured number, the d_E 30 threshold (no transfer at |S| 75, transfer at 100: 3 seeds,
+          bayes_gen_arch_plot.py): |S|* = (d_E / 30) |S|*_30 rho(Var z) / rho(1/30). A tinted panel lies inside the anchor's
+          uncertainty. Unscaled d_E 90 falls below the spanning bound and is FITTED to its own row, not predicted.
+"H2" marks the cell where the theory chat's alternative (a Var z-only barrier near 100 plus spanning) puts the first
+transfer under scaling. Covered by neither law: an upper limit on |S| (unscaled d_E 20 fails at 1000) and the time
+course (no formula for the onset or the plateau).
 
 Prints a status table (latest n per cell and arm, runs started / finished / stalled, the law's tally) for the hourly report.
 
-    python zscale_progress.py [--pull] [--logs DIR] [--out PATH]
+    python zscale_progress.py [--pull] [--logs DIR] [--out PATH] [--law free|anchor]
 --pull: fetch the logs from ~/cgw_zscale/runs/bayes_gen with cluster.sh (the runs live apart from ~/cgw).
 """
 import os, re, sys, glob, json, time, argparse, subprocess
@@ -37,9 +41,14 @@ SURFACE, INK, INK2, HAIR = "#fcfcfb", "#0b0b0b", "#52514e", "#e4e3df"
 ANCHOR = (75., 100.)                                           # |S|* at d_E 30: above 75, at most 100
 SPAN_90 = (125., 250.)                                         # unscaled d_E 90: spanning-limited, fitted to its row
 TALLY_FROM = 3000                                              # episodes before a run counts for or against the law
-LAW = (r"analytic threshold, anchored on $d_E = 30$ ($75 < |\mathcal{S}|^* \leq 100$):   "
-       r"$|\mathcal{S}|^* = (d_E / 30)\ |\mathcal{S}|^*_{30}\ R(\mathrm{Var}\,z)\,/\,R(1/30)$,   "
-       r"$R(v) = (e^{8 \pi^2 v} - 1)\,/\,(8 \pi^2 v) - 1$;   unscaled $d_E = 90$: spanning-limited, fitted to its row")
+PARTNERS = .9                                                  # training variables / |S| (test_states = |S| // 10)
+MODE = "free"                                                  # the law drawn: "free" or "anchor" (--law)
+RHO = r"$\rho(v) = (e^{8 \pi^2 v} - 1)\,/\,(8 \pi^2 v) - 1$"
+LAW = {"free": (r"threshold with nothing fitted:   $|\mathcal{S}|^* = \max(\,d_E\,\rho(\mathrm{Var}\,z),\ d_E / 0.9\,)$,   "
+                + RHO + r"   (idealized detection bound; at least $d_E$ training partners)"),
+       "anchor": (r"threshold anchored on $d_E = 30$ ($75 < |\mathcal{S}|^* \leq 100$):   "
+                  r"$|\mathcal{S}|^* = (d_E / 30)\ |\mathcal{S}|^*_{30}\ \rho(\mathrm{Var}\,z)\,/\,\rho(1/30)$,   "
+                  + RHO + r";   unscaled $d_E = 90$: spanning-limited, fitted to its row")}
 
 
 def fold_ratio(v):
@@ -49,7 +58,11 @@ def fold_ratio(v):
 
 
 def threshold(d, scaled):
-    """((lo, hi), kind): the law puts |S|* above lo and at most hi; kind = anchor | predicted | fitted"""
+    """((lo, hi), kind): the law puts |S|* above lo and at most hi (lo = hi: a point). kind: predicted; spanning (free
+    law, the d_E partners bind, not rho); anchor / fitted (anchor law: measured, not predicted)"""
+    if MODE == "free":
+        osc, span = d * fold_ratio(1 / 30 if scaled or d == 30 else 1 / d), d / PARTNERS
+        return (max(osc, span),) * 2, "predicted" if osc >= span else "spanning"
     if d == 30:
         return ANCHOR, "anchor"
     osc = tuple(a * d / 30 * (1 if scaled else fold_ratio(1 / d) / fold_ratio(1 / 30)) for a in ANCHOR)
@@ -69,7 +82,7 @@ def band_text(d, scaled, math=False):
     (lo, hi), kind = threshold(d, scaled)
     num = lambda x: f"{x / 1000:.1f}k" if x >= 1000 else f"{x:.0f}"
     who = "" if d == 30 else "scaled " if scaled else "unscaled "
-    return (who + (r"$|\mathcal{S}|^*$ " if math else "") + f"{num(lo)}-{num(hi)}"
+    return (who + (r"$|\mathcal{S}|^*$ " if math else "") + (num(hi) if lo == hi else f"{num(lo)}-{num(hi)}")
             + ("" if kind == "predicted" else f" ({kind})"))
 
 
@@ -139,8 +152,9 @@ def status(runs):
                 v = [r[1][-1] for k, r in runs.items() if k[:3] == (src, d, S)]
                 cells.append(f"{np.mean(v):5.2f}{'*' if np.mean(v) >= .5 else ' '}" if v else "    - ")
             print(f"  {arm:4s} d_E {d:2d}: " + " ".join(cells))
-    print("analytic |S|* (anchor: d_E 30, 75-100): "
-          + "; ".join(f"d_E {d} " + ", ".join(band_text(d, sc) for sc in (True, False)) for d in DIMS if d != 30))
+    print(f"analytic |S|* ({'nothing fitted' if MODE == 'free' else 'anchor: d_E 30, 75-100'}): "
+          + "; ".join(f"d_E {d} " + ", ".join(band_text(d, sc) for sc in ((False,) if d == 30 else (True, False)))
+                      for d in DIMS if d != 30 or MODE == "free"))
     score, miss, open_ = tally(runs)
     print(f"law against the runs past {TALLY_FROM} episodes: "
           + ", ".join(f"{k} cells {a}/{b}" for k, (a, b) in sorted(score.items()))
@@ -218,9 +232,10 @@ def plot(runs, out):
     handles.append(Line2D([], [], color=INK2, lw=.8, label="transfer threshold, n = .5"))
     handles.append(Line2D([], [], color=INK2, marker="|", ls="none", ms=13, mew=3.2,
                           label=r"analytic $|\mathcal{S}|^*$ for that colour's z: transfer expected from here rightwards"))
-    handles.append(Patch(facecolor=INK2, alpha=.16, lw=0, label=r"inside the uncertainty of $|\mathcal{S}|^*$"))
+    if MODE == "anchor":
+        handles.append(Patch(facecolor=INK2, alpha=.16, lw=0, label=r"inside the uncertainty of $|\mathcal{S}|^*$"))
     fig.legend(handles=handles, loc="outside lower center", ncol=3, frameon=False, fontsize=fs["legend"],
-               title=LAW, title_fontsize=fs["tick"] + .5)
+               title=LAW[MODE], title_fontsize=fs["tick"] + .5)
     fig.suptitle(rf"Var(z) test: novel-environment transfer $n$ = (plug-in $-$ z-blind) / (Joint $-$ z-blind)"
                  f"\n{started}/{N_RUNS} runs started, {done} finished, updated "
                  f"{time.strftime('%Y-%m-%d %H:%M UTC', time.gmtime())}", fontsize=fs["label"] + 2, color=INK)
@@ -230,11 +245,14 @@ def plot(runs, out):
 
 
 def main():
+    global MODE
     ap = argparse.ArgumentParser()
     ap.add_argument("--pull", action="store_true")
     ap.add_argument("--logs", default=LOGS)
     ap.add_argument("--out", default=os.path.join(ROOT, "main", "REPLICATION", "figure_bin", "zscale_progress.png"))
+    ap.add_argument("--law", choices=("free", "anchor"), default=MODE, help="the analytic threshold drawn (docstring)")
     a = ap.parse_args()
+    MODE = a.law
     if a.pull:
         pull(a.logs)
     runs = load(a.logs)
