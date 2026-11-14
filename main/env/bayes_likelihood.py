@@ -34,10 +34,18 @@ class Bayes_likelihood(Bayes_inference):
                 V = V[..., None, :]
         return V
     
+    def env_z_scale(self):
+        """sqrt(KQ_dim / z_ref_dim) with scale_z_env on (Var(z) = 1/z_ref_dim at every KQ_dim), else 1"""
+        if not getattr(self, "scale_z_env", False):
+            return 1.0
+        return float(np.sqrt(self.KQ_dim / getattr(self, "z_ref_dim", 30)))
+
     def get_V(self, ctx_1, ctx_2):
         K = self.active_K[:,ctx_1]
         Q = self.active_Q[:,ctx_2]
         Z = np.einsum('boc,boc->bo', K, Q)                                 # Inner product
+        if getattr(self, "scale_z_env", False):
+            Z = Z * self.env_z_scale()                                     # before soft_roll and joint_Z
         V = self.soft_roll(Z)
         self.curr_Z[:,:, self.Z_count] = Z 
         self.Z_count += 1 

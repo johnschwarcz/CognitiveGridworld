@@ -41,6 +41,13 @@ class CognitiveGridworld(Env_model_manager):
         self.ctx_num = init.get('ctx_num', 2)
         self.obs_num = init.get('obs_num', 5)
         self.KQ_dim = init.get('KQ_dim', 30)
+        # Var(z) decoupled from d_E (2026-11): z = <k, q> of unit vectors has Var 1/KQ_dim; with these on it is multiplied by
+        # sqrt(KQ_dim / z_ref_dim), so Var(z) = 1/z_ref_dim at every KQ_dim. scale_z_env: the environment's true z
+        # (env/bayes_likelihood.py get_V: likelihoods, observers, observations). scale_z_model: the network's learned z_hat
+        # (model/model_forward.py KQ_to_Z). Without learned embeddings the network's z IS the true z, so scale_z_env scales it.
+        self.scale_z_env = init.get('scale_z_env', False)
+        self.scale_z_model = init.get('scale_z_model', False)
+        self.z_ref_dim = init.get('z_ref_dim', 30)
 
         self.skip_training_analyses = init.get('skip_training_analyses', False)
         self.early_stopping = init.get('early_stopping', False)

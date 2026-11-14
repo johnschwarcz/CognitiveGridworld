@@ -59,6 +59,9 @@ class Model_forward(Model_backward):
         K = self.active_K[:,ctx_1]
         Q = self.active_Q[:,ctx_2]
         Z = (K * Q).sum(-1)
+        z_scale = getattr(self, "z_scale", 1.0)    # set in init_env_vars; absent on models pickled before 2026-11
+        if z_scale != 1.0:                         # after the dot product: scaling active_K/Q would be undone by reg_loss
+            Z = Z * z_scale
         self.active_Z[:,:, self.Z_count] = Z
         self.Z_count += 1 
 

@@ -53,6 +53,11 @@ stream is reseeded, so the resumed part sees new episodes.
     python train_bayes_generator.py --task 3 --resume-to 20000
     python train_bayes_generator.py --label chance --S 500 --lr 1e-4 --episodes 15000 --test-every 250
     python train_bayes_generator.py --label joint --S 125 --seed 1 --arch old --episodes 8000
+    python train_bayes_generator.py --task 123                   # Var(z) decoupling (11-14): tasks 123-252 (ZTASKS)
+    python train_bayes_generator.py --label joint --S 100 --d 10 --zscale env     # -> joint_S100_d10_s0_zenv
+--zscale (11-14): z x sqrt(d_E / 30) so Var(z) = 1/30 at every d_E (env = the environment only, both = also the Generator's
+z_hat, none = unscaled), named in the run; every test also logs <set>_zblind, Bayes with the z-averaged likelihood (the
+floor of the normalized transfer score; claude_plots/zscale_table.py reads these runs).
 --arch (11-10 12:30, John: the Generator now transfers at |S| 100-125, the paper's Fig 12 needed ~500 -- task change or the
 Generator fix?): old = the paper's Generator (gen_zflow False: no stream LayerNorms, no skip, default downscale init), new =
 the fix, named _old / _new; bayes_gen_arch.sbatch runs joint answers at |S| 100 / 125 / 250 / 500 x seeds 0-2 x both.
@@ -79,6 +84,22 @@ TASKS += [(lab, S, d, 0) for S in (25, 100, 250, 1000) for d in (10, 90) for lab
 TASKS += [(lab, S, d, 0) for S in (50, 75, 125, 150, 200, 500) for d in (10, 90) for lab in AGENTS]
 # 11-10 03:45: 120-122 = the error controls at |S| 500, d_E 30 (compare joint / naive / truth there: tasks 10, 11, 37).
 TASKS += [(lab, 500, 30, 0) for lab in ("jointU", "jn", "nj")]
+# 11-14 (theory review): is the small-d_E failure set by Var(z) = 1/d_E? Joint's answers with z multiplied by sqrt(d_E/30),
+# so Var(z) = 1/30 in every row (--zscale): "env" scales the environment's true z only, "both" also the Generator's z_hat,
+# "none" reruns the unscaled rows in the same code (d_E 20's original runs are not in this repo; the d_E 10 / 90 seed-0
+# reruns should reproduce tasks 40-119). At d_E 30 the factor is 1, so its runs serve every arm. Seed 0 everywhere (the
+# same variables and initial weights as the baseline at that seed), seeds 1-2 at the pre-registered transition cells.
+# Tasks 123-252, five-tuples (label, |S|, d_E, seed, arm), in priority order:
+ZS_S = (50, 75, 100, 125, 250, 500, 1000)
+ZS_EXTRA = {10: (50, 75, 100), 20: (50, 75, 100), 30: (75, 100), 90: (125, 250, 500)}
+ZS_EXTRA_NONE = {20: (50, 75, 100, 125, 250, 500, 1000), 30: (75, 100), 90: (125, 250, 500)}
+ZTASKS = [("joint", S, d, 0, "env") for d in (10, 20, 90) for S in ZS_S]                         # 123-143 the test
+ZTASKS += [("joint", S, d, 0, "none") for d in (20, 30, 90, 10) for S in ZS_S]                   # 144-171 same-code baselines
+ZTASKS += [("joint", S, d, 0, "both") for d in (10, 20, 90) for S in ZS_S]                       # 172-192 + model z_hat
+ZTASKS += [("joint", S, d, s, arm) for arm in ("env", "both") for d in (10, 20, 90) for s in (1, 2)
+           for S in ZS_EXTRA[d]]                                                                   # 193-228
+ZTASKS += [("joint", S, d, s, "none") for d in (20, 30, 90) for s in (1, 2) for S in ZS_EXTRA_NONE[d]]   # 229-252
+TASKS += ZTASKS
 EPISODES_FROM_20 = 8000
 EPISODES, TEST_EVERY, BATCH, LR = 6000, 500, 10000, 1e-3
 TEST_AT = (0, 25, 50, 100, 150, 250, 350, 500, 750, 1000)
@@ -99,18 +120,26 @@ def main():
     ap.add_argument("--resume-to", type=int, default=None, help="continue the finished run to this many episodes")
     ap.add_argument("--arch", choices=("new", "old"), default=None,
                     help="Generator architecture, named in the run: new = the Z-flow fix (the default), old = the paper's")
+    ap.add_argument("--zscale", choices=("none", "env", "both"), default=None,
+                    help="z x sqrt(d_E / z-ref-dim), named in the run (_z<arm>): env = the environment's true z, both = also "
+                         "the Generator's z_hat, none = unscaled (the same-code baseline)")
+    ap.add_argument("--z-ref-dim", type=float, default=30., help="Var(z) = 1 / z-ref-dim under --zscale env / both")
     a = ap.parse_args()
     # the array index picks a TASKS row only when the run is not named explicitly (11-10 16:05: the arch test's array passed
     # --label/--S/--seed and the index overrode them, so its tasks 0-1 ran TASKS[0-1] = joint/naive |S| 25 instead)
     if a.task is None and a.label is None and os.environ.get("SLURM_ARRAY_TASK_ID") is not None:
         a.task = int(os.environ["SLURM_ARRAY_TASK_ID"])
     if a.task is not None:
-        a.label, a.S, a.d, a.seed = TASKS[a.task]
+        a.label, a.S, a.d, a.seed, *arm = TASKS[a.task]
+        if arm:
+            a.zscale = arm[0]
         if a.task >= 20:
             a.episodes = EPISODES_FROM_20
     B, episodes, test_every = (256, 6, 3) if a.smoke else (a.batch, a.episodes, a.test_every)
+    # the scaling arm is part of the name, so these runs never overwrite (line below: os.remove) a baseline log
+    zname = "" if a.zscale is None else f"_z{a.zscale}" + ("" if a.z_ref_dim == 30 else f"{a.z_ref_dim:g}")
     name = (f"{a.label}_S{a.S}_d{a.d}_s{a.seed}" + ("" if a.lr == LR else f"_lr{-int(round(np.log10(a.lr)))}") +
-            (f"_{a.arch}" if a.arch else ""))
+            (f"_{a.arch}" if a.arch else "") + zname)
     if a.arch == "old":
         assert not a.label.endswith("1"), "predict() hard-codes the new Generator; single-variable labels need it"
     sub = "smoke" if a.smoke else "bayes_gen"
@@ -135,8 +164,11 @@ def main():
     env = CognitiveGridworld(mode="RL", ctx_num=2, obs_num=5, realization_num=10, state_num=a.S, KQ_dim=a.d, hid_dim=1000,
                              batch_num=B, step_num=30, learn_embeddings=True, gen_zflow=a.arch != "old", generator_LR=a.lr,
                              classifier_LR=a.lr, episodes=1, training=False, checkpoint_every=1, gpu_inference=True,
-                             show_plots=False, cuda=0, load_env=f"/{sub}/{src}" if start else None)
+                             show_plots=False, cuda=0, load_env=f"/{sub}/{src}" if start else None,
+                             scale_z_env=a.zscale in ("env", "both"), scale_z_model=a.zscale == "both", z_ref_dim=a.z_ref_dim)
     m, dev, R, C = env.model, env.device, env.realization_num, env.ctx_num
+    if a.zscale is not None:
+        print(f"zscale {a.zscale}: environment z x {env.env_z_scale():.4f}, Generator z_hat x {m.z_scale:.4f}", flush=True)
     if start:                                            # same environments and held-out variables, new episodes
         np.random.seed(a.seed + 1000); torch.manual_seed(a.seed + 1000)
         # load() replaces all_K / all_Q with new Parameters after the optimizer took the old ones (which load_state_dict
@@ -248,6 +280,22 @@ def main():
                 out.append(m.pred_pobs.float())
         return torch.stack(out, -1).reshape(B, env.obs_num, R, R)
 
+    def zblind_table(n_pairs=20000, chunk=2000):
+        """(O, R*R) the true likelihood averaged over random pairs of training variables: what a Generator that ignores z_hat
+        converges to. Its plug-in accuracy (logged as <set>_zblind) is the floor of the normalized transfer score
+        n = (plugin - zblind) / (joint - zblind) (11-14). A private RNG leaves the episode stream untouched."""
+        rng = np.random.default_rng(10_000 + a.seed)
+        train, s, tot = np.arange(env.test_states, env.state_num), env.env_z_scale(), 0.
+        for _ in range(n_pairs // chunk):
+            c = rng.choice(train, size=(chunk, 2))
+            z01 = np.einsum('nok,nok->no', env.all_K[c[:, 0]], env.all_Q[c[:, 1]]) * s
+            z10 = np.einsum('nok,nok->no', env.all_K[c[:, 1]], env.all_Q[c[:, 0]]) * s
+            tot = tot + env.sigmoid(env.soft_roll(z01)[..., :, None] * env.soft_roll(z10)[..., None, :]).sum(0)
+        L = tot / (n_pairs // chunk * chunk)
+        return torch.as_tensor(L, device=dev, dtype=torch.float32).reshape(env.obs_num, -1).clamp(1e-6, 1 - 1e-6)
+
+    Lbar = None if single else zblind_table()
+
     def test(test_set, rec, key):
         jb, nb, low = episode(test_set)
         g = m.goal_ind.long()
@@ -276,6 +324,10 @@ def main():
             goal_post = torch.where(g[:, None] == 0, post.sum(2), post.sum(1))
         res = dict(kl_env=kl.mean(1), kl_own=kl[BR, cell], plugin=(goal_post.argmax(-1) == m.goal_value).float(),
                    joint=(jb[BR, g].argmax(-1) == m.goal_value).float(), naive=(nb[BR, g].argmax(-1) == m.goal_value).float())
+        if Lbar is not None:                             # the z-blind floor: the same observations through the z-averaged table
+            llz = torch.einsum('bto,ok->bk', o, Lbar.log()) + torch.einsum('bto,ok->bk', 1 - o, (1 - Lbar).log())
+            postz = torch.softmax(llz, -1).reshape(B, R, R)
+            res["zblind"] = (torch.where(g[:, None] == 0, postz.sum(2), postz.sum(1)).argmax(-1) == m.goal_value).float()
         if base.startswith("chance"):                    # the goal's marginal as the chance runs see it
             with torch.no_grad(), torch.autocast(**amp):
                 Pm = learned_marginal_guess().clamp(1e-6, 1 - 1e-6)                             # (B, O, R)

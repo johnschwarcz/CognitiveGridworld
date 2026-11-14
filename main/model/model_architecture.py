@@ -18,6 +18,10 @@ class Model_architecture(Model_controller):
     def init_env_vars(self, kwargs):
         self.__dict__.update(kwargs)
         self.gen_zflow = kwargs.get('gen_zflow', kwargs.get('mode') == 'oracle')
+        # multiplier of the network's z (KQ_to_Z), see scale_z_env / scale_z_model in CognitiveGridworld.py: learned embeddings
+        # follow scale_z_model; the true embeddings (learn_embeddings False) follow the environment's scale_z_env
+        on = kwargs.get('scale_z_model', False) if kwargs.get('learn_embeddings', True) else kwargs.get('scale_z_env', False)
+        self.z_scale = float(np.sqrt(kwargs['KQ_dim'] / kwargs.get('z_ref_dim', 30))) if on else 1.0
         self.ctx_range, self.batch_range, self.step_range, self.roll_V_range, self.realization_range, self.roll_realization_range, self.obs_range, self.all_K, self.all_Q =\
             tnp([self.ctx_range, self.batch_range, self.step_range, self.roll_V_range, self.realization_range, self.roll_realization_range, self.obs_range, self.all_K, self.all_Q], 'torch', self.device)
         (self.realization_range,self.ctx_range,self.batch_range,self.step_range,self.obs_range) = (x.long() for x in (self.realization_range,self.ctx_range,self.batch_range,self.step_range,self.obs_range))
