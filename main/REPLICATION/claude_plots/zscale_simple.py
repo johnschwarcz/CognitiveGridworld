@@ -1,6 +1,7 @@
 """The Var(z) test in one simple figure (John 11-14: "simple one since we dont need the full through training curves unless it
 looks like a network just needed more training time"): every run's latest n against |S|, one panel per d_E, one colour per
-world (blue: z scaled to z0^2 = 1/30, green: unscaled, orange: z scaled to z0^2 = 1/20), and for each world the shaded
+world (blue: z scaled to z0^2 = 1/30, green: unscaled, black: d_E 30, where the two coincide, orange: z scaled to
+z0^2 = 1/20), and for each world the shaded
 |S| range in which the bootstrap rule puts its threshold (where the proxy r of zscale_proxy.py crosses .37 to .45; the
 level was read off seed 0 of the first 49 cells, later cells were called before they ran: zscale_tests.py).
 Left of a world's band its runs should sit at n ~ 0, right of it above the line n = .2.
@@ -9,7 +10,7 @@ only have needed more training if, past 3,000 episodes, it sits between .05 and 
 last 2,000 episodes (three-test means), or crossed the line only within them: it is ringed, and the lower panel draws those runs' curves. A run far above
 the line that still creeps up is not ringed (its verdict cannot change). With no ringed run the figure is the top row alone.
 
-    python zscale_simple.py [--pull] [--logs DIR] [--out PATH] [--running NAME,NAME,...]
+    python zscale_simple.py [--pull] [--logs DIR] [--out PATH] [--running NAME,NAME,...] [--stamp TEXT]
 """
 import os, re, sys, glob, json, time, argparse
 import numpy as np
@@ -28,7 +29,8 @@ BLUE, GREEN, ORANGE = "#2a78d6", "#1baf7a", "#eb6834"
 
 
 def colour(d, ref):
-    return GREEN if ref == d else BLUE if ref == 30 else ORANGE
+    """d_E 30 at z0^2 = 1/30 is black (John 11-14): its scale factor is 1, so it is the scaled and the unscaled world at once"""
+    return INK if (d, ref) == (30, 30) else GREEN if ref == d else BLUE if ref == 30 else ORANGE
 
 
 def load(logs):
@@ -74,7 +76,7 @@ def new(d, ref, S):
     return (ref == 20 and d != 20) or d == 60 or ((d, ref) == (30, 30) and 75 < S < 100) or ((d, ref) == (10, 30) and S < 50)
 
 
-def plot(runs, out, running):
+def plot(runs, out, running, stamp=""):
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
@@ -167,18 +169,19 @@ def plot(runs, out, running):
                     fontsize=fs["tick"] + 1, color=INK2, loc="left")
     handles = [Line2D([], [], color=BLUE, marker="o", lw=1.2, label=r"z scaled, $z_0^2 = 1/30$ (dot: a run, line: median)"),
                Line2D([], [], color=GREEN, marker="o", lw=1.2, label=r"unscaled, $z_0^2 = 1/d_E$"),
+               Line2D([], [], color=INK, marker="o", lw=1.2, label=r"$d_E = 30$: scaled and unscaled are the same world"),
                Line2D([], [], color=ORANGE, marker="o", lw=1.2, label=r"z scaled, $z_0^2 = 1/20$"),
                Patch(facecolor=INK2, alpha=.2, lw=0, label="where the rule puts that colour's threshold"),
                Line2D([], [], color=INK2, lw=.9, label=f"transfer: n $\\geq$ {CUT:g}"),
                Line2D([], [], color=INK2, marker="o", mfc=SURFACE, ls="none", label="still training (value so far)"),
                Line2D([], [], color=INK, marker="o", mfc="none", ms=10, ls="none", label="more training could change the verdict")]
     if not any(k[1] == 20 and k[0] != 20 for k in runs):
-        handles.pop(2)
+        handles.pop(3)
     if not flagged:
         handles.pop()
     fig.legend(handles=handles, loc="outside lower center", ncol=4, frameon=False, fontsize=fs["legend"])
     fig.suptitle("Var(z) test: transfer by number of variables, against where the rule puts each threshold"
-                 f"\n{len(runs)} runs, {time.strftime('%Y-%m-%d %H:%M UTC', time.gmtime())}; past {SETTLED:,} episodes: "
+                 f"\n{len(runs)} runs, {stamp or time.strftime('%Y-%m-%d %H:%M UTC', time.gmtime())}; past {SETTLED:,} episodes: "
                  f"{right} of {right + wrong} runs on the rule's side of their band"
                  + (f" (not: {'; '.join(odd)})" if 0 < len(odd) <= 2 else "")
                  + (f"; in cells called before they ran: {new_right} of {new_right + new_wrong}" if new_right + new_wrong else ""),
@@ -195,11 +198,12 @@ def main():
     ap.add_argument("--logs", default=LOGS)
     ap.add_argument("--out", default=os.path.join(ROOT, "main", "REPLICATION", "figure_bin", "zscale_simple.png"))
     ap.add_argument("--running", default="", help="names of the runs still training, comma-separated (S100_d30_s1_znone)")
+    ap.add_argument("--stamp", default="", help="the time of the data, for the title (default: now, UTC)")
     a = ap.parse_args()
     if a.pull:
         zp.pull(a.logs)
     runs = load(a.logs)
-    flagged = plot(runs, a.out, set(filter(None, a.running.split(","))))
+    flagged = plot(runs, a.out, set(filter(None, a.running.split(","))), a.stamp)
     for k in flagged:
         ep, n, name = runs[k]
         print(f"more training could change the verdict: {name}  n {n[-1]:.2f} at episode {ep[-1]}")
