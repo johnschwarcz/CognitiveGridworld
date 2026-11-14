@@ -2,9 +2,11 @@
 failure come from Var(z) = 1/d_E? Arms: none = unscaled, env = the environment's z x sqrt(d_E/30), both = also the
 Generator's z_hat (at d_E 30 the factor is 1, so its "none" runs stand for every arm).
 
-Transfer = normalized novel accuracy n = (plugin - zblind) / (joint - zblind) >= .5 at the run's last test, all three logged
-per test (zblind = Bayes with the likelihood averaged over z: a Generator that ignores z_hat). Per cell: mean n over seeds
-(the number of seeds in brackets). First |S| = the smallest |S| from which every larger |S| of the row transfers.
+Transfer = normalized novel accuracy n = (plugin - zblind) / (joint - zblind) >= the cut at the run's last test, all three
+logged per test (zblind = Bayes with the likelihood averaged over z: a Generator that ignores z_hat, the floor). Per cell:
+mean n over seeds (the number of seeds in brackets). First |S| = the smallest |S| from which every larger |S| of the row
+transfers. Two cuts are reported: .2, the floor-dependent rule adopted on 11-14 after the first results (John: a threshold
+relative to the floor, which is .10 to .20 depending on the world), and .5, the cut fixed before any run.
 
 Pre-registered (11-14, before any run), first |S| with n >= .5 under scaling:
   H1  |S|* grows with d_E at fixed Var(z) (BBP/spanning bound ~3 d_E): d_E 10 -> 50, 20 -> 75, 30 -> 100, 90 -> 500
@@ -23,6 +25,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.a
 LOGS = os.path.join(ROOT, "main", "DATA", "experimental", "bayes_gen_zscale")
 S_GRID, DIMS, ARMS = (50, 75, 100, 125, 250, 500, 1000), (10, 20, 30, 90), ("none", "env", "both")
 PRED = {"H1": {10: 50, 20: 75, 30: 100, 90: 500}, "H2": {10: 100, 20: 100, 30: 100, 90: 250}}
+CUTS = ((.2, "adopted 11-14, floor-dependent"), (.5, "pre-registered"))
 
 
 def pull(logs):
@@ -46,11 +49,11 @@ def load(logs, episodes):
     return cells
 
 
-def first_transfer(means):
-    """smallest tested |S| from which every larger tested |S| has mean n >= .5 (None: never)"""
+def first_transfer(means, cut):
+    """smallest tested |S| from which every larger tested |S| has mean n >= cut (None: never)"""
     tested = [S for S in S_GRID if S in means]
     for i, S in enumerate(tested):
-        if all(means[T] >= .5 for T in tested[i:]):
+        if all(means[T] >= cut for T in tested[i:]):
             return S
     return None
 
@@ -65,27 +68,30 @@ def main():
         pull(a.logs)
     cells = load(a.logs, a.episodes)
     print(f"{sum(map(len, cells.values()))} finished runs in {a.logs}\n")
-    firsts = {}
+    means = {}
     for arm in ARMS:
-        print(f"arm {arm}: mean n (seeds)" + "".join(f"{S:>11d}" for S in S_GRID) + "   first |S|")
+        print(f"arm {arm}: mean n (seeds)" + "".join(f"{S:>11d}" for S in S_GRID))
         for d in DIMS:
             src = "none" if d == 30 else arm                                   # factor 1 at d_E 30
-            means, row = {}, ""
+            means[arm, d], row = {}, ""
             for S in S_GRID:
                 v = cells.get((src, d, S), [])
                 if v:
-                    means[S] = float(np.mean([x[1] for x in v]))
-                row += f"{means[S]:8.2f}({len(v)})" if v else f"{'-':>11s}"
-            firsts[arm, d] = first_transfer(means) if means else "-"
-            print(f"  d_E {d:3d}{' ' * 14}{row}   {firsts[arm, d]}")
+                    means[arm, d][S] = float(np.mean([x[1] for x in v]))
+                row += f"{means[arm, d][S]:8.2f}({len(v)})" if v else f"{'-':>11s}"
+            print(f"  d_E {d:3d}{' ' * 14}{row}")
         print()
-    for arm in ("env", "both"):
-        for h, pred in PRED.items():
-            hits = [d for d in DIMS if firsts[arm, d] == pred[d]]
-            print(f"{arm:4s} vs {h}: first |S| matches in {len(hits)}/4 rows {hits}  (predicted {pred})")
-    core = [firsts["env", 10] not in (None, "-") and firsts["env", 10] <= 125,
-            firsts["env", 20] not in (None, "-") and firsts["env", 20] < 250]
-    print(f"\ncore (env arm): d_E 10 transfers by 125: {core[0]}; d_E 20 moves left of 250: {core[1]}")
+    for cut, what in CUTS:
+        firsts = {(arm, d): first_transfer(means[arm, d], cut) if means[arm, d] else "-" for arm in ARMS for d in DIMS}
+        print(f"cut n >= {cut:g} ({what}): first transferring |S| by d_E " + "; ".join(
+            f"{arm} " + "/".join(str(firsts[arm, d]) for d in DIMS) for arm in ARMS))
+        for arm in ("env", "both"):
+            for h, pred in PRED.items():
+                hits = [d for d in DIMS if firsts[arm, d] == pred[d]]
+                print(f"  {arm:4s} vs {h}: first |S| matches in {len(hits)}/4 rows {hits}  (predicted {pred})")
+        core = [firsts["env", 10] not in (None, "-") and firsts["env", 10] <= 125,
+                firsts["env", 20] not in (None, "-") and firsts["env", 20] < 250]
+        print(f"  core (env arm): d_E 10 transfers by 125: {core[0]}; d_E 20 moves left of 250: {core[1]}\n")
 
 
 if __name__ == "__main__":
