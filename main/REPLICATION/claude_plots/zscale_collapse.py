@@ -73,7 +73,7 @@ def plot(runs, out, running, stamp=""):
     cells = {}                                               # name the cells with runs on the wrong side, once each
     for lam, (d, ref, S, seed), n, ep in odd:
         cells.setdefault((lam, d, ref, S), []).append(n)
-    spots = [((-14, 34), "right"), ((14, -26), "left"), ((0, 34), "center"), ((14, 34), "left")]
+    spots = [((-14, 30), "right"), ((14, -26), "left"), ((0, 24), "center"), ((14, 30), "left")]   # clear of the n = .2 line
     for k, ((lam, d, ref, S), ns) in enumerate(sorted(cells.items())):
         world = "unscaled " if ref == d and d != 30 else "scaled " if d != 30 else ""
         total = sum(key[:3] == (d, ref, S) for key in runs)
