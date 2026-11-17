@@ -89,6 +89,9 @@ RAND = "excl_rand_thr10_s0"                                                     
 FULL = ("trained", "no block", "#1f77b4")                                         # the Trained RNN (analysis/trained)
 STAGES = (100, 300, 600, 1100, 1600, 3000)                                        # raw; 3,000 = 2,400 training episodes
 EXTRA = (6000, 9000, 12000)                                                       # the .1 runs' later stages (numbers)
+CONT = tuple(range(12400, 37501, 400)) + (37500,)                                 # the (.1 | 1) runs continued (11-11):
+                                                                                  # every 4th checkpoint to 30,000 episodes
+DRAW = STAGES + (6000, 12000, 18800, 37500)                                       # stages drawn in figure_bands
 TS, FL, FT, DPI, CMAP, NORM = flp.TS, flp.FL, flp.FT, flp.DPI, flp.CMAP, flp.NORM
 FIG_W = 7.0
 train_x = flp.train_x
@@ -192,7 +195,7 @@ def load():
     Z["bin"] = np.searchsorted(EDGES, Z["fr_T"], side="right") - 1
     Z["x"] = np.array([Z["fr_T"][Z["bin"] == k].mean() for k in range(len(EDGES) - 1)])
     for run in all_runs():
-        raws = [raw for raw in STAGES + EXTRA if os.path.exists(cache(run, raw))]
+        raws = [raw for raw in sorted(set(STAGES + EXTRA + CONT)) if os.path.exists(cache(run, raw))]
         Z[f"raw_{run}"] = np.array(raws, int)
         Z[f"ans_{run}"] = np.stack([np.load(cache(run, raw))["ans"][:, -1] for raw in raws]) if raws else None
     f = os.path.join(OUT, "trained_answers.npz")                                  # the Trained RNN's answers, read once
@@ -497,54 +500,57 @@ def split_curve(ax, x, y, th, side, color, last):
 
 
 END_COL = {"hi": "#2ca02c", "lo": "#d62728"}                                      # learned at high / low FR
+RND_STYLE = dict(color="0.4", lw=1.1, ls=(0, (1, 1.5)))                           # the random control: dotted (as the GIF)
 END_SHADE = {(.03, 3): 1.0, (.1, 1): .55}                                         # narrower chunks darker
 
 
-def end_profile(Z, run):
-    """accuracy per FR_T bin at each END checkpoint, then the mean over the checkpoints (and their SD), or None"""
-    have = [raw for raw in END if os.path.exists(cache(run, raw))]
-    if len(have) < len(END) // 2:
+def end_profile(Z, run, last=12000):
+    """accuracy per FR_T bin at each replayed checkpoint in the last 2,400 raw (1,920 training) episodes up to raw
+    last, then the mean over the checkpoints (and their SD), or None"""
+    have = [raw for raw in range(last - 2400, last + 1, 100) if os.path.exists(cache(run, raw))]
+    if len(have) < 5:
         return None
     P = np.stack([profile(np.load(cache(run, raw))["ans"][:, -1] == Z["r"], Z["bin"]) for raw in have])
     return P.mean(0), P.std(0), len(have)
 
 
-def end_panel(fig, Z, W_, H, xl, w, top, h, cols):
+def end_panel(fig, Z, W_, H, xl, w, top, h, cols, lasts):
     """John 11-11 00:40: "a panel for the end of training results, just the last however many training episodes (1k
     or 2k, however many we can get for a stable batch of data), with all the different conditions, green curves for
     training at high FR, red curves for training at low FR. Again with solid curves for the training range and dashed
-    curves for the testing range": accuracy at T by FR_T bin, the mean over the END checkpoints (raw 9,600 - 12,000
-    every 200: 13 checkpoints over the last ~1,920 training episodes); grey: the random control"""
+    curves for the testing range": accuracy at T by FR_T bin, the mean over each run's replayed checkpoints in its last
+    1,920 training episodes (end_profile; lasts: each column's last common checkpoint, so both networks of a column, and
+    the random control of (.1 | 1), end at the same episode); dotted: the random control"""
     from matplotlib.colors import to_rgb
     ax = fig.add_axes([xl / W_, 1 - (top + h) / H, w / W_, h / H])
     axes(ax, True, True)
     ax.set_xlim(10 ** -3.5, 10 ** 2.5)
     x = Z["x"]
     hs, lb = [], []
-    for lo, hi in cols:
+    for (lo, hi), last in zip(cols, lasts):
         for side in ("lo", "hi"):
-            e = end_profile(Z, band_name(side, lo, hi))
+            e = end_profile(Z, band_name(side, lo, hi), last)
             if e is None:
                 continue
             k = END_SHADE.get((lo, hi), .75)
             c = tuple(1 - k * (1 - v) for v in to_rgb(END_COL[side]))
             split_curve(ax, x, e[0], lo if side == "lo" else hi, side, c, False)
             hs.append(Line2D([], [], color=c, lw=1.2))
-            lb.append(("FR $<$ " if side == "lo" else "FR $>$ ") + fmt(lo if side == "lo" else hi))
-    e = end_profile(Z, BRAND)
-    if e is not None:
-        ax.plot(x, e[0], color="0.55", lw=1.0, zorder=2)
-        hs.append(Line2D([], [], color="0.55", lw=1.2))
-        lb.append(r"random (count of .1 $|$ 1)")
+            lb.append(("FR $<$ " if side == "lo" else "FR $>$ ") + fmt(lo if side == "lo" else hi) + f" ({train_x(last):,})")
+        if (lo, hi) == (.1, 1):
+            e = end_profile(Z, BRAND, last)
+            if e is not None:
+                ax.plot(x, e[0], zorder=2, **RND_STYLE)
+                hs.append(Line2D([], [], **RND_STYLE))
+                lb.append(rf"random steps ({train_x(last):,})")
     ax.set_ylabel("accuracy", fontsize=FL - .5, labelpad=2)
     ax.set_xlabel(r"FR$_T$ of the probe state (nats)", fontsize=FL, labelpad=3)
     ax.annotate("End of training", xy=(.5, 1), xycoords="axes fraction", xytext=(0, 16), textcoords="offset points",
                 ha="center", va="bottom", fontsize=TS)
-    ax.annotate(f"mean over the last {train_x(END[-1]) - train_x(END[0]):,} training episodes", xy=(.5, 1),
-                xycoords="axes fraction", xytext=(0, 4), textcoords="offset points", ha="center", va="bottom",
-                fontsize=FT - 1.5, color="0.3")
-    ax.legend(hs, lb, title="learned from", title_fontsize=FT - 1, loc="lower left", fontsize=FT - 1, frameon=False,
-              handlelength=1.6, labelspacing=.3, borderaxespad=.2)
+    ax.annotate("mean over each run's last 1,920 training episodes", xy=(.5, 1), xycoords="axes fraction",
+                xytext=(0, 4), textcoords="offset points", ha="center", va="bottom", fontsize=FT - 1.5, color="0.3")
+    ax.legend(hs, lb, title="learned from (training episodes)", title_fontsize=FT - 1, loc="lower left",
+              fontsize=FT - 1, frameon=False, handlelength=1.6, labelspacing=.3, borderaxespad=.2)
 
 
 def figure_bands(Z, cols=None, path=None):
@@ -555,7 +561,11 @@ def figure_bands(Z, cols=None, path=None):
     green chunks have the same width; rows: the network that learned only from updates with FR < lo / FR > hi
     (train_learn_masks band modes): every network learns exactly n(t) = min(#FR < .01, #FR > 10) updates at step t of
     every batch (2.9% of all), the same in every panel, for the same 2,400 training episodes (2,400 weight updates; the
-    loss is the mean over the learned terms). Grey: the same count of random updates (excl_bandrand) at 2,400."""
+    loss is the mean over the learned terms). Grey: the same count of random updates (excl_bandrand) at 2,400.
+    Since 11-11 17:10 (John: "update everything with the most recent data"): each column runs to its own last checkpoint
+    that all its networks have reached (the (.1 | 1) networks continue to 30,000 training episodes, train_learn_masks
+    cont; the (.03 | 3) ones end at 9,600), so the networks of a column always compare at equal training; the random
+    control dotted; the key in the GIF's wording (Training set / Evaluation set / Training at random steps)."""
     apply_fig_style()
     plt.rcParams["mathtext.fontset"] = "cm"
     b, x, r = Z["bin"], Z["x"], Z["r"]
@@ -565,9 +575,12 @@ def figure_bands(Z, cols=None, path=None):
     if not nc:
         print("no band pair has reached 2,400 episodes yet: nothing drawn")
         return
-    allst = STAGES + EXTRA                                                        # the long runs: every stage to 9,600
-    last = max(raw for raw in allst if all(at_T(Z, band_name(s_, *b), raw) is not None for b in cols for s_, _ in BROWS))
-    rnd = at_T(Z, BRAND, last)
+    def col_last(lo, hi):                                                         # each column's last checkpoint that
+        runs_ = [band_name(s_, lo, hi) for s_, _ in BROWS] + ([BRAND] if (lo, hi) == (.1, 1) else [])   # every one of
+        return max(raw for raw in sorted(set(STAGES + EXTRA + CONT))              # its networks has reached: within a
+                   if all(at_T(Z, r_, raw) is not None for r_ in runs_))          # column the comparison stays matched
+    lasts = [col_last(*b) for b in cols]
+    last = max(lasts)
     left, right, gap, ph, rgap, pw = .66, .08, .14, 1.12, .16, 2.0
     egap, ew = .55, 2.6                                                           # the end-of-training panel
     W_ = max(left + nc * pw + (nc - 1) * gap + egap + ew + right, 4.9)
@@ -582,8 +595,8 @@ def figure_bands(Z, cols=None, path=None):
         ftext(x0[k] + pw / 2, top0 - .25, rf"FR $<$ {fmt(lo)}  or  $>$ {fmt(hi)} nats", fontsize=TS, ha="center",
               va="bottom")
         if st is not None:
-            ftext(x0[k] + pw / 2, top0 - .06, f"{100 * (1 - st['blocked']):.1f}% of updates learned", fontsize=FT - 1.5,
-                  ha="center", va="bottom", color="0.3")
+            ftext(x0[k] + pw / 2, top0 - .06, f"{100 * (1 - st['blocked']):.1f}% of updates, "
+                  f"{train_x(lasts[k]):,} episodes", fontsize=FT - 1.5, ha="center", va="bottom", color="0.3")
     for row, (side, name) in enumerate(BROWS):
         top = top0 + row * (ph + rgap)
         ftext(.13, top + ph / 2, name, rotation=90, fontsize=FL, ha="center", va="center")
@@ -594,10 +607,12 @@ def figure_bands(Z, cols=None, path=None):
             th = lo if side == "lo" else hi
             ax.axvspan(*((XL[0], lo) if side == "lo" else (hi, XL[1])), color=LEARN, alpha=.13, lw=0, zorder=0)
             ax.axvline(th, color=LEARN, lw=.8, zorder=1)
+            rnd = at_T(Z, BRAND, lasts[k])
             if rnd is not None and (lo, hi) == (.1, 1):                  # its count matches (.1 | 1) only
-                ax.plot(x, profile(rnd == r, b), color="0.6", lw=1.0, zorder=2, solid_capstyle="round")
+                ax.plot(x, profile(rnd == r, b), zorder=2, **RND_STYLE)
             run = band_name(side, lo, hi)
-            sts = [raw for raw in allst if raw <= last and at_T(Z, run, raw) is not None]
+            sts = sorted({raw for raw in DRAW if raw <= lasts[k]} | {lasts[k]})
+            sts = [raw for raw in sts if at_T(Z, run, raw) is not None]
             for n_, raw in enumerate(sts):                                # solid on the learned chunk, dashed where
                 split_curve(ax, x, profile(at_T(Z, run, raw) == r, b), th, side,  # it generalizes (John 11-10)
                             CMAP(NORM(train_x(raw))), n_ == len(sts) - 1)
@@ -610,8 +625,9 @@ def figure_bands(Z, cols=None, path=None):
           fontsize=FL, ha="left", va="top")
     y0 = top0 + 2 * ph + rgap + tick + xlab + .22
     hs = [Patch(fc=LEARN, alpha=.26, lw=0), Line2D([], [], color="0.35", lw=1.2),
-          Line2D([], [], color="0.35", lw=1.2, ls=GEN_LS), Line2D([], [], color="0.6", lw=1.0)]
-    lb = ["learned FR range", "accuracy there", "generalization (outside it)", r"random, same count (.1 $|$ 1)"]
+          Line2D([], [], color="0.35", lw=1.2, ls=GEN_LS), Line2D([], [], **RND_STYLE)]
+    lb = ["training FR range", "Training set", "Evaluation set", r"Training at random steps (.1 $|$ 1)"]   # the GIF's
+                                                                                  # wording (John 11-11)
     fig.legend(hs, lb, loc="upper left", bbox_to_anchor=((left + 2.05) / W_, 1 - (y0 + .02) / H), ncol=1,
                fontsize=FT - .5, frameon=False, handlelength=1.6, columnspacing=1.2, handletextpad=.4, borderpad=0,
                borderaxespad=0)
@@ -619,18 +635,645 @@ def figure_bands(Z, cols=None, path=None):
     cax = fig.add_axes([(left + .05) / W_, 1 - (y0 + .16) / H, cw / W_, .075 / H])
     cb = fig.colorbar(ScalarMappable(norm=NORM, cmap=CMAP), cax=cax, orientation="horizontal")
     cax.set_xlim(train_x(STAGES[0]), train_x(last))
-    cb.set_ticks([100, 1000] + ([] if train_x(last) < 5000 else []))
-    cb.set_ticklabels(["100", "1k"])
+    tk = [v for v in (100, 1000, 10000) if v < train_x(last) * .8]
+    cb.set_ticks(tk)
+    cb.set_ticklabels([{100: "100", 1000: "1k", 10000: "10k"}[v] for v in tk])
     cb.ax.minorticks_off()
     cb.ax.tick_params(labelsize=FT - 1, pad=1.5, length=2)
     cb.outline.set_linewidth(.5)
     ftext(left + .05, y0 + .06, "training episodes", fontsize=FT - .5, ha="left", va="bottom")
     ftext(left + .05 + cw + .05, y0 + .125, f"{train_x(last):,}", fontsize=FT - .5, ha="left", va="center")
-    end_panel(fig, Z, W_, H, x0[-1] + pw + egap, ew, top0, 2 * ph + rgap, cols)
+    end_panel(fig, Z, W_, H, x0[-1] + pw + egap, ew, top0, 2 * ph + rgap, cols, lasts)
     path = path or fig_path("fig_learn_holdout.png")
     fig.savefig(path, dpi=DPI)
     plt.close(fig)
     print("saved", path)
+
+
+def figure_saturation(Z, chunk=(.1, 1), path=None):
+    """fig_learn_holdout_saturation.png: has learning saturated? (John 11-11: "Are you sure the red is levelling off?")
+    Accuracy at T of the (.1 | 1) networks at every replayed checkpoint (every 80 training episodes to 9,600, then
+    every 320: the continued runs, train_learn_masks cont), against training episodes on a LINEAR axis; left: the probe
+    states with FR_T > 1 (the learned-high network's training set, the learned-low network's evaluation set), right:
+    FR_T < .1. Thin: every checkpoint; thick: a running mean over 1,000 training episodes. Dotted vertical: 15,040
+    episodes, where the runs were stopped and continued (a fresh episode stream, the episode-9,600 Adam state).
+    RESULTS (11-11 22:56, all three to 30,000; mean over the checkpoints near 15,040 / 20,000 / 25,000 / 30,000 training
+    episodes, FR_T < .1 | FR_T > 1): learned FR < .1 .813|.508 -> .817|.565 -> .817|.593 -> .817|.609 (its FR > 1 slope
+    per 1,000 episodes .015 at 10-15k, .008, .006, .003 at 25-30k; last five checkpoints .604-.614: levelled off);
+    learned FR > 1 .788|.702 -> .799|.707 -> .801|.714 -> .805|.716; random steps .814|.712 -> .817|.718 -> .815|.720 ->
+    .818|.722. At 30,000 the learned-low network stays .11 below on FR > 1, the learned-high one .012 below on FR < .1."""
+    apply_fig_style()
+    plt.rcParams["mathtext.fontset"] = "cm"
+    lo, hi = chunk
+    fr, r = Z["fr_T"], Z["r"]
+    sets = ((fr > hi, rf"probe states with FR$_T$ $>$ {fmt(hi)}"), (fr < lo, rf"probe states with FR$_T$ $<$ {fmt(lo)}"))
+    runs = ((band_name("lo", lo, hi), END_COL["lo"], rf"learned FR $<$ {fmt(lo)}", "lo"),
+            (band_name("hi", lo, hi), END_COL["hi"], rf"learned FR $>$ {fmt(hi)}", "hi"),
+            (BRAND, "0.4", "random steps", None))
+    raws_all = sorted(set(range(100, 12001, 100)) | set(CONT))
+    W_, H_ = 7.2, 2.75
+    fig = plt.figure(figsize=(W_, H_))
+    for j, (sel, ttl) in enumerate(sets):
+        ax = fig.add_axes([(.62 + j * 3.35) / W_, .58 / H_, 2.95 / W_, 1.75 / H_])
+        for run, c, nm, side in runs:
+            have = [raw for raw in raws_all if os.path.exists(cache(run, raw))]
+            t = np.array([train_x(raw) for raw in have], float)
+            a = np.array([(np.load(cache(run, raw))["ans"][:, -1] == r)[sel].mean() for raw in have])
+            train_side = (side == "hi") == (j == 0)                              # this panel is the run's training set
+            ls = "-" if (side is not None and train_side) else (GEN_LS if side is not None else (0, (1, 1.5)))
+            ax.plot(t, a, color=c, lw=.5, alpha=.45, ls="-")
+            sm = np.array([a[np.abs(t - ti) <= 500].mean() for ti in t])          # running mean, 1,000 episodes
+            ax.plot(t, sm, color=c, lw=1.6, ls=ls, label=nm)
+        ax.axvline(15040, color="0.6", lw=.7, ls=(0, (1, 2)), zorder=0)
+        ax.set_xlim(0, 30500)
+        ax.set_xticks([0, 10000, 20000, 30000])
+        ax.set_xticklabels(["0", "10k", "20k", "30k"])
+        ax.set_ylim(0, 1)
+        ax.set_yticks([0, .5, 1])
+        ax.tick_params(labelsize=FT - .5, pad=2, length=3)
+        ax.spines[["top", "right"]].set_visible(False)
+        ax.set_title(ttl, fontsize=FL, pad=4)
+        ax.set_xlabel("training episodes", fontsize=FL - .5, labelpad=2)
+        if j == 0:
+            ax.set_ylabel("accuracy", fontsize=FL - .5, labelpad=2)
+            ax.legend(loc="lower right", fontsize=FT - 1, frameon=False, handlelength=2.0, labelspacing=.3)
+            ax.text(15400, .98, "continued", fontsize=FT - 1.5, color="0.45", ha="left", va="top")
+    path = path or fig_path("fig_learn_holdout_saturation.png")
+    fig.savefig(path, dpi=DPI)
+    plt.close(fig)
+    print("saved", path)
+
+
+def figure_saturation_one(Z, chunk=(.1, 1), path=None, logx=False, logy=False, random=False):
+    """fig_learn_holdout_saturation_1panel.png: figure_saturation's curves in ONE panel (John 11-13: "i wonder if we can
+    put it on 1 panel. with color indicating "Trained on" and linestyle indicating "Evaluated on", and a log-log scaling
+    maybe?", then "maybe let's drop the log scale x axis here and the random steps lines"): colour = the updates a
+    network learned from (red FR_t < .1, green FR_t > 1; random=True adds the grey random-steps network), line = the
+    probe states it is evaluated on (solid FR_T > 1, dashed FR_T < .1); linear axes (logx / logy: log axes, the 11-13
+    first draft). Thin: every replayed checkpoint; thick: a running mean over 1,000 training episodes (log x: +-.06
+    decades). No 'continued' marker: the restart at 15,040 episodes (a fresh episode stream, the episode-9,600 Adam
+    state) leaves no step in any curve. Numbers: figure_saturation's RESULTS."""
+    from matplotlib.lines import Line2D as L2
+    apply_fig_style()
+    plt.rcParams["mathtext.fontset"] = "cm"
+    lo, hi = chunk
+    fr, r = Z["fr_T"], Z["r"]
+    evals = ((fr > hi, "-", rf"FR$_T$ $>$ {fmt(hi)}"), (fr < lo, (0, (4, 2)), rf"FR$_T$ $<$ {fmt(lo)}"))
+    runs = ((band_name("lo", lo, hi), END_COL["lo"], rf"FR$_t$ $<$ {fmt(lo)}"),
+            (band_name("hi", lo, hi), END_COL["hi"], rf"FR$_t$ $>$ {fmt(hi)}"))
+    runs += ((BRAND, "0.45", "random steps"),) if random else ()
+    raws_all = sorted(set(range(100, 12001, 100)) | set(CONT))
+    W_, H_ = 4.2, 3.0
+    fig = plt.figure(figsize=(W_, H_))
+    ax = fig.add_axes([.62 / W_, .55 / H_, 2.4 / W_, 2.2 / H_])
+    for run, c, _ in runs:
+        have = [raw for raw in raws_all if os.path.exists(cache(run, raw))]
+        t = np.array([train_x(raw) for raw in have], float)
+        ans = [np.load(cache(run, raw))["ans"][:, -1] == r for raw in have]
+        lt = np.log10(t)
+        for sel, ls, _ in evals:
+            a = np.array([x[sel].mean() for x in ans])
+            ax.plot(t, a, color=c, lw=.4, alpha=.3, ls="-", zorder=2)
+            sm = np.array([a[np.abs(lt - v) <= .06].mean() for v in lt] if logx else
+                          [a[np.abs(t - v) <= 500].mean() for v in t])
+            ax.plot(t, sm, color=c, lw=1.7, ls=ls, zorder=3)
+    if logx:
+        ax.set_xscale("log")
+        ax.set_xlim(70, 3.3e4)
+        ax.set_xticks([100, 1000, 10000])
+        ax.set_xticklabels(["100", "1k", "10k"])
+    else:
+        ax.set_xlim(0, 30500)
+        ax.set_xticks([0, 10000, 20000, 30000])
+        ax.set_xticklabels(["0", "10k", "20k", "30k"])
+    if logy:
+        ax.set_yscale("log")
+        ax.set_ylim(.08, 1)
+        ax.set_yticks([.1, .2, .5, 1])
+        ax.set_yticklabels([".1", ".2", ".5", "1"])
+    else:
+        ax.set_ylim(0, 1)
+        ax.set_yticks([0, .5, 1])
+    ax.minorticks_off()
+    ax.tick_params(labelsize=FT - .5, pad=2, length=3)
+    ax.spines[["top", "right"]].set_visible(False)
+    ax.set_xlabel("training episodes", fontsize=FL - .5, labelpad=2)
+    ax.set_ylabel("accuracy", fontsize=FL - .5, labelpad=2)
+    leg1 = ax.legend([L2([], [], color=c, lw=1.7) for _, c, _ in runs], [nm for _, _, nm in runs],
+                     title="trained on", loc="upper left", bbox_to_anchor=(1.02, 1.0), fontsize=FT - 1,
+                     title_fontsize=FT - .5, frameon=False, handlelength=1.8, labelspacing=.3, alignment="left")
+    ax.add_artist(leg1)
+    ax.legend([L2([], [], color="0.2", lw=1.7, ls=ls) for _, ls, _ in evals], [nm for _, _, nm in evals],
+              title="evaluated on", loc="upper left", bbox_to_anchor=(1.02, .52), fontsize=FT - 1,
+              title_fontsize=FT - .5, frameon=False, handlelength=1.8, labelspacing=.3, alignment="left")
+    path = path or fig_path("fig_learn_holdout_saturation_1panel.png")
+    fig.savefig(path, dpi=DPI, bbox_inches="tight")
+    plt.close(fig)
+    print("saved", path)
+
+
+def figure_saturation_cols(Z, chunks=((.03, 3), (.1, 1)), path=None, xunit="updates", gap=True):
+    """fig_learn_holdout_saturation_2col.png: figure_saturation_one with one column per FR band (John 11-13: "do we have an
+    equivalent for the other threshold that we could put as another column?", then "and if the x axis is episdes *
+    updates? Also can we add another panel that shows all of their Eval - Training"): (.03 | 3), continued 11-13/14
+    from 12,000 raw to 66,750 to match the learned updates (John: "we'd want to match the learning updates"; last
+    checkpoint raw 66,700 = 53,360 training episodes), and (.1 | 1), to 30,000. x: learned updates = training episodes
+    x the band's learned share (sel.npz: 1 - the blocked share per episode; .0780 +- .0017 and .2044 +- .0023, constant
+    through training) x 8,000 trajectories x 30 steps, i.e. 18,720 and 49,056 learned updates per episode; totals
+    9.99e8 and 1.47e9 (xunit "episodes": training episodes, each column its own axis). Colour = trained on (red low FR,
+    green high FR), line = evaluated on (solid high-FR probe states, dashed low-FR ones), the band's own edges. Thin:
+    every replayed checkpoint ((.03 | 3): 270 per run, every 25 raw to 500, every 100 to 12,000, every 400 from 12,400,
+    and the last, 66,700); thick: a running mean over 1,000 training episodes. Last panel: evaluation minus training
+    accuracy of every network (red: high-FR minus low-FR probe states, green: the reverse), both bands on one axis of
+    learned updates ((.03 | 3) dotted, (.1 | 1) solid); triangles: Joint Bayes's own difference (it too is better on
+    low-FR states: low / high .854 / .726 for (.03 | 3), .826 / .736 for (.1 | 1), so -.128 / +.128 and -.090 / +.090;
+    open (.03 | 3), filled (.1 | 1)); its key sits under the panel (the dotted red curve ran into it). At the end
+    (running means): (.03 | 3) at 9.99e8 learned low .849 / .243 -> gap -.61 (its high-FR accuracy at 1 / 2 / 4 / 6 / 8
+    / 10e8: .081 / .080 / .112 / .138 / .188 / .243, still rising), learned high .799 / .702 -> +.10 (its low-FR
+    accuracy .545 / .692 / .767 / .781 / .796 / .799, levelled off); (.1 | 1) learned low .817 / .609 -> -.21, learned
+    high .805 / .716 -> +.09 (= Joint Bayes's +.090). The matched-range version: figure_holdout_matched."""
+    import glob as _g
+    from matplotlib.lines import Line2D as L2
+    apply_fig_style()
+    plt.rcParams["mathtext.fontset"] = "cm"
+    fr, r = Z["fr_T"], Z["r"]
+    ok_b = Z["bayes"] == r
+    upd = xunit == "updates"
+    SC = 1e8                                                                       # x in units of 10^8 learned updates
+    BLS = {(.03, 3): (0, (1, 1.2)), (.1, 1): "-"}                                  # the gap panel: band line style
+
+    def share(run):
+        f = os.path.join(TD, f"learnmask_{run}_s20261029", "sel.npz")
+        return 1 - float(np.load(f)["sel"][:, 0].mean())
+
+    def series(run, sel_eval):
+        raws = sorted(int(os.path.basename(f)[len(run) + 1:-4]) for f in _g.glob(os.path.join(OUT, f"{run}_*.npz"))
+                      if os.path.basename(f)[len(run) + 1:-4].isdigit())
+        t = np.array([train_x(raw) for raw in raws], float)
+        ans = [np.load(cache(run, raw))["ans"][:, -1] == r for raw in raws]
+        out = []
+        for sel in sel_eval:
+            a = np.array([x[sel].mean() for x in ans])
+            out.append((a, np.array([a[np.abs(t - v) <= 500].mean() for v in t])))
+        return t, out
+
+    n_col = len(chunks) + bool(gap)
+    PW, GAP_ = 2.05, .62
+    W_, H_ = .55 + n_col * PW + (n_col - 1) * GAP_ + .1, 2.7
+    fig = plt.figure(figsize=(W_, H_))
+    axes = [fig.add_axes([(.55 + j * (PW + GAP_)) / W_, .78 / H_, PW / W_, 1.55 / H_]) for j in range(n_col)]
+    gax = axes[-1] if gap else None
+    gmax = 0
+    for j, (lo, hi) in enumerate(chunks):
+        ax = axes[j]
+        evals = ((fr > hi, "-"), (fr < lo, (0, (4, 2))))
+        xmax = tmax = 0
+        for side in ("lo", "hi"):
+            run = band_name(side, lo, hi)
+            t, curves = series(run, [e[0] for e in evals])
+            x = t * share(run) * 8000 * 30 / SC if upd else t
+            xmax, tmax = max(xmax, x.max()), max(tmax, t.max())
+            for (a, sm), (_, ls) in zip(curves, evals):
+                ax.plot(x, a, color=END_COL[side], lw=.4, alpha=.3, ls="-", zorder=2)
+                ax.plot(x, sm, color=END_COL[side], lw=1.6, ls=ls, zorder=3)
+            if gax is not None:                                                   # evaluation - training, smoothed
+                (_, hi_sm), (_, lo_sm) = curves
+                g_ = hi_sm - lo_sm if side == "lo" else lo_sm - hi_sm
+                gax.plot(x, g_, color=END_COL[side], lw=1.5, ls=BLS[(lo, hi)], zorder=3)
+                gmax = max(gmax, x.max())
+        if gax is not None:                                                       # Joint Bayes's own differences
+            d_b = ok_b[fr > hi].mean() - ok_b[fr < lo].mean()
+            for side, v in (("lo", d_b), ("hi", -d_b)):
+                gax.plot([1.03], [v], marker="<", ms=6, ls="none", clip_on=False, zorder=6,
+                         transform=gax.get_yaxis_transform(), markeredgecolor=END_COL[side], markeredgewidth=1,
+                         markerfacecolor=END_COL[side] if (lo, hi) == (.1, 1) else "white")
+        ax.set_xlim(0, xmax * 1.02)
+        if upd:
+            ax.xaxis.set_major_locator(plt.MaxNLocator(4))
+        else:
+            ticks = [0, 5000, 10000] if xmax < 12000 else [0, 10000, 20000, 30000]
+            ax.set_xticks(ticks)
+            ax.set_xticklabels([f"{v // 1000}k" if v else "0" for v in ticks])
+        ax.set_ylim(0, 1)
+        ax.set_yticks([0, .5, 1])
+        ax.set_title(rf"low FR $<$ {fmt(lo)}, high FR $>$ {fmt(hi)} nats", fontsize=FL, pad=14)
+        ax.annotate(f"{int(round(tmax)):,} episodes", (.5, 1), xycoords="axes fraction", xytext=(0, 3),
+                    textcoords="offset points", ha="center", va="bottom", fontsize=FT - 1, color="0.4")
+        if j == 0:
+            ax.set_ylabel("accuracy", fontsize=FL - .5, labelpad=2)
+    xl = r"learned updates ($\times 10^8$)" if upd else "training episodes"
+    for ax in axes:
+        ax.tick_params(labelsize=FT - .5, pad=2, length=3)
+        ax.spines[["top", "right"]].set_visible(False)
+        ax.set_xlabel(xl, fontsize=FL - .5, labelpad=2)
+    if gax is not None:
+        gax.axhline(0, color="0.5", lw=.7, zorder=1)
+        gax.set_xlim(0, gmax * 1.02)
+        if upd:
+            gax.xaxis.set_major_locator(plt.MaxNLocator(4))
+        gax.set_ylim(-.85, .3)
+        gax.set_yticks([-.75, -.5, -.25, 0, .25])
+        gax.set_ylabel("accuracy difference", fontsize=FL - .5, labelpad=2)
+        gax.set_title("evaluation $-$ training", fontsize=FL, pad=14)
+        gax.annotate("both bands", (.5, 1), xycoords="axes fraction", xytext=(0, 3),
+                     textcoords="offset points", ha="center", va="bottom", fontsize=FT - 1, color="0.4")
+    fig.canvas.draw()                                                              # the legends right under the x labels
+    yb = min(a.xaxis.label.get_window_extent().transformed(fig.transFigure.inverted()).y0 for a in axes) - .015
+    xc = (axes[0].get_position().x0 + axes[len(chunks) - 1].get_position().x1) / 2
+    leg1 = fig.legend([L2([], [], color=END_COL[s], lw=1.6) for s in ("lo", "hi")], ["low FR", "high FR"],
+                      title="trained on", loc="upper right", bbox_to_anchor=(xc - .02, yb), ncols=2, fontsize=FT - 1,
+                      title_fontsize=FT - .5, frameon=False, handlelength=1.8, columnspacing=1.2)
+    fig.add_artist(leg1)
+    fig.legend([L2([], [], color="0.2", lw=1.6, ls=ls) for ls in ("-", (0, (4, 2)))], ["high FR", "low FR"],
+               title="evaluated on", loc="upper left", bbox_to_anchor=(xc + .02, yb), ncols=2, fontsize=FT - 1,
+               title_fontsize=FT - .5, frameon=False, handlelength=1.8, columnspacing=1.2)
+    if gax is not None:                                                            # under the gap panel: no curve crosses it
+        fig.legend([L2([], [], color="0.2", lw=1.5, ls=BLS[b]) for b in chunks] +
+                   [L2([], [], color="0.2", marker="<", ls="none", ms=5)],
+                   [rf"$<$ {fmt(lo)} $|$ $>$ {fmt(hi)}" for lo, hi in chunks] + ["Joint Bayes"],
+                   title="FR band", loc="upper center", bbox_to_anchor=((gax.get_position().x0 + gax.get_position().x1) / 2, yb),
+                   ncols=2, fontsize=FT - 1, title_fontsize=FT - .5, frameon=False, handlelength=1.8, columnspacing=1.2)
+    path = path or fig_path("fig_learn_holdout_saturation_2col.png")
+    fig.savefig(path, dpi=DPI, bbox_inches="tight")
+    plt.close(fig)
+    print("saved", path)
+
+
+def holdout_matched_primitives(Z):
+    """every number figure_holdout_matched draws, as a flat dict (savable with np.savez; a drawing function needs nothing
+    else): cap (the matched range, 1e8 learned updates), bands (2, 2) = (.03, 3), (.1, 1); per band bi (0, 1) and
+    learner side (lo = trained on low FR, hi = trained on high FR): x_{bi}_{side} learned updates / 1e8, t_{bi}_{side}
+    training episodes, acc_{bi}_{side}_{high|low} the running mean (1,000 training episodes, on the full run) of the
+    accuracy on the band's high- / low-FR test answers and raw_{bi}_{side}_{high|low} the per-checkpoint value, all cut
+    at cap; jb_{bi}_{high|low} Joint Bayes's accuracy on the same answers, n_{bi}_{high|low} their counts; col_lo /
+    col_hi the colours (red / green)"""
+    import glob as _g
+    fr, r = Z["fr_T"], Z["r"]
+    ok_b = Z["bayes"] == r
+    bands = ((.03, 3), (.1, 1))
+    P = {"bands": np.array(bands, float), "col_lo": END_COL["lo"], "col_hi": END_COL["hi"]}
+    xs = {}
+    for bi, (lo, hi) in enumerate(bands):
+        sets = (("high", fr > hi), ("low", fr < lo))
+        for name, sel in sets:
+            P[f"jb_{bi}_{name}"] = float(ok_b[sel].mean())
+            P[f"n_{bi}_{name}"] = int(sel.sum())
+        for side in ("lo", "hi"):
+            run = band_name(side, lo, hi)
+            sh = 1 - float(np.load(os.path.join(TD, f"learnmask_{run}_s20261029", "sel.npz"))["sel"][:, 0].mean())
+            raws = sorted(int(os.path.basename(f)[len(run) + 1:-4]) for f in _g.glob(os.path.join(OUT, f"{run}_*.npz"))
+                          if os.path.basename(f)[len(run) + 1:-4].isdigit())
+            t = np.array([train_x(raw) for raw in raws], float)
+            ans = [np.load(cache(run, raw))["ans"][:, -1] == r for raw in raws]
+            xs[(bi, side)] = (t, t * sh * 8000 * 30 / 1e8)
+            for name, sel in sets:
+                a = np.array([x[sel].mean() for x in ans])
+                P[f"raw_{bi}_{side}_{name}"] = a
+                P[f"acc_{bi}_{side}_{name}"] = np.array([a[np.abs(t - v) <= 500].mean() for v in t])
+    cap = min(x[-1] for _, x in xs.values())
+    P["cap"] = float(cap)
+    for (bi, side), (t, x) in xs.items():
+        k = x <= cap * (1 + 1e-9)
+        P[f"x_{bi}_{side}"], P[f"t_{bi}_{side}"] = x[k], t[k]
+        for name in ("high", "low"):
+            for q in ("acc", "raw"):
+                P[f"{q}_{bi}_{side}_{name}"] = P[f"{q}_{bi}_{side}_{name}"][k]
+    return P
+
+
+def draw_holdout_matched(P, path=None, return_fig=False, opposite=False, key="top"):
+    """draw fig_learn_holdout_matched.png from P = holdout_matched_primitives(Z) alone (the design: see
+    figure_holdout_matched); opposite: its two-panel version, fig_learn_holdout_opposite.png (see
+    figure_holdout_opposite), its key outside the panels: above them (key="top") or in a column right of them
+    ("right"); asserts that every key inside a panel clears the curves and markers by >= 4 pt; return_fig: return the
+    open figure instead of closing it"""
+    import matplotlib.transforms as mtr
+    from matplotlib.patches import Rectangle
+    from matplotlib.text import Text
+    apply_fig_style()
+    plt.rcParams["mathtext.fontset"] = "cm"
+    plt.rcParams["pdf.fonttype"] = 42                                                # a PDF copy embeds TrueType
+    n = 2 if opposite else 3                                                         # panels
+    W, L, G1, G2, R = 5.5, .36, .15, .46, .12                                        # inches, equal panels
+    gaps = [G2] if opposite else [G1, G2]                                            # G1: no tick labels between
+    B, AH, TOP = .56, 2.0, .2
+    KG, KR, KT, KM = .2, .04, .1, .04                                                # outside key: gap, right / top
+    F7, F8 = 7, 8                                                                    # points
+    col = {"lo": P["col_lo"], "hi": P["col_hi"]}
+    K, JB, ZERO = "0.15", "0.45", "0.6"
+    LW = {"high": 2.0, "low": .8}                                                    # 3 panels: width = evaluated on
+    LWC, SPINE = 1.2, .6                                                             # gap-styled curves; spines, ticks
+    BLS = {0: (0, (1, 1.3)), 1: "-"}                                                 # line style per gap
+    OPEN = {0: True, 1: False}                                                       # Joint Bayes: open = 2-decade gap
+    MS, MEW = 5, .9
+    CLEAR, SPAD = 4, 3                                                               # key clearance (asserted), pt
+    XR = 10.0 if opposite else 11.0                                                  # x range; x > 10: Joint Bayes
+    cap = float(P["cap"])
+    edge = {(0, "lo"): r"3{\cdot}10^{-2}", (0, "hi"): r"3{\cdot}10^{0}", (1, "lo"): r"10^{-1}", (1, "hi"): r"10^{0}"}
+    dec = {0: 2, 1: 1}
+
+    fig = plt.figure(figsize=(W, B + AH + TOP))
+    rend = fig.canvas.get_renderer()
+    pt = fig.dpi / 72                                                                # pixels per point
+
+    def table(ax, head, rows, row=9.6, line=8.4, gap=None):
+        """build a key in points (origin: its header's baseline), drawn through an offset that is translated later:
+        the header (if any), then one row per entry with its handles left of its label, whose further lines (split
+        at newlines) run under the first, line pt apart; gap: {row index: extra pt above it}; handles are dicts of
+        kind "chip" (colour), "line" (width / style) or "marker" """
+        off = mtr.Affine2D()
+        tr = off + mtr.Affine2D().scale(1 / 72) + fig.dpi_scale_trans + mtr.ScaledTranslation(0, 0, ax.transAxes)
+        CH, GAP, MID = 4.2, 3, 2.3                                                   # chip height, gap, handle height
+        cw = {"chip": 7, "line": 12, "marker": 6}                                    # handle widths
+        arts = [ax.text(0, 0, head, fontsize=F7, transform=tr, ha="left", va="baseline")] if head else []
+        yb = -row if head else 0
+        for i, (hs, lab) in enumerate(rows):
+            yb, u = yb - (row + (gap or {}).get(i, 0) if i else 0), 0
+            for kw in hs:
+                kw = dict(kw)
+                kind = kw.pop("kind")
+                u0, u = u, u + cw[kind]
+                if kind == "chip":
+                    arts.append(ax.add_patch(Rectangle((u0, yb + MID - CH / 2), u - u0, CH, transform=tr, lw=0,
+                                                       clip_on=False, **kw)))
+                elif kind == "marker":
+                    arts += ax.plot([(u0 + u) / 2], [yb + MID], ls="none", transform=tr, clip_on=False, label="_key",
+                                    **kw)
+                else:
+                    arts += ax.plot([u0, u], [yb + MID] * 2, transform=tr, clip_on=False, label="_key",
+                                    solid_capstyle="butt", dash_capstyle="butt", **kw)
+                u += GAP
+            for k, t in enumerate(lab.split("\n")):
+                arts.append(ax.text(u + .5, yb - k * line, t, fontsize=F7, transform=tr, ha="left", va="baseline"))
+            yb -= lab.count("\n") * line
+        return off, arts
+
+    def boxes(arts):
+        """display boxes (x0, y0, x1, y1) of a key's parts as printed: text extents, strokes with their width"""
+        out = []
+        for a in arts:
+            if isinstance(a, Text) or isinstance(a, Rectangle):
+                b = a.get_window_extent(rend)
+                out.append((b.x0, b.y0, b.x1, b.y1))
+                continue
+            d = a.get_transform().transform(np.column_stack([np.asarray(v, float) for v in a.get_data()]))
+            if len(d) == 1:
+                h = (a.get_markersize() + a.get_markeredgewidth()) / 2 * pt
+                out.append((d[0, 0] - h, d[0, 1] - h, d[0, 0] + h, d[0, 1] + h))
+            else:
+                h = a.get_linewidth() / 2 * pt
+                out.append((d[:, 0].min(), d[:, 1].min() - h, d[:, 0].max(), d[:, 1].max() + h))
+        return np.array(out)
+
+    def ink(ax):
+        """display points along every curve / marker / reference line of ax, each with its half-width (px)"""
+        pts, hw = [], []
+        for ln in ax.get_lines():
+            if ln.get_label() == "_key":
+                continue
+            d = ln.get_transform().transform(np.column_stack([np.asarray(v, float) for v in ln.get_data()]))
+            d = d[np.isfinite(d).all(1)]
+            if ln.get_linestyle() not in ("None", "none", "", " ") and len(d) > 1:
+                n_ = np.maximum(np.ceil(np.hypot(*(d[1:] - d[:-1]).T) / pt).astype(int), 1)  # <= 1 pt apart
+                seg = np.concatenate([p + (q - p) * np.arange(k)[:, None] / k for p, q, k in zip(d[:-1], d[1:], n_)]
+                                     + [d[-1:]])
+                pts.append(seg)
+                hw.append(np.full(len(seg), ln.get_linewidth() / 2 * pt))
+            if ln.get_marker() not in (None, "None", "none", "", " "):
+                h = (ln.get_markersize() + ln.get_markeredgewidth()) / 2 * pt
+                g = np.linspace(-h, h, 7)
+                sq = (d[:, None, None, :] + np.stack(np.meshgrid(g, g), -1)[None]).reshape(-1, 2)
+                pts.append(sq)
+                hw.append(np.zeros(len(sq)))
+        return np.concatenate(pts), np.concatenate(hw)
+
+    def clearance(bx, P_, hw):
+        """min over the key's boxes bx (k, 4) of the distance to the ink P_ (n, 2) minus its half-width, in pt"""
+        best = np.inf
+        for x0_, y0_, x1_, y1_ in bx:
+            dx = np.maximum(np.maximum(x0_ - P_[:, 0], 0), P_[:, 0] - x1_)
+            dy = np.maximum(np.maximum(y0_ - P_[:, 1], 0), P_[:, 1] - y1_)
+            best = min(best, (np.hypot(dx, dy) - hw).min())
+        return best / pt
+
+    def search(ax, bx, xs, avoid=None):
+        """the shift (clearance in pt, sx, sy in px) of a key with boxes bx that puts its right edge at one of the data
+        x in xs (None: its left edge SPAD pt right of the axis line), its height anywhere that keeps it SPAD pt inside
+        both axis lines and under the axes top (away from the title), and clears the data (and the boxes avoid) most"""
+        P_, hw = ink(ax)
+        abb = ax.bbox
+        xlo, ylo = ax.transData.transform((0, ax.get_ylim()[0])) + (SPAD + SPINE / 2) * pt
+        best = (-np.inf, 0, 0)
+        for xr in xs:
+            sx = xlo - bx[:, 0].min() if xr is None else ax.transData.transform((xr, 0))[0] - bx[:, 2].max()
+            if bx[:, 0].min() + sx < xlo - 1e-6:
+                continue
+            for sy in np.arange(ylo - bx[:, 1].min(), abb.y1 - SPAD * pt - bx[:, 3].max(), pt / 4):
+                b = bx + [sx, sy, sx, sy]
+                c = clearance(b, P_, hw)
+                if avoid is not None:                                                # box to box, in pt
+                    dx = np.maximum(np.maximum(b[:, None, 0] - avoid[None, :, 2], avoid[None, :, 0] - b[:, None, 2]), 0)
+                    dy = np.maximum(np.maximum(b[:, None, 1] - avoid[None, :, 3], avoid[None, :, 1] - b[:, None, 3]), 0)
+                    c = min(c, np.hypot(dx, dy).min() / pt)
+                if c > best[0]:
+                    best = (c, sx, sy)
+        return best
+
+    def place(ax, keys, xs, name):
+        """slide the keys [(offset, artists), ...] (one or two) of ax into place: for each order, the first where it
+        clears the data most, the second clear of the data and the first; keep the order whose worse key clears more"""
+        fig.canvas.draw()
+        bxs = [boxes(arts) for _, arts in keys]
+        best = (-np.inf, None)
+        for order in ([0], ) if len(keys) == 1 else ([0, 1], [1, 0]):
+            sh, avoid, worst = {}, None, np.inf
+            for k in order:
+                c, sx, sy = search(ax, bxs[k], xs, avoid)
+                sh[k], worst = (sx, sy), min(worst, c)
+                avoid = bxs[k] + [sx, sy, sx, sy]
+            if worst > best[0]:
+                best = (worst, sh)
+        c, sh = best
+        for k, (off, _) in enumerate(keys):
+            off.translate(sh[k][0] / pt, sh[k][1] / pt)
+        assert c >= CLEAR, f"the {name} key clears the data by only {c:.1f} pt"
+
+    def jb_marker(ax, x, y, edgec, open_):
+        ax.plot([x], [y], marker="<", ms=MS, mew=MEW, ls="none", mec=edgec, mfc="white" if open_ else edgec,
+                clip_on=False, zorder=6)
+
+    KW = KH = 0                                                                      # the outside key (inches)
+    if opposite:                                                                     # colour above line style
+        kax = fig.add_axes([0, 0, 1, 1])
+        kax.axis("off")
+        brk = "\n" if key == "right" else " "
+        rows = [([dict(kind="chip", color=col[s])], f"Trained on {a},{brk}evaluated on {b}")
+                for s, a, b in (("lo", "low", "high"), ("hi", "high", "low"))]
+        rows += [([dict(kind="line", color=K, lw=LWC, ls=BLS[bi])], f"{dec[bi]}-decade gap{brk}"
+                  rf"$(\mathrm{{Low}} < {edge[(bi, 'lo')]}\ |\ \mathrm{{High}} > {edge[(bi, 'hi')]})$") for bi in (0, 1)]
+        koff, karts = table(kax, None, rows, gap={2: 4})
+        fig.canvas.draw()
+        kb = boxes(karts)
+        KW, KH = (kb[:, 2].max() - kb[:, 0].min()) / fig.dpi, (kb[:, 3].max() - kb[:, 1].min()) / fig.dpi
+    kright = opposite and key == "right"
+    H = B + AH + TOP + (KT + KH + KM if opposite and not kright else 0)
+    fig.set_size_inches(W, H)
+    rend = fig.canvas.get_renderer()
+    PW = (W - L - sum(gaps) - (KG + KW + KR if kright else R)) / n
+    x0s = [L + j * PW + sum(gaps[:j]) for j in range(n)]
+    axes = [fig.add_axes([x0 / W, B / H, PW / W, AH / H]) for x0 in x0s]
+    upt = PW * 72 / XR                                                               # points per x unit
+    XA = cap + 7 / upt                                                               # one gap per panel: 7 pt past
+    XM = {0: cap + 4.5 / upt, 1: cap + (12.5 if opposite else 11) / upt}             # both gaps: side by side
+    if opposite:                                                                     # key: right column / centred above
+        if kright:
+            kax.set_position([(W - KR - KW) / W, B / H, KW / W, AH / H])
+        else:
+            kax.set_position([L / W, (B + AH + TOP + KT) / H, (x0s[-1] + PW - L) / W, KH / H])
+        fig.canvas.draw()
+        kb, bb = boxes(karts), kax.bbox
+        dx = bb.x0 - kb[:, 0].min() if kright else (bb.x0 + bb.x1 - kb[:, 0].min() - kb[:, 2].max()) / 2
+        dy = (bb.y0 + bb.y1 - kb[:, 1].min() - kb[:, 3].max()) / 2
+        koff.translate(dx / pt, dy / pt)
+
+    if opposite:                                                                     # a: each learner on the other set
+        ax = axes[0]
+        for bi in (0, 1):
+            for side, name in (("lo", "high"), ("hi", "low")):
+                ax.plot(P[f"x_{bi}_{side}"], P[f"acc_{bi}_{side}_{name}"], color=col[side], lw=LWC, ls=BLS[bi],
+                        zorder=3)
+        ax.set_title("evaluated on the other FR set", fontsize=F8, pad=4)
+    else:                                                                            # a, b: accuracy, one gap each
+        for bi in (0, 1):
+            ax = axes[bi]
+            for side in ("lo", "hi"):
+                for name in ("low", "high"):
+                    ax.plot(P[f"x_{bi}_{side}"], P[f"acc_{bi}_{side}_{name}"], color=col[side], lw=LW[name],
+                            solid_capstyle="butt", zorder=3)
+            for name in ("high", "low"):
+                jb_marker(ax, XA, P[f"jb_{bi}_{name}"], JB, OPEN[bi])
+            ax.set_title(f"{dec[bi]}-decade gap", fontsize=F8, pad=4)
+        axes[1].tick_params(labelleft=False)
+    for ax in axes[:-1]:
+        ax.set_ylim(0, 1)
+        ax.set_yticks(np.round(np.linspace(0, 1, 6), 6))
+    axes[0].set_ylabel("accuracy", fontsize=F8, labelpad=2)
+
+    gax = axes[-1]                                                                   # last: evaluation - training
+    gax.plot([0, 10], [0, 0], color=ZERO, lw=.6, zorder=1)                           # zero, over the x axis's extent
+    ys = []
+    for bi in (0, 1):
+        for side in ("lo", "hi"):
+            hi_, lo_ = P[f"acc_{bi}_{side}_high"], P[f"acc_{bi}_{side}_low"]
+            ys.append(hi_ - lo_ if side == "lo" else lo_ - hi_)
+            gax.plot(P[f"x_{bi}_{side}"], ys[-1], color=col[side], lw=LWC, ls=BLS[bi], zorder=3)
+        if not opposite:                                                             # Joint Bayes's own differences
+            d = P[f"jb_{bi}_high"] - P[f"jb_{bi}_low"]
+            jb_marker(gax, XM[bi], d, col["lo"], OPEN[bi])
+            jb_marker(gax, XM[bi], -d, col["hi"], OPEN[bi])
+            ys.append(np.array([d, -d]))
+    y0 = round(np.floor(min(y.min() for y in ys) / .2) * .2, 6)                      # 1.0 wide: the accuracies' scale
+    assert max(y.max() for y in ys) < y0 + 1, "the difference panel's data exceed the 1.0-wide range"
+    gax.set_title(r"evaluation $-$ training", fontsize=F8, pad=4)
+    gax.set_ylim(y0, y0 + 1)
+    gax.set_yticks(np.round(np.linspace(y0, y0 + 1, 6), 6))
+    gax.set_ylabel("accuracy difference", fontsize=F8, labelpad=2)
+
+    for ax in axes:
+        ax.set_xlim(0, XR)
+        ax.set_xticks(np.arange(0, 10.1, 2))
+        ax.spines["bottom"].set_bounds(0, 10)
+        ax.spines[["left", "bottom"]].set_linewidth(SPINE)
+        ax.tick_params(labelsize=F7, pad=2, length=2.5, width=SPINE)
+        ax.spines[["top", "right"]].set_visible(False)
+
+    if not opposite:                                                                 # keys, each slid into place
+        for bi in (0, 1):
+            lab = {"low": rf"low FR $(\!<\!{edge[(bi, 'lo')]})$", "high": rf"high FR $(\!>\!{edge[(bi, 'hi')]})$"}
+            rows = [([dict(kind="chip", color=col[s]), dict(kind="line", color=K, lw=LW[nm])], lab[nm])
+                    for s, nm in (("lo", "low"), ("hi", "high"))]
+            place(axes[bi], [table(axes[bi], "trained on / evaluated on", rows)], [10], "abc"[bi])
+        tri = lambda open_: dict(kind="marker", marker="<", ms=MS, mew=MEW, mec=JB, mfc="white" if open_ else JB)
+        place(gax, [table(gax, "Joint Bayes / RNNs",
+                          [([tri(OPEN[bi]), dict(kind="line", color=K, lw=LWC, ls=BLS[bi])], f"{dec[bi]}-decade gap")
+                           for bi in (0, 1)])], np.arange(7, 10.01, .25), "c")
+
+    for j in (range(n) if opposite else [1]):                                        # x labels: one per panel / under b
+        fig.text((x0s[j] + PW / 2) / W, (B - .3) / H, r"learned updates ($\times 10^8$)", ha="center",
+                 va="baseline", fontsize=F8)
+    for j, x0 in enumerate(x0s):                                                     # panel letters, the paper's style
+        fig.text((x0 + PW / 2) / W, .05 / H, f"({'abc'[j]})", ha="center", va="baseline", fontsize=F8,
+                 family="DejaVu Sans")
+    path = path or fig_path("fig_learn_holdout_opposite.png" if opposite else "fig_learn_holdout_matched.png")
+    fig.savefig(path, dpi=DPI)
+    if return_fig:
+        return fig
+    plt.close(fig)
+    print("saved", path)
+
+
+def figure_holdout_matched(Z, path=None):
+    """fig_learn_holdout_matched.png, at print size (5.5 x 2.76 in, >= 7 pt): the two FR-band hold-outs over the range
+    of learned updates both bands reach (John 11-14: "show the figure with an xlim for where we have matched updates";
+    polish 1: "make high and low FR, thick and thin lines, so we can reserve dashed and dotted linestyles for panel
+    c ... clarify why the 4 bayes triangles differ ... put the legends into the panels ... show the structure of 0.03
+    and 3, and 0.1 and 1"; polish 2: "put the legends from panel a and b into both panels a and b (without the joint
+    bayes line or scatters) ... put the actual decade into 'low FR (< decade)' ... remove the bars ... fit titles into
+    1 line"; polish 3: "ooof this is a little rough", redesigned from four candidate designs, two judges and a
+    synthesis; polish 4 (11-15): "put both the color and size legend on the right or left of the text"; drawn by
+    draw_holdout_matched from holdout_matched_primitives' numbers alone; two-panel version: figure_holdout_opposite).
+    Columns a, b: one band each, titled by the FR gap between its two sets (.03 | 3: 2 decades, .1 | 1: 1 decade; both
+    gaps centred at ~.3 nats, .03 x 3 = .1 x 1 = .1; the probes' median FR_T is .45), the edges in powers of ten in each
+    panel's key. Colour = trained on, line width = evaluated on (thick: the band's high-FR test answers, thin: its
+    low-FR ones); lines: running means over 1,000 training episodes, computed on the full runs, then cut at the matched
+    range (the (.03 | 3) runs' last checkpoint, 9.99e8 learned updates = 53,360 training episodes; (.1 | 1): 20,160 of
+    its 30,000). Grey triangles: Joint Bayes's own accuracy on the low-FR (upper) and high-FR (lower) answers: .854 /
+    .726 (a, open) and .826 / .736 (b, filled). c: evaluation minus training accuracy of each network (red: high-FR
+    minus low-FR answers, green: the reverse), line style = gap (dotted: 2 decades, solid: 1 decade); triangles: the
+    same two differences for Joint Bayes (the differences of the grey triangles in a and b: -.128 / +.128 open, -.090 /
+    +.090 filled, coloured by learner; Joint Bayes is less accurate on high-FR answers, the more so the wider the gap),
+    i.e. where a learner matching Joint Bayes on both sets would sit.
+    Layout: one row of three equally wide axes (1.47 x 2.0 in) on one baseline, all at one vertical scale (1.0 per axes
+    height, ticks every .2 that line up across the row; c spans the 1.0-wide window from its data's minimum floored to
+    .2, -.8 to .2), one x label (under b), the letters (8 pt, the titles' size) centred under the panels. The x axis line (and c's zero line)
+    stops at 10; the column right of it holds Joint Bayes's triangles, centred 7 pt past the matched end in a, b and in
+    c side by side per gap (open 4.5 pt, filled 11 pt past). Keys: one table per panel in the room its own curves leave,
+    both handles left of each label, in the order the header names them; a, b: "trained on / evaluated on" = colour
+    chip, line width; rows = the panel's two FR sets with its own edges, no Joint Bayes entry; c: "Joint Bayes / RNNs"
+    = grey open / filled triangle (as in a, b), dotted / solid line; rows = the two gaps. Each table is right-aligned
+    (a, b at x = 10; c at the best x in 7-10, now 8.75) and slid, at least 3 pt inside the axis lines and under the
+    axes top, to where it clears every curve and marker most, handles included (asserted >= 4 pt; now a 7.4 pt,
+    between the green curves and the thick red one; b 5.5 pt, under the thick red one; c 5.3 pt, between zero and the
+    solid red one).
+    Test set: the 10,000 probe trajectories (50 environments x 200; both variables, n answers in the band: 2,255 low /
+    3,751 high for (.03 | 3), 4,817 / 6,898 for (.1 | 1)). At the matched end (9.99e8 / 9.89e8): trained on high FR
+    -> low-FR answers .799 / .798; trained on low FR -> high-FR answers .243 / .566."""
+    return draw_holdout_matched(holdout_matched_primitives(Z), path)
+
+
+def figure_holdout_opposite(Z, path=None):
+    """fig_learn_holdout_opposite.png, the two-panel version of figure_holdout_matched and the one John keeps (11-15:
+    "maybe let's try showing only the trained on evaluated on opposites, reducing panels a and b into 1 panel where the
+    linestyle indicated decade"; then "let's stick with the 2 panel ... legend style 'Trained on high, evaluated on
+    low' (etc) and with both legends just the first panel. Also let's get rid of the bayes markers, I think it's still
+    too confusing"): same size, data, smoothing and matched range (x 0-10; no Joint Bayes column). a: each learner's
+    accuracy on the OTHER set only (red: trained on low FR, evaluated on its band's high-FR answers; green: the
+    reverse), line style = gap (dotted: 2 decades, solid: 1 decade, as in b). b: the last panel of
+    figure_holdout_matched (evaluation - training) without the Joint Bayes markers. One key, centred above both
+    panels (John 11-15: the gap legend as "X-decade gap (Low < Y | High > Z)", "put it below the other legend. we can
+    adjust the height / width of the figure if necessary, you can also move both legends around"): colour chips
+    "Trained on low, evaluated on high" / "Trained on high, evaluated on low" (FR is named in a's title, "evaluated on
+    the other FR set"), then, 4 pt lower, line styles "2-decade gap (Low < 3e-2 | High > 3e0)" / "1-decade gap (Low <
+    1e-1 | High > 1e0)". The stacked key (about 141 x 40 pt) fits in neither panel without stretching its axes (a's
+    room above the green curves is 29 pt), so it sits outside: 0.1 in above the titles, figure 5.5 x 3.46 in, two
+    equal axes 2.28 x 2.0 in, one x label each. draw_holdout_matched(..., key="right") puts it in a column right of
+    the panels instead (labels wrapped after "Trained on low," and "gap"; panels 1.49 in wide; 5.5 x 2.76 in). For the
+    caption, Joint
+    Bayes: .854 / .826 on the low-FR answers, .726 / .736 on the high-FR ones (2- / 1-decade gap), so its own
+    evaluation - training is +.128 / +.090 (green's direction) and -.128 / -.090 (red's). At the matched end (9.99e8 /
+    9.89e8 learned updates): green .799 / .798, red .243 / .566; evaluation - training green +.097 / +.091, red
+    -.605 / -.253."""
+    return draw_holdout_matched(holdout_matched_primitives(Z), path, opposite=True, key="top")
 
 
 if __name__ == "__main__":
@@ -645,6 +1288,23 @@ if __name__ == "__main__":
         band_numbers(Z)
     if "--thresholds" in sys.argv:                                                # the 11-10 morning design
         figure(Z, path=fig_path("fig_learn_holdout_thresholds.png"))
+    if "--one" in sys.argv:                                                       # only the one-panel saturation figure
+        figure_saturation_one(Z)
+        sys.exit()
+    if "--primitives" in sys.argv:                                                # the matched figure's numbers -> npz
+        out_ = sys.argv[sys.argv.index("--primitives") + 1]
+        np.savez(out_, **holdout_matched_primitives(Z))
+        print("saved", out_)
+        sys.exit()
+    if "--matched" in sys.argv:                                                   # the matched-updates figures (11-14)
+        figure_holdout_matched(Z)
+        figure_holdout_opposite(Z)
+        sys.exit()
+    if "--cols" in sys.argv:                                                      # only the one-column-per-band one
+        figure_saturation_cols(Z)
+        sys.exit()
     figure_bands(Z)
+    figure_saturation(Z)
+    figure_saturation_one(Z)
     if "--long" in sys.argv:
         figure_long(Z)

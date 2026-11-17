@@ -36,15 +36,32 @@ class Model_forward(Model_backward):
         self.Z_count = 0
         self.active_K = self.all_K[self.ctx_inds, :]
         self.active_Q = self.all_Q[self.ctx_inds, :]
-        if self.learn_embeddings:
+        if self.learn_embeddings and not getattr(self, "z_full", False):     # z_full: the full embeddings, no down-scaling
             self.active_K = self.K_downscale(self.active_K)
             self.active_Q = self.Q_downscale(self.active_Q)
 
+        if getattr(self, "z_raw", False):    # no K.Q bottleneck (model_architecture.model_Z_num): per channel, the active
+            B = self.batch_num               # variables' K vectors then their Q vectors, (B, O, 2 * C * KQ_dim), float32
+            if getattr(self, "z_attn", False):
+                # z_attn (model_architecture.default_generator): per channel, the C active variables are tokens [K_v; Q_v]
+                # (2 * hid); h = x + MHA(LN(x)), the same layer for every channel; the code is [h_1; ...; h_C] per channel
+                x = torch.cat((self.active_K, self.active_Q), -1).transpose(1, 2)            # (B, O, C, 2 * hid)
+                x = x.reshape(B * self.obs_num, self.ctx_num, -1)
+                y = self.z_attn_norm(x)
+                h = x + self.z_attn(y, y, y, need_weights = False)[0]
+                self.active_Z = h.reshape(B, self.obs_num, -1).float()                     # (B, O, C * 2 * hid)
+                return
+            K = self.active_K.transpose(1, 2).reshape(B, self.obs_num, -1)          # (B, C, O, KQ) -> (B, O, C * KQ)
+            Q = self.active_Q.transpose(1, 2).reshape(B, self.obs_num, -1)
+            self.active_Z = torch.cat((K, Q), -1).float()
+            return
         self.active_Z = torch.zeros(self.Z_dims, device = self.device)
         if self.ctx_num == 1:
             self.KQ_to_Z(0,0)
         else:
-            for self.k in self.ctx_range:
+            # Python ints, not the elements of the CUDA tensor ctx_range: the same slices, without 2 GPU syncs per pair
+            # (range() and indexing turned each 0-d CUDA tensor into an int with .item()) (2026-11-13, speed)
+            for self.k in range(self.ctx_num):
                 for self.q in range(self.k+1, self.ctx_num):     
                     self.KQ_to_Z(self.k, self.q)
                     self.KQ_to_Z(self.q, self.k)      
@@ -100,7 +117,7 @@ class Model_forward(Model_backward):
         logits = self.classifier_readout(update)
         self.postprocess_belief(logits)
 
-        if self.testing and (self.mode == "SANITY") and self.keep_test_activations():
+        if (self.mode == "SANITY") and self.testing and self.keep_test_activations():   # mode first: testing is a GPU tensor
             self.update_flat = update.detach()        
             self.input_flat = (RNN_input() if callable(RNN_input) else RNN_input).detach()
         else:
@@ -196,8 +213,21 @@ class Model_forward(Model_backward):
         return [*out, *self.backward_return()]
 
     def RNN_readin(self):
+        if getattr(self, "readin_shared", False):
+            return self.classifier_readin.episode(self.obs_flat, self.classifier_Z())
         O = self.obs_flat
         Z = self.classifier_Z()
+        if getattr(self, "readin_perm", False):     # each episode's channels in a random order, bits and codes moved together
+            perm = torch.rand(self.batch_num, self.obs_num, device=Z.device).argsort(1)
+            O = O.gather(2, perm[:, None, :].expand(-1, O.shape[1], -1))
+            Z = Z.gather(1, perm[:, :, None].expand(-1, -1, Z.shape[2]))
+        if getattr(self, "z_full", False):
+            # z_full: the (B, T, O + O * 4 * hid) input is never built; the one-layer read-in is split into its bit and code
+            # columns (the same linear map: W [bits, Z] + b = W_bits bits + W_Z Z + b) and its Z part runs once per episode
+            W, b = self.classifier_readin.weight, self.classifier_readin.bias
+            n_bits = O.shape[-1]
+            z_part = Z.reshape(self.batch_num, -1) @ W[:, n_bits:].t() + b                 # (B, hid)
+            return O @ W[:, :n_bits].t() + z_part[:, None, :]
         Z = Z.reshape(self.batch_num, 1, -1)
         Z = Z.expand(-1, self.step_num, -1)
         return self.classifier_to_hid(O, Z)
@@ -225,8 +255,12 @@ class Model_forward(Model_backward):
         self.classifier_belief = belief
         self.classifier_belief_flat = belief.detach()
         self.classifier_goal_belief = belief[self.batch_range, :, self.goal_ind]
-        self.classifier_goal_selection = Categorical(self.classifier_goal_belief).sample() # SAMPLES FROM MARGINAL BELIEF
+        self.classifier_goal_selection = Categorical(self.classifier_goal_belief, validate_args = self.categorical_checks()).sample() # SAMPLES FROM MARGINAL BELIEF
         self.ACC = (self.classifier_goal_selection == self.goal_value[:,None]).float() 
+
+    def categorical_checks(self):
+        """None: torch's default argument checks (a GPU sync each); False under defer_train_outputs (same samples)"""
+        return False if getattr(self, "defer_train_outputs", False) else None
 
     def logits_to_belief(self, logits):
         if self.output_joint:
@@ -244,7 +278,7 @@ class Model_forward(Model_backward):
                 sample = self.controller_actions if training_controller else self.ctx_vals
             else:
                 CBF = self.classifier_belief_flat[:, -1]
-                sample = torch.distributions.Categorical(probs=CBF).sample()                 # SAMPLES FROM JOINT BELIEF                 
+                sample = torch.distributions.Categorical(probs=CBF, validate_args = self.categorical_checks()).sample()   # SAMPLES FROM JOINT BELIEF
                 sample[self.batch_range, self.goal_ind] = self.classifier_goal_selection[:, -1]
                 conf = CBF[self.BR, self.CR, sample]
                 conf[self.batch_range, self.goal_ind] = self.ACC[:,-1]

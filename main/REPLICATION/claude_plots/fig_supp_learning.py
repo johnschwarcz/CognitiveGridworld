@@ -73,7 +73,14 @@ is measured here.
    (John: "push the bottom row (nonheatmap) panels closer together since they share a ylabel and then put the legend as
    the first panel as a vertical column"); then the two pairs as close as their panels, one vertical r bar right of the
    Echo map, and the notation <u_T|x> (the mean of the mean-centred u_T over the episodes with x; John 11-11: "maybe we
-   should also change the symbol to be <u_T | x > so the given x does not need to be explained?"); then the centred state
+   should also change the symbol to be <u_T | x > so the given x does not need to be explained?"); NOTATION since 11-11
+   16:30 (John: "be very confident that the notation makes sense, is proper and can be understood by readers"): the
+   paper's E for every average (it never uses angle brackets, and <a|b> reads as an inner product): ubar_T = u_T -
+   E[u_T] (u_T the RNN output at T, as in the paper's Fig. 17; E over the 10,000 probe episodes), u_T^grid =
+   E[ubar_T | r] (context-invariant) or E[ubar_T | r, Z] - E[ubar_T | r] - E[ubar_T | Z] (context-dependent), exactly
+   td_tt_griddim's split; PR(ubar_T), PR(u_T^grid), PR(ubar_T - u_T^grid) (PR of a random vector = PR of its
+   covariance; the last is exact for the balanced 50 x 100 x 2 design); the maps E_t[corr(g_{t,k}, FR_{t-k})] (corr,
+   not r: bold r is the joint realization); then the centred state
    defined in the key, ubar_T = u_T - <u_T>, and used in the formulas (John: "maybe \\bar{u} = u - <u>"), "Shared" ->
    "Context-invariant", the key column narrowed to .95 in for wider PR panels. Then (John 11-10 ~16:20: "for g - j we dont need Trained and Echo, the colors
    denote that. Also please remove your a,b,c,... labels ... make panels a and f wider so the title can fit on one line
@@ -100,8 +107,9 @@ Why these panels:
   The link from FR to LEARNING a compositional representation: fig_learn_grids (the belief grid unfolds where
     naive's grid folds, i.e. where FR is high, in the Trained RNN, and folds further in the ESN), behaviour c-f (the
     dimension rise is the context-specific grid code), a (the shared count code dips while the network passes naive and
-    recovers; within environments it stays), k, l (before the crossing the credit of high-FR episodes lands 8-15 steps
-    back, after it 2-4; the ESN's stays at lag 0), and mechanism a (memory is recruited at entangled observations and from ever
+    recovers; within environments it stays), k, l (from ~160 episodes the credit of high-FR episodes lands 8-15 steps
+    back; after the crossing the peak moves in, from 1,600 episodes, to 2-3 steps back from 5,000 on (11-11 check);
+    the ESN's stays at lag 0), and mechanism a (memory is recruited at entangled observations and from ever
     older steps).
   Whether the ESN's failure is just accuracy: behaviour b (the ESN converges onto naive's answers, copying half of
     naive's errors).
@@ -112,6 +120,20 @@ Why these panels:
     and the posterior decoding (td_tt_count_var, 11-09: tried, replaced by d), the update-measure distributions
     (carried by the lag maps), the restart heat map, the relative memory-use panels (duplicates) and memory use vs FR
     (11-09: implied by b, see above).
+Caption of supp_learning_behaviour (11-11; John: at most 1.5x the length of the main learning figure's caption; every
+number checked against the caches, details in the paragraphs above):
+  \\caption{\\textbf{The Trained RNN reorganizes its updates and representation as it passes Naive Bayes ($C=2$,
+  $N=1{,}000$).} Dotted lines: the Trained RNN first exceeds Naive Bayes (880 training episodes). Measures use 2,000--
+  50,000 testing trajectories from 50 interaction sets. \\textbf{(a)} Fraction of Naive Bayes's errors (Joint Bayes
+  correct) that the network repeats: the Trained RNN sheds them, the ESN repeats half. \\textbf{(b)} Held-out $R^2$ of
+  one linear decoder of the observation counts from the final RNN output $u_T$, shared across interaction sets; it
+  dips as the Trained RNN passes Naive Bayes, then recovers. \\textbf{(c, d)} Squared norm and participation ratio
+  (PR) of the LSTM weight update $\\Delta W$ from one step's loss; the Trained RNN's updates peak, then approach two
+  dimensions. \\textbf{(e, f)} Grid decomposition of the centered output $\\bar u_T$ into a grid invariant to (e) or
+  dependent on (f) the interaction set $Z$; the Trained RNN's $Z$-dependent grid exceeds PR 100. \\textbf{(g)}
+  Correlation across trajectories between the share of the step-$t$ gradient reaching $k$ steps back and FR at that
+  step. On high-FR trajectories, the Trained RNN's gradient first reaches 8--15 steps back, then 2--3 after passing
+  Naive Bayes; the ESN's stays at the current step.} \\label{fig:learning_behaviour}
 Sources (definitions, checks and caveats in their docstrings):
   behaviour a         td_tt_count_code's decoders (the ESN's extra checkpoints: td_tt_count_var.harvest_counts)
   behaviour b         fig_td_summary b (plot_training_dynamics)
@@ -529,7 +551,7 @@ def behaviour():
     # say "grid"; 11-11: "expand the title into a multi-line sentence 'Correlation between...' so the title isnt wider
     # than the actual column"
     MAPT = "Correlation between the gradient reaching $k$ steps back and FR $k$ steps back"
-    MAPF = (r"$\langle\, r(g_{t,k},\, \mathrm{FR}_{t-k}) \,\rangle_t$,   "
+    MAPF = (r"$\mathbb{E}_t[\mathrm{corr}(g_{t,k},\, \mathrm{FR}_{t-k})]$,   "     # the paper's E, subscripted
             r"$g_{t,k} = \Vert\delta_{t,k}\Vert^2 / \Sigma_{k'}\Vert\delta_{t,k'}\Vert^2$")
     PW = (W - X0 - .20 - MW - GW - 3 * GX) / 4                        # .20 in right margin: the last title fits
     CX = [X0, X0 + MW + GW] + [X0 + MW + GW + j * (PW + GX) for j in range(1, 4)]
@@ -634,9 +656,9 @@ def behaviour():
         if r == "trained":                                             # one title per pair, centred over both
             for txt, dy, fsz, col in ((("Context-dependent" if f_ == "envcell" else "Context-invariant") + " PR", 12.5,
                                        fs["title"], "k"),
-                                      (r"$u_{\rm grid} = \langle \bar u_T|\mathbf{r},Z\rangle - \langle \bar u_T|\mathbf{r}\rangle"
-                                       r" - \langle \bar u_T|Z\rangle$" if f_ == "envcell"   # the centred state: the
-                                       else r"$u_{\rm grid} = \langle \bar u_T|\mathbf{r}\rangle$", 3.5, fs["key"],   # grand mean drops;
+                                      (r"$u_T^{\rm grid} = \mathbb{E}[\bar u_T\,|\,\mathbf{r},Z] - \mathbb{E}[\bar u_T\,|\,\mathbf{r}]"
+                                       r" - \mathbb{E}[\bar u_T\,|\,Z]$" if f_ == "envcell"   # the centred state: the
+                                       else r"$u_T^{\rm grid} = \mathbb{E}[\bar u_T\,|\,\mathbf{r}]$", 3.5, fs["key"],   # grand mean drops;
                                        "0.15")):                       # <u_T|x>: John 11-11, so that "given x" needs
                                                                        # no explaining
                 a.annotate(txt, xy=(1 + PG / 2 / PWB, 1), xycoords="axes fraction", xytext=(0, dy),
@@ -650,13 +672,13 @@ def behaviour():
             a.set_yticklabels([])
     A[1][1].set_ylabel("participation ratio", fontsize=fs["label"], labelpad=1)
     fig.legend(handles=[Line2D([], [], color="0.3", lw=1.0, ls=LS[k]) for k in ("tot", "g", "rest")],
-               labels=[r"PR$(u_T)$", r"PR$(u_{\rm grid})$", r"PR$(u_T - u_{\rm grid})$"], loc="upper left", ncol=1,
-               frameon=False, bbox_to_anchor=(LX / W, (H - tops[1] - .05) / H), fontsize=fs["key"],
+               labels=[r"PR$(\bar u_T)$", r"PR$(u_T^{\rm grid})$", r"PR$(\bar u_T - u_T^{\rm grid})$"], loc="upper left",
+               ncol=1, frameon=False, bbox_to_anchor=(LX / W, (H - tops[1] - .27) / H), fontsize=fs["key"],
                handlelength=1.6, handletextpad=.4, labelspacing=.7, borderaxespad=0)   # the key column, row 2
     fig.text(LX / W, (H - tops[1] + 12.5 / 72) / H, "Grid decomposition", fontsize=fs["title"], ha="left",
              va="bottom")                                              # the key's title, level with the pair titles
                                                                        # (John 11-11: "give a title to the grid legend")
-    fig.text(LX / W, (H - tops[1] - .64) / H, r"$\bar u_T = u_T - \langle u_T\rangle$", fontsize=fs["key"], ha="left",
+    fig.text(LX / W, (H - tops[1] - .02) / H, r"$\bar u_T = u_T - \mathbb{E}[u_T]$", fontsize=fs["key"], ha="left",
              va="top")                                                 # John 11-11: "maybe \bar{u} = u - <u>"
                                                                                                     # (John 11-10)
     for i_, row_ in enumerate(A):
@@ -693,7 +715,7 @@ def behaviour():
     cbh.ax.set_yticklabels(["$-$.2", "$-$.1", "0", ".1", ".2"])
     cbh.ax.tick_params(labelsize=fs["tick"], length=1.8, pad=1.2, width=.5)
     cbh.outline.set_visible(False)
-    cbh.ax.set_title("$r$", fontsize=fs["label"], pad=4)
+    cbh.ax.set_title("corr", fontsize=fs["key"], pad=4)              # not r: bold r is the joint realization
     fig.canvas.draw()                                                  # every text inside the figure
     rr, fb = fig.canvas.get_renderer(), fig.bbox
     for t in fig.texts + [t for ax in fig.axes for t in ax.texts]:

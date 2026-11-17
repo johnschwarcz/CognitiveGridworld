@@ -51,7 +51,30 @@ TASKS = [("gen60k_lr4_s0", None, False, "gen_s0_own"),
 TASKS += [(run, None, kind, f"{tag}_{kind}") for kind in ("map_linear", "map_mlp")
           for run, tag in (("clf60k_lr4_s0", "clf_s0"), ("clf60k_lr4_s1", "clf_s1"), ("rccclf60k_lr4_s1", "rccclf_s1"),
                            ("gen60k_lr4_s0", "gen_s0"))]
+# 11-11 19:00 (John: "run the cheap controls"): is the Generator route's one-frame, in-slot code made by the Generator's
+# weight sharing over channels? Embeddings AND Generator from scratch (random embeddings, trainable), with the Generator's
+# Z input shared over channels as built ("scratch_shared") or one input layer per channel ("scratch_unshared"); the
+# learned and true codes of a novel batch are saved at the end for the frame analysis; TASKS 21-24
+TASKS += [("gen60k_lr4_s0", None, kind, f"{kind}_s{k}") for kind in ("scratch_shared", "scratch_unshared") for k in (0, 1)]
 FIX = None                                          # Z-level transform applied after every MC_to_interactions
+
+
+def per_channel_linear(O, n_in, n_out):
+    """one Linear(n_in, n_out) per channel applied to (B, O, n_in): the Generator's Z input without sharing"""
+    import torch
+    nn = torch.nn
+
+    class PCL(nn.Module):
+        def __init__(self):
+            super().__init__()
+            layers = [nn.Linear(n_in, n_out) for _ in range(O)]           # independent default inits
+            self.W = nn.Parameter(torch.stack([l.weight.data.T for l in layers]))   # (O, n_in, n_out)
+            self.b = nn.Parameter(torch.stack([l.bias.data for l in layers]))       # (O, n_out)
+
+        def forward(self, Z):
+            return torch.einsum("boi,oih->boh", Z, self.W) + self.b[None]
+
+    return PCL()
 
 
 def make_map(kind, O=5, hidden=128):
@@ -183,6 +206,9 @@ def main():
     global FIX
     name, perm, random_emb, tag = TASKS[a.task]
     tag += a.suffix
+    scratch = random_emb if random_emb in ("scratch_shared", "scratch_unshared") else None
+    if scratch:
+        random_emb = True                               # random embeddings ...
     frame = random_emb if isinstance(random_emb, str) else None
     random_emb = random_emb is True
     if a.smoke:
@@ -204,6 +230,8 @@ def main():
             for n in ("all_K", "all_Q"):
                 getattr(m, n).data.copy_(getattr(m, n).data[:, list(perm)])
     del fresh
+    if scratch == "scratch_unshared":
+        m.Z_to_pobs = per_channel_linear(env.obs_num, m.Z_to_pobs.in_features, m.Z_to_pobs.out_features).to(env.device)
     learned_map = None
     if frame in ("map_linear", "map_mlp"):                              # a learnable correction (tasks 13+)
         learned_map = make_map(frame).to(env.device)
@@ -212,11 +240,14 @@ def main():
         #                                               # map gets no gradient; the embeddings themselves stay frozen
     elif frame is not None:                                             # Z-level frames (tasks 9-12)
         FIX = z_frame(env, perm, frame, seed)
-    for n in EMB:
-        x = getattr(m, n)
-        for p in (x.parameters() if isinstance(x, torch.nn.Module) else [x]):
-            p.requires_grad_(False)
+    emb_params = [p for n in EMB for p in (getattr(m, n).parameters() if isinstance(getattr(m, n), torch.nn.Module)
+                                           else [getattr(m, n)])]
+    for p in emb_params:
+        p.requires_grad_(bool(scratch))                 # ... and trainable in the scratch controls
     params = [p for n in GEN for p in getattr(m, n).parameters()] + (list(learned_map.parameters()) if learned_map else [])
+    params += emb_params if scratch else []
+    if scratch:
+        m.embedding_grad = "generator"
     opt = torch.optim.Adam(params, lr=a.lr)
     os.makedirs(OUT, exist_ok=True)
     path = os.path.join(OUT, f"{tag}.jsonl")
@@ -247,6 +278,13 @@ def main():
         loss.backward()
         opt.step()
         losses.append(loss.item())
+    if scratch:                                         # learned and true codes of a novel batch, for the frame analysis
+        env.test_set = True
+        env.run_generators()
+        env.prep_model()
+        with torch.no_grad():
+            m.MC_to_interactions()
+        np.savez(path[:-6] + "_codes.npz", z=m.active_Z.detach().cpu().numpy(), ztrue=np.asarray(env.joint_Z))
     if learned_map is not None:                         # how far the learned correction moved from the identity
         import torch as _t
         sd = {k: v.detach().cpu().numpy() for k, v in learned_map.state_dict().items()}

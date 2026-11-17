@@ -50,7 +50,7 @@ not in Trained marginal / joint supervision, where the widest networks' curves e
 the minimum / 100 they still cross it); titles Marginal / Joint output, Marginal / Joint supervision. Then (John 11-10:
 "can we get the y-axis down to 0.0001 to fix the legend to the right?" -- not with one-column keys: two Trained panels
 still crossed -- "or maybe we can split the trained network legend lists into 2 columns?"): the y-axis from 1e-4
-(SUB_YMIN), the Trained keys in two blocks: every trainable-parameter key at the lower right corner but
+(a fixed floor), the Trained keys in two blocks: every trainable-parameter key at the lower right corner but
 Trained joint supervision's, just left of the widest network's dip at 20k (to ~6e-4; even at 5e-5 it crosses the key).
 Then (John 11-10: "can you also please make another version without the fully trained 1K?"): _n1_no1k.png, the same
 without the Trained N = 1k. Then (John 11-10: "Maybe for the legends we can give it a title 'Widths / Trainable params'
@@ -66,6 +66,13 @@ Echo N = 3k (John 11-11: "a new batch of 3K ESNs to include"): echo_N3000_b8k, j
 joint_echo_N3000_b8k_jl in the three Echo panels of every version; from John's other machine (his
 Downloads/N3000_b8k_test_accuracies: test files, run.json and progress.log, copied in unchanged; no weights:
 NO_WEIGHTS), batch 8,000 in slices, seed 20261029, 5 tests per point as the other training-dynamics runs, finished 11-11.
+Submission version's keys and y-axis (John 11-11: "make the 'trainable params' 2 lines and reduce the shared ylim as much
+as possible"; 11-13: "move 'Widths' down so it's on the second line"): the keys' header on two lines, 'Trainable' over
+'Widths / params', and no fixed floor: the shared y-axis ends SUB_YPAD points beyond the data's extremes, its lower end
+dropping further only while a curve passes within 2 pt of a key's text. _n1_no1k.png and the PDF: .0056 to .77 (2.1
+decades; before .003 to .84, 2.4), both ends set by the data (the lowest point .0064, no key in a curve's way); _n1.png:
+.00027 to .83 (before 1e-4 to .84), the floor set by the Trained N = 1k's curve beside the header of the
+joint-supervision key.
 -> main/REPLICATION/figure_bin/compare_matched_params_loglog_joint_panels.png, _n1.png, _n1_no1k.png, _no500_no1k.png,
 param_control_b.pdf, param_control_b.svg (= _n1_no1k.png; John 11-10: "remove the 1k fully trained from the pdf and svg")
 Run from the repository root:
@@ -104,8 +111,8 @@ LIN_CE_EDGE = .5049 - .4495                           # the best linear-in-count
 GREY = "#555555"
 SUB_SIZE = (8.5, 4.)                                  # the submission version, inches (docstring: print size)
 SUB_DROP = (500,)                                     # its trained widths left out (John 11-10): 50-400 and 1k drawn
-SUB_YLO = 4.                                          # its y-axis' lower end: the data's minimum / SUB_YLO, or
-SUB_YMIN = 1e-4                                       # this value if set (John 11-10)
+SUB_YPAD = 3.                                         # its shared y-axis ends this many points beyond the data's extremes
+SUB_YSTEP = 1.02                                      # (John 11-11); the lower end / SUB_YSTEP while a curve is on a key
 SUB_FS = dict(tick=7, key=7, label=8, title=8, row=9)   # its type, points in print
 SUB_LW = 1.                                           # its curves and naive bound, points
 SUB_RAMPS = (("Blues", .35, 1.), ("Reds", .3, .9))    # its rows' colours (Trained, Echo): evenly spaced by width rank
@@ -175,8 +182,10 @@ def params_of(label):
 def key_table(ax, rows, head, fs, at=(.03, .02)):
     """a key as a small table with its lower-left corner at `at` (axes fraction): a line in the curve's colour, then
     'width / params', the slashes aligned (widths right-aligned before them, params left-aligned after), under the header
-    'head[0] / head[1]' on the same slash (John 11-10); returns its artists; rows = (colour, width, params), the first on
-    top; offsets in points, so the table keeps its print size"""
+    'head[0] / head[1]' on the same slash (John 11-10), head[1] a text line per line break in it, the last beside head[0]
+    and the others above it at the params' left edge (John 11-11: a narrower key; 11-13: head[0] on the last line);
+    returns its artists; rows = (colour, width, params), the first on top; offsets in points, so the table keeps its
+    print size"""
     fig = ax.figure
     r = fig.canvas.get_renderer()
     pt = Affine2D().scale(1 / 72) + fig.dpi_scale_trans + ScaledTranslation(*at, ax.transAxes)
@@ -198,7 +207,10 @@ def key_table(ax, rows, head, fs, at=(.03, .02)):
         arts.append(ax.add_artist(Line2D([0, hl], [y + .3 * fs] * 2, transform=pt, color=c, lw=SUB_LW,
                                          solid_capstyle="butt", label="_key", clip_on=False)))
         arts += [ax.text(x, y, t, ha=ha, **kw) for (x, ha), t in zip(cols, (w, "/", n))]
-    arts += [ax.text(x, len(rows) * dy + base + 1, t, ha=ha, **kw) for (x, ha), t in zip(cols, (head[0], "/", head[1]))]
+    lines = head[1].split("\n")
+    low = len(rows) * dy + base + 1                                               # the header's last line
+    arts += [ax.text(x, low, t, ha=ha, **kw) for (x, ha), t in zip(cols, (head[0], "/", lines[-1]))]
+    arts += [ax.text(cols[2][0], low + i * dy, t, ha="left", **kw) for i, t in enumerate(lines[-2::-1], 1)]
     return arts
 
 
@@ -221,9 +233,10 @@ def _hits(ax, pad=2, texts=None):
     return hit
 
 
-def _finish_submission(fig, axes, path, ymin=None):
+def _finish_submission(fig, axes, path):
     """the submission version's look (docstring): print-size layout and type, rows' colours, row titles, shared axis
-    labels, a key per row; checks that no curve crosses a text and that every text lies inside the figure"""
+    labels, a key per panel, the tightest shared y-axis that keeps the curves off the keys; checks that no curve crosses a
+    text and that every text lies inside the figure"""
     fs = SUB_FS
     W, H = fig.get_size_inches()
     LM, RM, TM, BM, GX, GY = .68, .10, .34, .40, .10, .10                         # margins and gaps, inches
@@ -265,14 +278,21 @@ def _finish_submission(fig, axes, path, ymin=None):
         ax.set_title(t, fontsize=fs["title"], pad=4, linespacing=1.15)
     ys = np.concatenate([ln.get_ydata() for ax in axes.flat for ln in curves[ax]]).astype(float)
     ys = ys[np.isfinite(ys) & (ys > 0)]
-    for ax in axes.flat:
-        ax.set_ylim(ymin or SUB_YMIN or ys.min() / SUB_YLO, ys.max() * 1.25)      # room below the data for the keys
+    for ax, rows in keys:                                                         # at each panel's lower left (John 11-10)
         ax.set_autoscale_on(False)                                                # the keys' lines must not move the limits
+        key_table(ax, rows, ("Widths", "Trainable\nparams"), fs["key"])
+    h = 72 * ph                                                                   # a panel's height, points
+    lo = ys.min() * (ys.min() / ys.max()) ** (SUB_YPAD / (h - 2 * SUB_YPAD))      # the shared y-axis (John 11-11): the data's
+    while True:                                                                   # extremes SUB_YPAD points inside its ends;
+        hi = ys.max() * (ys.max() / lo) ** (SUB_YPAD / (h - SUB_YPAD))            # the lower end drops while a curve passes
+        for ax in axes.flat:                                                      # within 2 pt of a key's text
+            ax.set_ylim(lo, hi)
+        if lo < ys.min() / 100 or not any(_hits(ax) for ax in axes.flat):
+            break
+        lo /= SUB_YSTEP
     naive = next(ln for ln in axes[1, 0].get_lines() if ln.get_label().startswith("_") and ln.get_linestyle() == "--")
     axes[1, 0].text(.02, naive.get_ydata()[0] / 1.12, "Naive bound", fontsize=fs["key"], ha="left", va="top",   # once, under
                     transform=axes[1, 0].get_yaxis_transform())                   # the line where no curve is (Echo, early)
-    for ax, rows in keys:                                                         # at each panel's lower left (John 11-10)
-        key_table(ax, rows, ("Widths", "Trainable params"), fs["key"])
     fig.canvas.draw()
     r = fig.canvas.get_renderer()
     inv = fig.transFigure.inverted()
@@ -316,7 +336,7 @@ def _finish_submission(fig, axes, path, ymin=None):
 
 
 @plt.rc_context()                                                                 # the submission version's mathtext, undone
-def figure(step=cmp.STEP, path=None, width_1k=True, n1=False, drop_trained=(), submission=False, ymin=None):
+def figure(step=cmp.STEP, path=None, width_1k=True, n1=False, drop_trained=(), submission=False):
     from main.utils import fig_path
 
     def draw(ax, run, name, col, n_tests=pm.TEST_POOL):
@@ -413,7 +433,7 @@ def figure(step=cmp.STEP, path=None, width_1k=True, n1=False, drop_trained=(), s
         ax.relim()
         ax.autoscale_view()
     if submission:
-        return _finish_submission(fig, axes, path or fig_path("compare_matched_params_loglog_joint_panels_n1.png"), ymin)
+        return _finish_submission(fig, axes, path or fig_path("compare_matched_params_loglog_joint_panels_n1.png"))
     for ax in (t1, t2, t3, e1, e2, e3):
         by_width(ax)
     for ax in (t1, t2, t3):
@@ -439,6 +459,6 @@ if __name__ == "__main__":
            drop_trained=SUB_DROP)                                                 # curve, batch 8,000; 11-10: the submission version
     figure(path=(fig_path("compare_matched_params_loglog_joint_panels_n1_no1k.png"), fig_path("param_control_b.pdf"),
                  fig_path("param_control_b.svg")), n1=True, submission=True,     # John 11-10: also the paper's PDF and SVG
-           width_1k=False, drop_trained=SUB_DROP + (1000,), ymin=3e-3)            # the same without the Trained N = 1k
+           width_1k=False, drop_trained=SUB_DROP + (1000,))                       # the same without the Trained N = 1k
     figure(path=fig_path("compare_matched_params_loglog_joint_panels_no500_no1k.png"), width_1k=False, drop_trained=(500,))   # John 11-08:
     # the trained LSTMs up to N = 400 (1.3M trainable parameters), against the ESNs up to N = 10k (1.2M)   # John 11-04: without the Trained N = 1k

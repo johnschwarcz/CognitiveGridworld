@@ -305,6 +305,9 @@ def main(cond, gpu, episodes=1001, frac=FRAC, sel="ent", scratch=False, rep=1, t
            "hid_dim": 1000, "obs_num": 5, "show_plots": False, "training": True, "batch_num": 8000, "step_num": 30,
            "state_num": 500, "learn_embeddings": False, "classifier_LR": .001, "ctx_num": 2,
            "skip_training_analyses": True, "reservoir": False, "gpu_inference": True, "micro_batch": MICRO}
+    if os.environ.get("LEARNMASK_DEFER") == "1":            # the 11-13 speed patch (env_model_manager.defer_train_outputs):
+        cfg["defer_train_outputs"] = True                    # weights and selections bitwise equal over 10 episodes of a
+                                                             # band run's continuation (scratchpad bench_cont.py check, 11-13)
     if cond == "trunk":
         cfg["episodes"], offset, seed, adam = START + 1, 0, SEED, None
     elif cont is not None:                                   # continue this run from its own checkpoint at raw cont

@@ -59,6 +59,40 @@ TASKS += [(s, "shared_adapt", m, k) for m in ("frozen", "frozen_ch4") for s in (
 # identity at the start); all channels and the channel-4 test; TASKS 86-109
 TASKS += [(s, r, m, k) for r in ("shared_mlpmap", "unshared_adapt", "unshared_mlpmap") for m in ("frozen", "frozen_ch4")
           for s in ("gen", "clf") for k in (0, 1)]
+# 11-12 06:15 (John: the channel-4 test is what he means by new channels; "use the best classifier we can get as the
+# control"): the channel-4 test on every oracle-label net of Fig 13 (gen60k_lr4 / clf60k_lr4, seeds 0-5; the source
+# "<route>@<net>" names the net), reader seed 0: the shared reader as learned for both routes, plus the learned linear
+# and MLP maps for the Classifier route; TASKS 110-133.
+TASKS += [(f"gen@gen60k_lr4_s{n}", "shared", "frozen_ch4", 0) for n in range(6)]
+TASKS += [(f"clf@clf60k_lr4_s{n}", r, "frozen_ch4", 0) for n in range(6) for r in ("shared", "shared_adapt", "shared_mlpmap")]
+assert len(TASKS) == 134
+# 11-12 12:30 (John, leaving for ~12 h: "take full use of new compute"; idle cluster CPUs): the same channel-4 test on the
+# RCC-feedback nets of Fig 13 (rcc60k_lr4 = Generator route, rccclf60k_lr4 = Classifier route, the RCC's own answers as
+# labels, seeds 0-5); TASKS 134-157
+TASKS += [(f"gen@rcc60k_lr4_s{n}", "shared", "frozen_ch4", 0) for n in range(6)]
+TASKS += [(f"clf@rccclf60k_lr4_s{n}", r, "frozen_ch4", 0) for n in range(6) for r in ("shared", "shared_adapt", "shared_mlpmap")]
+assert len(TASKS) == 158
+# 11-13 01:50 (John: "when we trained with shuffled channels, did that rescue the classifier route?" ... "yes please run
+# it"): the channel-4 test on the nets trained with every episode's channels in a random order (readin_perm, oracle labels):
+# Classifier route seed 1 (learned: .66 / .67) with the reader as learned + the linear / MLP maps, seed 0 (stayed at chance)
+# as learned, Generator route seeds 0-1 as learned; lr 1e-4 (20k) and lr 1e-3 (10k) nets; TASKS 158-169.
+for _tag in ("20k_lr4", "10k_lr1e3"):
+    TASKS += [(f"gen@genperm{_tag}_s{n}", "shared", "frozen_ch4", 0) for n in range(2)]
+    TASKS += [(f"clf@clfperm{_tag}_s1", r, "frozen_ch4", 0) for r in ("shared", "shared_adapt", "shared_mlpmap")]
+    TASKS += [(f"clf@clfperm{_tag}_s0", "shared", "frozen_ch4", 0)]
+assert len(TASKS) == 170
+# 11-13 02:00: the same test on the RCC-feedback Classifier-route nets continued to 120k (rccclf120k_lr4_s0-3: all 5
+# channels in use again, .70-.72): does the transfer failure fade with training? TASKS 170-181.
+TASKS += [(f"clf@rccclf120k_lr4_s{n}", r, "frozen_ch4", 0) for n in range(4) for r in ("shared", "shared_adapt", "shared_mlpmap")]
+assert len(TASKS) == 182
+# 11-13 02:10 (John: "if it learns the shared readin we can keep adding more and more observations to keep improving
+# performance? is there a cap, does it saturate?"): the reader trained on channels 0-1 only ("frozen_ch2"), tested with
+# channels 0-1, 0-2, 0-3 and 0-4 (three never-seen channels added one at a time; logs novel_k3 / novel_k4 / novel_k5).
+# Generator route as learned (gen60k_lr4_s0-5), Classifier route as learned and with the linear map (clf60k_lr4_s0-1);
+# TASKS 182-191.
+TASKS += [(f"gen@gen60k_lr4_s{n}", "shared", "frozen_ch2", 0) for n in range(6)]
+TASKS += [(f"clf@clf60k_lr4_s{n}", r, "frozen_ch2", 0) for n in range(2) for r in ("shared", "shared_adapt")]
+assert len(TASKS) == 192
 CLF_PERM = (1, 0, 4, 2, 3)
 FIX = None
 EMB = ("all_K", "all_Q", "K_downscale", "Q_downscale")
@@ -164,11 +198,11 @@ def main():
     a = ap.parse_args()
     torch.set_num_threads(int(os.environ.get("OMP_NUM_THREADS", 8)))
     src, rname, mode, seed = TASKS[a.task]
-    tag = f"{rname}_{src}_{mode}_s{seed}"
+    tag = f"{rname}_{src.replace('@', '-')}_{mode}_s{seed}"
     tag += a.suffix
     if a.smoke:
         a.steps, a.batch, a.test_every, tag = 6, 64, 3, "smoke_" + tag
-    run = dict(SOURCES)[src]
+    run = src.split("@")[1] if "@" in src else dict(SOURCES)[src]
     np.random.seed(int(run.rsplit("_s", 1)[1])); torch.manual_seed(0)
     env = fg.build(run, a.batch, load=True)
     m = env.model
@@ -206,7 +240,7 @@ def main():
     if gen_params:
         groups.append(dict(params=gen_params, lr=a.lr))
     opt = torch.optim.Adam(groups)
-    train_ch = TRAIN_CH if mode == "frozen_ch4" else tuple(range(O))
+    train_ch = TRAIN_CH if mode == "frozen_ch4" else tuple(range(int(mode[9:]))) if mode.startswith("frozen_ch") else tuple(range(O))
     os.makedirs(OUT, exist_ok=True)
     path = os.path.join(OUT, f"{tag}.jsonl")
     log = open(path, "w")
@@ -217,6 +251,8 @@ def main():
             env._test_flag = True
             nov = accuracy(env, reader, nt, train_ch)
             extra = dict(novel_all5=accuracy(env, reader, nt)) if mode == "frozen_ch4" else {}
+            if mode.startswith("frozen_ch") and mode != "frozen_ch4":    # every larger prefix of channels (11-13)
+                extra = {f"novel_k{j}": accuracy(env, reader, nt, tuple(range(j))) for j in range(len(train_ch) + 1, O + 1)}
             env._test_flag = False
             tr = accuracy(env, reader, nt, train_ch)
             rec = dict(step=step, episodes=step * a.batch, t=round(time.time() - t0), novel=nov, train=tr,
@@ -235,6 +271,13 @@ def main():
         loss.backward()
         opt.step()
         losses.append(loss.item())
+    if mode.startswith("updated"):                      # learned and true codes of a novel batch (11-11 19:00 controls)
+        env.test_set = True
+        env.run_generators()
+        env.prep_model()
+        with torch.no_grad():
+            m.MC_to_interactions()
+        np.savez(path[:-6] + "_codes.npz", z=m.active_Z.detach().cpu().numpy(), ztrue=np.asarray(env.joint_Z))
     if rname == "shared_adapt":                         # the learned correction, for the record
         np.save(path[:-6] + "_A.npy", reader.A.detach().cpu().numpy())
     print("wrote", path)

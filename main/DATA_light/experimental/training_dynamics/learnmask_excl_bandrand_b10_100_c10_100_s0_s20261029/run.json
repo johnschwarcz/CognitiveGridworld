@@ -11,12 +11,12 @@
  ],
  "scratch": true,
  "rep": 1,
- "start": 12000,
- "seed": 20273029,
+ "start": 18800,
+ "seed": 20279829,
  "cfg": {
   "mode": "SANITY",
   "cuda": 1,
-  "episodes": 36001,
+  "episodes": 18701,
   "checkpoint_every": 5,
   "realization_num": 10,
   "hid_dim": 1000,
@@ -33,8 +33,9 @@
   "reservoir": false,
   "gpu_inference": true,
   "micro_batch": 2000,
-  "load_env": "experimental/training_dynamics/learnmask_excl_bandrand_b10_100_c10_100_s0_s20261029/ckpt_ep12000"
+  "load_env": "experimental/training_dynamics/learnmask_excl_bandrand_b10_100_c10_100_s0_s20261029/ckpt_ep18800_loadable"
  },
- "continued_from": 12000,
- "started": "2026-11-11 13:56:24"
+ "continued_from": 18800,
+ "adam_state_episode": 12000,
+ "started": "2026-11-11 19:29:48"
 }

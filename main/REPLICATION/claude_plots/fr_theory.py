@@ -17,6 +17,8 @@ at the bottom right; (d) q* dashed, no bars; (e) no inset; (f) the slope of ever
 R = 3 realizations (trap-free sets exist there); (g) one-step change of N-episode averages, N = 1, 10, 100 (violins); (h) thirds
 of the trapped fraction; "Theory" / "Simulation" key.  The full-size figure is also written to figure_bin (PNG and PDF).
 Titles: the title(...) calls in make_figure; sizes: FIGSIZE and FS.
+11-11 late: caches steps_lam (step law at lambda 1, 3), thirds_more (the thirds' SAME sets from step 0: mean +- s.d., step law, accuracy
+up to 10^9 steps) and synergy (population, I(r_g; r_c | o)) feed fr_theory_figure.py (the single theory figure, now drawn from there).
 
 WHAT IT COMPUTES
   Row 1 (panels a-d)  Small likelihood tables with one binary observable: exact expectations (finite sums over the
@@ -122,6 +124,9 @@ CFG = dict(
     POP_NZ=2000, POP_EP=150, POP_T0=10_000, POP_TS=(1, 10, 100, 1000),  # Figure 2 d and Figure 1 g: interaction sets drawn WITHOUT selection (the
                                                                        # Gridworld's population), episodes per set, start step, horizons T
     WORKERS=int(os.environ.get("FR_WORKERS", 12)),                     # worker processes of the heavy builds (results do not depend on it)
+    Q3_ACC_EP=100, ACC_TMAX=10 ** 9, ACC_PER_DECADE=4,                 # fr_theory_figure (11-11): Joint and Naive accuracy per third of q, episodes per
+                                                                       # set and log grid of steps (counts drawn binomially: a late step costs nothing)
+    SYN_EP=50, SYN_TMAX=10 ** 4, SYN_PER_DECADE=8,                     # fr_theory_figure: synergy I(r_g; r_c | o_1:t) vs FR in the population (POP_NZ sets)
 )
 QUICK = dict(NZ_FULL=150, NZ_LIGHT=60, NZ_POOL=200, N_MC=20_000, NZ_BAND=30, NZ_SMALL=40, OPT_NZ=20, OPT_NEP=30,
              TH_G_EP=60, TH_H_EP=60, G_GROUPS=100, MON_GROUPS=30, MON_TUPLES=150, POP_NZ=60, POP_EP=60, POP_GROUPS=30)   # overrides of `quick` / --quick
@@ -498,8 +503,8 @@ def decreasing_steps(m):
 # ============================================================================================================
 # 5. DATA: BUILD AND CACHE
 # ============================================================================================================
-ROW1_VERSION, POOL_VERSION, SIM_VERSION, DERIVED_VERSION, BAND_VERSION, SMALL_VERSION, OPT_VERSION, MON_VERSION = 3, 5, 5, 19, 2, 1, 2, 3
-POP_VERSION = 1   # DERIVED 18: spread theory from the simulated episodes' own joint realizations; 19: mean +- s.d. (fr_theory_figure)
+ROW1_VERSION, POOL_VERSION, SIM_VERSION, DERIVED_VERSION, BAND_VERSION, SMALL_VERSION, OPT_VERSION, MON_VERSION = 3, 5, 5, 21, 2, 1, 2, 3
+POP_VERSION = 1   # DERIVED 18: spread theory from the simulated episodes' own joint realizations; 19: mean +- s.d. (fr_theory_figure); 20: step law per lambda; 21: by third of q, synergy
 T_ANATOMY, T_DISTRACTORS, T_MIXTURE = 300, 400, 3000
 
 
@@ -644,18 +649,25 @@ def build_optimum(cfg):
     return {(R, d): r for (_, R, d), r in zip(tasks, run_parallel(_opt_point, tasks, cfg["WORKERS"], "panel f"))}
 
 
-def build_thirds(cfg):
-    """Panels g, h: NZ_BAND interaction sets in each third of the trapped fraction (CFG FRAC_BINS) at LAM_MAIN, found by drawing tables
-    (goal as returned).  THEORY (tables alone): the one-step pool of each third.  SIMULATION (counts drawn binomially, exact observers,
-    from step TH_T0 on, every episode at its own joint realization): g, the change at the next step of TH_G_EP episodes per set; h, the
-    changes over the next max(TH_TS) steps of TH_H_EP episodes per set."""
+def third_tables(cfg):
+    """The NZ_BAND interaction sets of each third of the trapped fraction (FRAC_BINS) at LAM_MAIN, found by drawing tables (goal as
+    returned): the same seed and order for build_thirds and build_thirds_more, so both use the SAME sets.  Returns them and the draws."""
     lam, bins, need = cfg["LAM_MAIN"], [tuple(b) for b in cfg["FRAC_BINS"]], cfg["NZ_BAND"]
     rng = np.random.default_rng(4141); keep = [[] for _ in bins]; draws = 0
     while any(len(k) < need for k in keep):
         ell = checked_table(make_env(rng, lam), lam); draws += 1; f = one_step_table(ell)["trapped"].mean()
         for k, (lo, hi) in zip(keep, bins):
             if lo <= f < hi and len(k) < need: k.append(ell)
-        if draws >= cfg["BAND_MAX_DRAWS"]: raise SystemExit(f"build_thirds: after {draws} tables the thirds hold {[len(k) for k in keep]} of {need} sets")
+        if draws >= cfg["BAND_MAX_DRAWS"]: raise SystemExit(f"third_tables: after {draws} tables the thirds hold {[len(k) for k in keep]} of {need} sets")
+    return keep, draws
+
+
+def build_thirds(cfg):
+    """Panels g, h: NZ_BAND interaction sets in each third of the trapped fraction (CFG FRAC_BINS) at LAM_MAIN, found by drawing tables
+    (goal as returned).  THEORY (tables alone): the one-step pool of each third.  SIMULATION (counts drawn binomially, exact observers,
+    from step TH_T0 on, every episode at its own joint realization): g, the change at the next step of TH_G_EP episodes per set; h, the
+    changes over the next max(TH_TS) steps of TH_H_EP episodes per set."""
+    lam, bins = cfg["LAM_MAIN"], [tuple(b) for b in cfg["FRAC_BINS"]]; keep, draws = third_tables(cfg)
     erng = np.random.default_rng(4242); t0, Tm = cfg["TH_T0"], max(cfg["TH_TS"]); out = dict(bins=bins, draws=draws, thirds=[]); tq = time.time()
     for tabs in keep:
         it = iter(tabs); pool = one_step_pool(lam, len(tabs), None, both_goals=False, env=lambda r_, l_: next(it)); g, h = [], []
@@ -790,6 +802,100 @@ def build_population(cfg):
                 step=np.concatenate([r[1] for r in res]), trapped=np.concatenate([r[2] for r in res]), n_sets=len(tabs), n_ep=n_ep)
 
 
+def _steps_lam_chunk(task):
+    """build_steps_lam, one chunk: its own tables (own seed) and the first step after POP_T0 of POP_EP episodes per set."""
+    cfg, lam, n_sets, seed = task; rng = np.random.default_rng(seed); erng = np.random.default_rng(seed + 10 ** 6); t0, n_ep = cfg["POP_T0"], cfg["POP_EP"]
+    tabs = [checked_table(make_env(rng, lam), lam) for _ in range(n_sets)]; step, trapped = [], []
+    for ell in tabs:
+        lg = table_logs(ell); d_o, R, Rc = ell.shape; tr_tab = one_step_table(ell)["trapped"]
+        rg, rc = erng.integers(0, R, n_ep), erng.integers(0, Rc, n_ep); pr = ell[:, rg, rc].T
+        n = erng.binomial(t0, pr).astype(float); prev = fr_counts(n, t0, *lg); n += erng.random(pr.shape) < pr
+        step.append((fr_counts(n, t0 + 1, *lg) - prev).astype(np.float32)); trapped.append(tr_tab[rg, rc])
+    it = iter(tabs); pool = one_step_pool(lam, len(tabs), None, both_goals=False, env=lambda r_, l_: next(it))
+    return {k: pool[k] for k in ("p", "theta", "const", "trapped", "Delta")}, np.concatenate(step), np.concatenate(trapped)
+
+
+def build_steps_lam(cfg):
+    """fr_theory_figure l at the likelihood temperatures other than LAM_MAIN (whose panel uses build_population): POP_NZ interaction sets
+    drawn without selection, POP_EP episodes each, the first step after POP_T0 (counts drawn binomially, exact observers), and the
+    sets' one-step pool (theory).  The same procedure as build_population, with its own seeds."""
+    out = {}
+    for lam in [l for l in cfg["LAMS_FULL"] if l != cfg["LAM_MAIN"]]:
+        k = 4 * cfg["WORKERS"]; sizes = [len(c) for c in np.array_split(np.arange(cfg["POP_NZ"]), k)]
+        res = run_parallel(_steps_lam_chunk, [(cfg, lam, m, 8100 + int(100 * lam) * 1000 + i) for i, m in enumerate(sizes) if m], cfg["WORKERS"],
+                           f"steps at lambda = {lam:g}")
+        out[lam] = dict(pool={f: np.concatenate([r[0][f] for r in res]) for f in ("p", "theta", "const", "trapped", "Delta")},
+                        step=np.concatenate([r[1] for r in res]), trapped=np.concatenate([r[2] for r in res]))
+    return out
+
+
+def acc_times(cfg): return np.unique(np.round(10.0 ** (np.arange(0, np.log10(cfg["ACC_TMAX"]) * cfg["ACC_PER_DECADE"] + 0.5) / cfg["ACC_PER_DECADE"])).astype(np.int64))
+def syn_times(cfg): return np.unique(np.round(10.0 ** (np.arange(0, np.log10(cfg["SYN_TMAX"]) * cfg["SYN_PER_DECADE"] + 0.5) / cfg["SYN_PER_DECADE"])).astype(np.int64))
+
+
+def _q3_chunk(task):
+    """build_thirds_more, one chunk of one third's interaction sets (own seed).  (i) FR_t for t = 1..T of N_EP episodes per set: per set
+    the sums of FR_t and FR_t^2, and each episode's Delta; (ii) the first step after POP_T0 of POP_EP episodes per set, with whether the
+    episode is trapped; (iii) the goal accuracy of the Joint and the Naive observer, Q3_ACC_EP episodes per set, on the grid acc_times."""
+    cfg, tabs, seed = task; T, t0 = cfg["T"], cfg["POP_T0"]; erng = np.random.default_rng(seed); TA = acc_times(cfg); k = len(tabs)
+    S1, S2, aJ, aN = np.zeros((k, T)), np.zeros((k, T)), np.zeros((k, len(TA))), np.zeros((k, len(TA))); dl, step, trp = [], [], []
+    for s_, ell in enumerate(tabs):
+        lg = table_logs(ell); d_o, R, Rc = ell.shape; tab = one_step_table(ell)
+        n_ep = cfg["N_EP"]; rg, rc = erng.integers(0, R, n_ep), erng.integers(0, Rc, n_ep); pr = ell[:, rg, rc].T; n = np.zeros_like(pr)
+        for t in range(1, T + 1):
+            n += erng.random(pr.shape) < pr; f = fr_counts(n, t, *lg); S1[s_, t - 1] = f.sum(); S2[s_, t - 1] = (f ** 2).sum()
+        dl.append(tab["Delta"][rg, rc])
+        n_ep = cfg["POP_EP"]; rg, rc = erng.integers(0, R, n_ep), erng.integers(0, Rc, n_ep); pr = ell[:, rg, rc].T
+        n = erng.binomial(t0, pr).astype(float); prev = fr_counts(n, t0, *lg); n += erng.random(pr.shape) < pr
+        step.append((fr_counts(n, t0 + 1, *lg) - prev).astype(np.float32)); trp.append(tab["trapped"][rg, rc])
+        n_ep = cfg["Q3_ACC_EP"]; rg, rc = erng.integers(0, R, n_ep), erng.integers(0, Rc, n_ep); pr = ell[:, rg, rc].T; n = np.zeros_like(pr); tp = 0
+        for i, t in enumerate(TA):
+            n = n + erng.binomial(int(t - tp), pr); tp = t; bj, bn = goal_answers(n, float(t), *lg); aJ[s_, i] = np.mean(bj == rg); aN[s_, i] = np.mean(bn == rg)
+    return S1, S2, np.concatenate(dl), np.concatenate(step), np.concatenate(trp), aJ, aN
+
+
+def build_thirds_more(cfg):
+    """fr_theory_figure (11-11, John: f-h and l-n by the same q as o-q): for the SAME interaction sets as build_thirds (third_tables),
+    simulations from step 0 (mean and s.d. of FR_t), the first step after POP_T0 (step law of a trapped episode) and the accuracy of both
+    observers up to ACC_TMAX (Proposition 4).  Counts drawn binomially, exact observers."""
+    keep, draws = third_tables(cfg); out = []
+    for i, tabs in enumerate(keep):
+        parts = [c for c in np.array_split(np.arange(len(tabs)), 2 * cfg["WORKERS"]) if len(c)]
+        res = run_parallel(_q3_chunk, [(cfg, [tabs[j] for j in c], 33_000 + 100 * i + k) for k, c in enumerate(parts)], cfg["WORKERS"], f"third {i + 1}: simulations")
+        out.append(dict(S1=np.concatenate([r[0] for r in res]), S2=np.concatenate([r[1] for r in res]), Delta=np.concatenate([r[2] for r in res]),
+                        step=np.concatenate([r[3] for r in res]), trapped=np.concatenate([r[4] for r in res]), aJ=np.concatenate([r[5] for r in res]),
+                        aN=np.concatenate([r[6] for r in res]), n_ep=cfg["N_EP"], acc_ep=cfg["Q3_ACC_EP"]))
+    return dict(thirds=out, draws=draws, acc_t=acc_times(cfg))
+
+
+def _syn_chunk(task):
+    """build_synergy, one chunk of interaction sets (own seeds): per set and step of syn_times, the means over SYN_EP episodes of FR_t, of
+    H(r_g | o_1:t) - H(r_g | o_1:t, r_c) (whose mean over episodes estimates the synergy I(r_g; r_c | o_1:t)) and of H(r_g | o_1:t) (Lambda_t)."""
+    cfg, n_sets, seed = task; lam = cfg["LAM_MAIN"]; rng, erng = np.random.default_rng(seed), np.random.default_rng(seed + 10 ** 6); TS = syn_times(cfg)
+    Fm, Sy, La = np.zeros((n_sets, len(TS))), np.zeros((n_sets, len(TS))), np.zeros((n_sets, len(TS))); dl = []
+    for s_ in range(n_sets):
+        ell = checked_table(make_env(rng, lam), lam); lg = table_logs(ell); L1, L0 = lg[0], lg[1]; d_o, R, Rc = ell.shape; tab = one_step_table(ell)
+        n_ep = cfg["SYN_EP"]; rg, rc = erng.integers(0, R, n_ep), erng.integers(0, Rc, n_ep); pr = ell[:, rg, rc].T; n = np.zeros_like(pr); tp = 0; e = np.arange(n_ep)
+        dl.append(tab["Delta"][rg, rc])
+        for i, t in enumerate(TS):
+            n = n + erng.binomial(int(t - tp), pr); tp = t
+            LJ = np.einsum("ei,ijk->ejk", n, L1) + np.einsum("ei,ijk->ejk", t - n, L0)              # log P(o | r_g, r_c), up to a constant
+            lm = logsumexp(LJ, axis=2); lm -= logsumexp(lm, axis=1, keepdims=True)                  # log P(r_g | o): the Joint goal belief
+            lc = LJ[e, :, rc]; lc -= logsumexp(lc, axis=1, keepdims=True)                            # log P(r_g | o, r_c): told the contextual variable
+            Hm = -np.sum(np.exp(lm) * lm, axis=1); Hc = -np.sum(np.exp(lc) * lc, axis=1)
+            Fm[s_, i] = fr_counts(n, float(t), *lg).mean(); Sy[s_, i] = np.mean(Hm - Hc); La[s_, i] = Hm.mean()
+    return Fm, Sy, La, np.concatenate(dl)
+
+
+def build_synergy(cfg):
+    """fr_theory_figure: Factorization Regret and synergy (Proposition 3) through time in the Gridworld's population at LAM_MAIN (POP_NZ
+    interaction sets drawn without selection, SYN_EP episodes each, counts drawn binomially on the grid syn_times, exact observers)."""
+    parts = [len(c) for c in np.array_split(np.arange(cfg["POP_NZ"]), 4 * cfg["WORKERS"]) if len(c)]
+    res = run_parallel(_syn_chunk, [(cfg, m, 44_000 + k) for k, m in enumerate(parts)], cfg["WORKERS"], "synergy")
+    return dict(t=syn_times(cfg), FR=np.concatenate([r[0] for r in res]), Syn=np.concatenate([r[1] for r in res]), Lam=np.concatenate([r[2] for r in res]),
+                Delta=np.concatenate([r[3] for r in res]), n_ep=cfg["SYN_EP"])
+
+
 def build_population_theory(cfg, pop):
     """THEORY for the population (tables alone): E_R[(1 - p_R)^T] for every N and every T of POP_TS (Figure 2 d)."""
     Nth = theory_ns(cfg); m, se = monotone_theory(pop["pool"], Nth, cfg["POP_TS"], cfg["MON_TUPLES"], 7272, workers=cfg["WORKERS"])
@@ -853,7 +959,7 @@ def law_quantiles(x, w, q, N, ps):
     v, pr = mean_law(x, w, q, N); o = np.argsort(v); return np.interp(ps, np.cumsum(pr[o]), v[o])
 
 
-def derive(pools, sims, cfg, bands, small, opt, mon, mth, pop, pth):
+def derive(pools, sims, cfg, bands, small, opt, mon, mth, pop, pth, sl, qmore, syn):
     """Everything the figure, the checks and the numbers need, computed once from the pools and the simulations."""
     rng = np.random.default_rng(11); T = cfg["T"]; n_ep = cfg["N_EP"]; lam0 = cfg["LAM_MAIN"]; tt = np.arange(1, T + 1)
     S0, P0 = sims[lam0], pools["pool"][lam0]; D = dict(tt=tt)
@@ -944,6 +1050,36 @@ def derive(pools, sims, cfg, bands, small, opt, mon, mth, pop, pth):
     ph = cnt / len(stp)
     D["pop_step"] = dict(edges=edges, dens=hgt / wd, sim=ph / wd, sim_2se=2 * np.sqrt(ph * (1 - ph) / len(stp)) / wd, xmax=xmax, n=len(stp),
                          p_pred=float(wt[x < 0].sum()), p_sim=float(np.mean(stp < 0)), q=float(q), q_sim=float(np.mean(pop["trapped"])))
+    # ---- fr_theory_figure l (11-11): the same, at every lambda of LAMS_FULL, on SHARED bins (0.1 nats) over the 96% range of the widest law
+    src = {lam: (pop["pool"], pop["step"], pop["trapped"]) if lam == lam0 else (sl[lam]["pool"], sl[lam]["step"], sl[lam]["trapped"]) for lam in cfg["LAMS_FULL"]}
+    xs = 0.0
+    for lam, (pl, _, _) in src.items():
+        x, w, q = step_atoms(pl); wt = w / w.sum(); cw = np.argsort(np.abs(x)); xs = max(xs, np.abs(x[cw])[np.searchsorted(np.cumsum(wt[cw]), 0.96)])
+    xs = float(np.ceil(xs / 0.5) * 0.5); edges = np.linspace(-xs, xs, int(round(2 * xs / 0.1)) + 1); wd = np.diff(edges); D["step_lam"] = {}
+    for lam, (pl, st, trf) in src.items():
+        x, w, q = step_atoms(pl); wt = w / w.sum(); stp = st[trf].astype(float); hgt, _ = np.histogram(x, bins=edges, weights=wt)
+        cnt, _ = np.histogram(stp, bins=edges); ph = cnt / len(stp)
+        D["step_lam"][lam] = dict(edges=edges, dens=hgt / wd, sim=ph / wd, sim_2se=2 * np.sqrt(ph * (1 - ph) / len(stp)) / wd, xmax=xs, n=len(stp),
+                                  p_pred=float(wt[x < 0].sum()), p_sim=float(np.mean(stp < 0)), q=float(q))
+    # ---- fr_theory_figure (11-11): per third of q (the sets of Figure 2 a-c): mean +- s.d. of FR_t, the step of a trapped episode, accuracy
+    qrng = np.random.default_rng(23); D["by_q"] = []; tmk3 = np.arange(T // 10, T + 1, T // 10) - 1; xs3 = 0.0
+    for T3 in mon["thirds"]:
+        x, w, q = step_atoms(T3["pool"]); wt = w / w.sum(); cw = np.argsort(np.abs(x)); xs3 = max(xs3, np.abs(x[cw])[np.searchsorted(np.cumsum(wt[cw]), 0.96)])
+    xs3 = float(np.ceil(xs3 / 0.5) * 0.5); e3 = np.linspace(-xs3, xs3, int(round(2 * xs3 / 0.1)) + 1); wd3 = np.diff(e3)
+    for T3, Q in zip(mon["thirds"], qmore["thirds"]):
+        x, w, q = step_atoms(T3["pool"]); wt = w / w.sum(); ne = Q["n_ep"]; S1, S2 = Q["S1"][:, tmk3], Q["S2"][:, tmk3]; nz = len(S1)
+        def msd(idx): m_ = S1[idx].sum(0) / (len(idx) * ne); s_ = np.sqrt(np.maximum(S2[idx].sum(0) / (len(idx) * ne) - m_ ** 2, 0)); return m_, m_ - s_, m_ + s_
+        m0, lo0, hi0 = msd(np.arange(nz)); bs = np.array([np.stack(msd(qrng.integers(0, nz, nz))) for _ in range(200)])     # (200, 3, steps)
+        stp = Q["step"][Q["trapped"]].astype(float); hgt, _ = np.histogram(x, bins=e3, weights=wt); cnt, _ = np.histogram(stp, bins=e3); ph = cnt / len(stp)
+        gap = Q["aJ"] - Q["aN"]
+        D["by_q"].append(dict(q=float(q), t=tt, mean_th=tt * Q["Delta"].mean(), sd_th=np.sqrt(tt ** 2 * Q["Delta"].var() + tt * T3["pool"]["v"].mean()),
+                              tm=tt[tmk3], mean_m=m0, lo_m=lo0, hi_m=hi0, mean_se=bs[:, 0].std(0), lo_se=bs[:, 1].std(0), hi_se=bs[:, 2].std(0), n_sets=nz,
+                              step=dict(edges=e3, dens=hgt / wd3, sim=ph / wd3, sim_2se=2 * np.sqrt(ph * (1 - ph) / len(stp)) / wd3, xmax=xs3, n=len(stp),
+                                        p_pred=float(wt[x < 0].sum()), p_sim=float(np.mean(stp < 0))),
+                              acc=dict(t=qmore["acc_t"], gap=gap.mean(0), gap_se=gap.std(0) / np.sqrt(nz), J=Q["aJ"].mean(0), N=Q["aN"].mean(0))))
+    # ---- fr_theory_figure: Factorization Regret and synergy through time, the population (Proposition 3)
+    nzs = len(syn["FR"]); D["syn"] = dict(t=syn["t"], EDelta=float(syn["Delta"].mean()), n_sets=nzs, n_ep=syn["n_ep"],
+                                         **{k: syn[k].mean(0) for k in ("FR", "Syn", "Lam")}, **{k + "_se": syn[k].std(0) / np.sqrt(nzs) for k in ("FR", "Syn", "Lam")})
     # ---- Figure 1 h: spread of FR_t across episodes (Proposition 2(c); theory: sqrt(t^2 Var(Delta) + t E[v]), Var(Delta) over the joint
     #      realizations of the simulated episodes themselves (tables alone; with the moments of the pool's OTHER 2,000 sets the curves
     #      sat 2.5% above the simulation at lambda = 2, 3, a sampling difference between the two sets of tables), E[v] (a ~1% term)
@@ -994,7 +1130,11 @@ def load_all(cfg, store, fresh=False, need_sims=True, rederive=False):
     sig_t = (MON_VERSION, sig_n, tuple(cfg["TH_TS"]), cfg["MON_TUPLES"], tuple(cfg["MON_NS"]), cfg["N_TH_GRID"], "stratified")
     sig_pop = (POP_VERSION, fp, cfg["POP_NZ"], cfg["POP_EP"], cfg["POP_T0"], max(cfg["POP_TS"]), tuple(cfg["MON_NS"]), cfg["POP_GROUPS"], cfg["LAM_MAIN"])
     sig_popt = (POP_VERSION, sig_pop, tuple(cfg["POP_TS"]), cfg["MON_TUPLES"], cfg["N_TH_GRID"], "stratified")
-    sig_d = (DERIVED_VERSION, sig_p, sig_s, sig_b, sig_m, sig_o, sig_n, sig_t, sig_pop, sig_popt, cfg["LAM_MAIN"], tuple(cfg["SLOPE_WINDOW"]), cfg["T_EARLY"],
+    sig_sl = (POP_VERSION, fp, cfg["POP_NZ"], cfg["POP_EP"], cfg["POP_T0"], tuple(cfg["LAMS_FULL"]), cfg["LAM_MAIN"], "steps_lam 2")
+    sig_q3 = ("thirds_more 1", fp, str(cfg["FRAC_BINS"]), cfg["NZ_BAND"], cfg["BAND_MAX_DRAWS"], cfg["LAM_MAIN"], cfg["T"], cfg["N_EP"], cfg["POP_T0"], cfg["POP_EP"],
+              cfg["Q3_ACC_EP"], cfg["ACC_TMAX"], cfg["ACC_PER_DECADE"])
+    sig_sy = ("synergy 1", fp, cfg["POP_NZ"], cfg["SYN_EP"], cfg["SYN_TMAX"], cfg["SYN_PER_DECADE"], cfg["LAM_MAIN"])
+    sig_d = (DERIVED_VERSION, sig_p, sig_s, sig_b, sig_m, sig_o, sig_n, sig_t, sig_pop, sig_popt, sig_sl, sig_q3, sig_sy, cfg["LAM_MAIN"], tuple(cfg["SLOPE_WINDOW"]), cfg["T_EARLY"],
              cfg["PAPER_HORIZON"], cfg["ALPHA"], tuple(cfg["G_TIMES"]), tuple(cfg["G_NS"]), cfg["G_GROUPS"], tuple(cfg["MON_NS"]), cfg["MON_GROUPS"])
     path_d = store.path("derived")
     if os.path.exists(path_d) and not fresh and not rederive:        # the usual case while polishing: nothing heavy is loaded
@@ -1009,7 +1149,10 @@ def load_all(cfg, store, fresh=False, need_sims=True, rederive=False):
     mth = store.get("thirds_theory", sig_t, lambda: build_third_theory(cfg, mon), fresh)
     pop = store.get("population", sig_pop, lambda: build_population(cfg), fresh)
     pth = store.get("population_theory", sig_popt, lambda: build_population_theory(cfg, pop), fresh)
-    data = store.get("derived", sig_d, lambda: dict(summary=pools["summary"], D=derive(pools, sims, cfg, bands, small, opt, mon, mth, pop, pth)), fresh=True)
+    sl = store.get("steps_lam", sig_sl, lambda: build_steps_lam(cfg), fresh)
+    qmore = store.get("thirds_more", sig_q3, lambda: build_thirds_more(cfg), fresh)
+    syn = store.get("synergy", sig_sy, lambda: build_synergy(cfg), fresh)
+    data = store.get("derived", sig_d, lambda: dict(summary=pools["summary"], D=derive(pools, sims, cfg, bands, small, opt, mon, mth, pop, pth, sl, qmore, syn)), fresh=True)
     return row1, data["summary"], data["D"]
 
 

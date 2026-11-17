@@ -101,6 +101,31 @@ class CognitiveGridworld(Env_model_manager):
         # training episodes only (2026-11): None | "low" | "high" | "half" -- joint realizations drawn from the cells where
         # the Naive observer converges to the true goal value ("low" FR), where it does not ("high"), or a fixed random half
         self.fr_select = init.get('fr_select', None)
+        # offline imagination (2026-11-13; model_backward.dream_sample / dream_backward): on training iterations (modes RL /
+        # oracle) the Classifier also learns, with oracle_loss's cross-entropy, from a batch its own Generator dreams on the
+        # same environments; dream_weight scales that loss (0 = off: the code path never runs), dream_start = training
+        # iterations without it, dream_mask_test = leave held-out (test-state) variables out of the dream loss (None = in
+        # mode RL only, where RL feedback never trains them; oracle_loss supervises them), dream_shuffle = targets taken
+        # from another dream episode (no-information control), dream_seed = seed of the dream's private torch RNG stream
+        self.dream_weight = init.get('dream_weight', 0.0)
+        self.dream_start = init.get('dream_start', 0)
+        self.dream_mask_test = init.get('dream_mask_test', None)
+        self.dream_shuffle = init.get('dream_shuffle', False)
+        self.dream_seed = init.get('dream_seed', 0)
+        # teaching a fresh Classifier from a frozen trained net (2026-11-13; model_architecture.teach_setup, model_backward.
+        # frozen_backward; modes RL / oracle): freeze_generator = the embeddings and the Generator get no updates (out of
+        # every optimizer, requires_grad off; only the Classifier steps), classifier_reinit = None, or the seed of fresh
+        # Classifier weights drawn after load_env (needs freeze_generator), dream_only = the Classifier's only loss is the
+        # dream loss (needs dream_weight > 0), oracle_teach = its loss is oracle_loss on the real batch, test-state
+        # variables masked by dream_mask_test's rule. All off: the code path never runs
+        self.classifier_reinit = init.get('classifier_reinit', None)
+        self.freeze_generator = init.get('freeze_generator', False)
+        self.dream_only = init.get('dream_only', False)
+        self.oracle_teach = init.get('oracle_teach', False)
+        # speed (2026-11-13, opt-in; results bitwise identical): training iterations keep the network's outputs and losses on
+        # the GPU and compute their numpy copies only when read; the training slots of the logs are written once per block
+        # (Env_model_manager.forward_backward_deferred, Env_model_data_manager.flush_train_log)
+        self.defer_train_outputs = init.get('defer_train_outputs', False)
         self.custom_log = {}
 
         self.trigger_simulation()

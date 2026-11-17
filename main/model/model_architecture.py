@@ -18,6 +18,25 @@ class Model_architecture(Model_controller):
     def init_env_vars(self, kwargs):
         self.__dict__.update(kwargs)
         self.gen_zflow = kwargs.get('gen_zflow', kwargs.get('mode') == 'oracle')
+        if getattr(self, "dream_weight", 0.0) > 0:
+            assert self.mode in ("RL", "oracle") and self.learn_embeddings and not getattr(self, "micro_batch", None), \
+                "dream needs a Generator and the RNN Classifier (mode RL or oracle, learn_embeddings, no micro_batch)"
+        if getattr(self, "freeze_generator", False) or getattr(self, "classifier_reinit", None) is not None or \
+                getattr(self, "dream_only", False) or getattr(self, "oracle_teach", False):
+            assert self.mode in ("RL", "oracle") and self.learn_embeddings and not getattr(self, "micro_batch", None), \
+                "teaching needs a Generator and the RNN Classifier (mode RL or oracle, learn_embeddings, no micro_batch)"
+            assert getattr(self, "freeze_generator", False), "classifier_reinit / dream_only / oracle_teach need freeze_generator"
+            assert not (getattr(self, "dream_only", False) and getattr(self, "oracle_teach", False)), "one teacher at a time"
+            assert not getattr(self, "dream_only", False) or getattr(self, "dream_weight", 0.0) > 0, "dream_only needs dream_weight > 0"
+        if getattr(self, "z_raw", False):
+            assert self.mode in ("RL", "oracle") and self.learn_embeddings and not getattr(self, "readin_shared", False) \
+                and not getattr(self, "reservoir_dedup", False), \
+                "z_raw needs the RNN Classifier's default read-in and learned embeddings (mode RL or oracle)"
+        if getattr(self, "z_full", False):
+            assert getattr(self, "z_raw", False) and self.readin_depth == 1 and self.mode != "FF", \
+                "z_full (no downscale, no norm loss) extends z_raw and needs the one-layer RNN read-in"
+        if getattr(self, "z_attn", False):
+            assert getattr(self, "z_full", False), "z_attn (a self-attention layer over the embeddings) extends z_full"
         self.ctx_range, self.batch_range, self.step_range, self.roll_V_range, self.realization_range, self.roll_realization_range, self.obs_range, self.all_K, self.all_Q =\
             tnp([self.ctx_range, self.batch_range, self.step_range, self.roll_V_range, self.realization_range, self.roll_realization_range, self.obs_range, self.all_K, self.all_Q], 'torch', self.device)
         (self.realization_range,self.ctx_range,self.batch_range,self.step_range,self.obs_range) = (x.long() for x in (self.realization_range,self.ctx_range,self.batch_range,self.step_range,self.obs_range))
@@ -39,7 +58,7 @@ class Model_architecture(Model_controller):
         if self.mode == "lazyrich":
             self.lazyrich_classifier()
             return
-        inp_dims = (self.Z_num + 1) * self.obs_num
+        inp_dims = (self.model_Z_num() + 1) * self.obs_num
         out_dims = self.R_to_the_ctx if self.output_joint else self.realization_num * self.ctx_num
         if self.mode == "FF" and getattr(self, "ff_time_inject", False):
             from main.model.time_ff import TimeInjectedFF
@@ -47,6 +66,10 @@ class Model_architecture(Model_controller):
                                                     self.ff_regenerate, self.device, shared = getattr(self, "ff_shared_readin", False),
                                                     first_only = getattr(self, "ff_inject_first_only", False),
                                                     layer_gains = getattr(self, "ff_layer_gains", False))
+        elif getattr(self, "readin_shared", False):       # one function for every channel's (bit, Z): main/model/shared_readin.py
+            from main.model.shared_readin import SharedChannelReadin
+            self.classifier_readin = SharedChannelReadin(self.obs_num, self.Z_num, self.hid_dim,
+                                                         getattr(self, "readin_channels", None))
         else:
             self.classifier_readin = self.mlp_stack(inp_dims, self.hid_dim, self.readin_depth)   
         self.classifier_readout = self.mlp_stack(self.hid_dim, out_dims, self.readout_depth)
@@ -64,6 +87,18 @@ class Model_architecture(Model_controller):
                     self.LSTM.half()        # frozen, so no fp32 master is needed; autocast makes this same copy per call
 
         self.classifier_optim = optim.Adam([{'params': params,'lr': self.classifier_LR}])
+
+    def model_Z_num(self):
+        """Features per channel of the environment code both modules read (active_Z's last axis). Default: Z_num, the K.Q
+        dot products of the ordered pairs of active variables (the per-channel form the environment builds its likelihood
+        from). z_raw (2026-11-14, John: "remove the bottleneck from both the classifier and the generator"): the active
+        variables' down-scaled K and Q vectors themselves, concatenated per channel (2 * ctx_num * KQ_dim features), so each
+        module has to learn the interaction itself. z_full (2026-11-14, John: "remove the downscale and the normalization
+        loss in this 'no world structure' setting"): the full embeddings instead (no K / Q down-scaling to the environment's
+        KQ_dim, no norm loss): 2 * ctx_num * hid_dim features."""
+        if getattr(self, "z_raw", False):
+            return 2 * self.ctx_num * (self.hid_dim if getattr(self, "z_full", False) else self.KQ_dim)
+        return self.Z_num
 
     def oracle_readin(self, W, B, norm_dims):
         with torch.no_grad():
@@ -83,12 +118,49 @@ class Model_architecture(Model_controller):
     def trainable_params(self):
         return sum(p.numel() for g in self.classifier_optim.param_groups for p in g['params'] if p.requires_grad)
 
+    def teach_setup(self):
+        """Teaching a Classifier from a frozen trained net (2026-11-13), called by Env_model_manager.run_model after
+        load_env (whose load() replaces all_K / all_Q with new Parameters, so it must come after it). classifier_reinit: the
+        Classifier's modules (read-in, LSTM, STM / LTM, read-out) are rebuilt by default_classifier() from a private torch
+        RNG stream seeded with classifier_reinit (fork_rng: the global stream, hence every episode draw, is that of the same
+        run without the re-init). freeze_generator: every parameter outside the Classifier's own group (all_K, all_Q, both
+        downscales, the Generator, its stream norms) gets requires_grad off, and the Classifier's optimizer is rebuilt on its
+        own parameters only (fresh Adam at classifier_LR; load() restores no optimizer state either). frozen_backward never
+        touches generator_optim / combined_optim."""
+        if self.classifier_reinit is not None:
+            cuda = self.device.type == "cuda"
+            with torch.random.fork_rng(devices = [self.device] if cuda else []):
+                torch.manual_seed(int(self.classifier_reinit))
+                if cuda:
+                    with torch.cuda.device(self.device):
+                        torch.cuda.manual_seed(int(self.classifier_reinit))
+                self.default_classifier()                  # new modules (CPU) and a new classifier_optim on them
+            super().to(self.device)                        # in place: the optimizer's Parameters stay the same objects
+        if self.freeze_generator:
+            own = list(self.classifier_optim.param_groups[0]['params'])      # group 0 = the Classifier (default_classifier)
+            ids = {id(p) for p in own}
+            for p in self.parameters():
+                if id(p) not in ids:
+                    p.requires_grad_(False)
+            self.classifier_optim = optim.Adam([{'params': own, 'lr': self.classifier_LR}])
+
     def default_generator(self):
         
-        if self.learn_embeddings:
+        if self.learn_embeddings and getattr(self, "z_full", False):
+            embedding_params = [self.all_K, self.all_Q]                   # z_full: no down-scaling layers
+            if getattr(self, "z_attn", False):
+                # z_attn (2026-11-14, John: "make the first layer from embeddings a transformer attention layer"): one
+                # pre-LayerNorm multi-head self-attention layer with a residual connection, over the C active variables'
+                # tokens [K_v(o); Q_v(o)] (2 * hid_dim), applied to every channel with the same weights. It is part of the
+                # shared environment code, so it is trained by whichever loss trains the embeddings (embedding_grad).
+                d = 2 * self.hid_dim
+                self.z_attn_norm = nn.LayerNorm(d)
+                self.z_attn = nn.MultiheadAttention(d, getattr(self, "z_attn_heads", 16), batch_first = True)
+                embedding_params += list(self.z_attn_norm.parameters()) + list(self.z_attn.parameters())
+        elif self.learn_embeddings:
             self.K_downscale = nn.Linear(self.hid_dim, self.KQ_dim)
             self.Q_downscale = nn.Linear(self.hid_dim, self.KQ_dim)
-            
+
             if self.gen_zflow:
                 for L in (self.K_downscale, self.Q_downscale):
                     nn.init.orthogonal_(L.weight, gain=(self.hid_dim / self.KQ_dim)**0.5)
@@ -97,16 +169,24 @@ class Model_architecture(Model_controller):
             embedding_params = ([self.all_K, self.all_Q] +
                                 list(self.K_downscale.parameters()) +
                                 list(self.Q_downscale.parameters()))
-            self.Z_to_pobs = nn.Linear(self.Z_num , self.hid_dim)            
+        if self.learn_embeddings:
+            self.Z_to_pobs = nn.Linear(self.model_Z_num() , self.hid_dim)
             self.sample_to_emb = nn.Embedding(self.realization_num, self.hid_dim)
             self.sample_to_hid = nn.Linear(self.hid_dim * self.ctx_num, self.hid_dim)
             self.gen_hid2hid = nn.Linear(self.hid_dim, self.hid_dim)
             self.conf_to_hid = nn.Linear(self.ctx_num, self.hid_dim)
             self.hid_to_pobs = nn.Linear(self.hid_dim, 1)
 
-            if self.gen_zflow:
+            if self.gen_zflow and getattr(self, "z_raw", False):
+                # z_raw: no structured start for the Z read-in (the directions below assume one code per K.Q pair term);
+                # the same layer norms, Z_to_pobs keeps its default init
+                self.gen_stream_norm = nn.ModuleList([nn.LayerNorm(d) for d in [self.hid_dim] * 3])
+            elif self.gen_zflow:
                 Wo = self.hid_to_pobs.weight[0].double()
-                B = torch.stack([Wo, self.gen_hid2hid.weight.double().T @ Wo], dim = 1)
+                dirs = (Wo, self.gen_hid2hid.weight.double().T @ Wo)
+                # C > 2 (2026-11-12): the likelihood's logit is a sum of pairwise terms of the C = 2 form, so each pair's two
+                # codes get the two directions (Z_num = 2 at C = 2: unchanged; 1 at C = 1)
+                B = torch.stack([dirs[j % 2] for j in range(self.Z_num)], dim = 1)
                 self.gen_stream_norm = self.oracle_readin(self.Z_to_pobs.weight, B, [self.hid_dim] * 3)
 
             generator_params = ([] if self.embedding_grad == "classifier" else embedding_params)

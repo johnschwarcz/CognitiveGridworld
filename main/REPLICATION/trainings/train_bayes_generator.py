@@ -51,11 +51,27 @@ stream is reseeded, so the resumed part sees new episodes.
     python train_bayes_generator.py --task 3 [--smoke]           # TASKS index
     python train_bayes_generator.py --label naive --S 500 --d 30 --seed 0 [--episodes 6000]
     python train_bayes_generator.py --task 3 --resume-to 20000
+    python train_bayes_generator.py --task 3 --resume-to 30000 --resume-from _e20k     # 11-15: continue the 20k run
     python train_bayes_generator.py --label chance --S 500 --lr 1e-4 --episodes 15000 --test-every 250
     python train_bayes_generator.py --label joint --S 125 --seed 1 --arch old --episodes 8000
 --arch (11-10 12:30, John: the Generator now transfers at |S| 100-125, the paper's Fig 12 needed ~500 -- task change or the
 Generator fix?): old = the paper's Generator (gen_zflow False: no stream LayerNorms, no skip, default downscale init), new =
 the fix, named _old / _new; bayes_gen_arch.sbatch runs joint answers at |S| 100 / 125 / 250 / 500 x seeds 0-2 x both.
+--zin (11-11 21:50, John: a real difference "should not depend on the specific architecture"): the Generator's Z input
+layer as built (shared: one Linear for every channel) or one Linear per channel (fresh_generator's per_channel_linear;
+the rest of the Generator stays shared): per_channel = every channel's layer starts as a copy of the shared layer's Z-flow
+start (oracle_readin aligns it with the read-out path), per_channel_random = independent default starts (no alignment),
+shared_random = the shared layer with a default start (no alignment; 11-11 22:35: separates a common start from the
+alignment); named _shared / _per_channel / _per_channel_random / _shared_random. These runs also save each novel test batch's learned and true codes
+(<name>_codes.npz, overwritten per test) for claude_plots/fig13_controls.py.
+--learner (11-11 23:00, John: "run the classifier with the shared channel thing"): the same embeddings, start, batch, lr and
+reg_loss, but learned by CLASSIFICATION instead of generation: a reader from trainings/transfer_reader.py (reader_shared =
+one evidence function applied to every channel and summed, the form of exact Bayes; reader_unshared = one per channel;
+reader_lstm = an LSTM over the 30 steps reading every channel's code and bits, like the RCC's Classifier) is trained with
+the embeddings on the true joint value (cross-entropy + reg_loss; label truth only). Tests log the reader's goal accuracy
+(<set>_reader) instead of the plug-in; the codes are saved as for --zin. Named _<learner>.
+--reuse k (11-11 23:00, John: "could the generator learn from the same batch of data multiple times while the classifier
+couldn't?"): k optimizer steps on every fresh batch (episodes = fresh batches); named _reuse<k>.
 """
 import os, sys, json, time, argparse
 import numpy as np
@@ -79,6 +95,15 @@ TASKS += [(lab, S, d, 0) for S in (25, 100, 250, 1000) for d in (10, 90) for lab
 TASKS += [(lab, S, d, 0) for S in (50, 75, 125, 150, 200, 500) for d in (10, 90) for lab in AGENTS]
 # 11-10 03:45: 120-122 = the error controls at |S| 500, d_E 30 (compare joint / naive / truth there: tasks 10, 11, 37).
 TASKS += [(lab, 500, 30, 0) for lab in ("jointU", "jn", "nj")]
+# 11-12 12:25 (John: "add an embedding dim = 20" to the generator-on-answers grid): 123-146 = d_E 20 at every |S| of the
+# grid for the three drawn rows (8,000 episodes, as tasks from 20 on).
+TASKS += [(lab, S, 20, 0) for S in (25, 50, 75, 100, 125, 250, 500, 1000) for lab in ("truth1", "joint", "naive")]
+# 11-13 02:50 (John: "can you explain how the joint bayes did worse than naive in a slot?"): at d_E 20 single runs fail to
+# escape their start within 8,000 episodes (joint |S| 1000, naive |S| 250: training accuracy creeps .10 -> .2), so the
+# grid's d_E 20 row gets a second seed where it transfers or should: 147-154 = (joint, naive) x |S| 125 / 250 / 500 / 1000,
+# seed 1 (the two stuck seed-0 runs also continue to 20,000 episodes: --task 145 / 140 --resume-to 20000).
+TASKS += [(lab, S, 20, 1) for S in (125, 250, 500, 1000) for lab in ("joint", "naive")]
+assert len(TASKS) == 155 and TASKS[145] == ("joint", 1000, 20, 0) and TASKS[140] == ("naive", 250, 20, 0)
 EPISODES_FROM_20 = 8000
 EPISODES, TEST_EVERY, BATCH, LR = 6000, 500, 10000, 1e-3
 TEST_AT = (0, 25, 50, 100, 150, 250, 350, 500, 750, 1000)
@@ -97,6 +122,12 @@ def main():
     ap.add_argument("--smoke", action="store_true", help="batch 256, 6 episodes, test every 3, output under smoke/")
     ap.add_argument("--lr", type=float, default=LR)
     ap.add_argument("--resume-to", type=int, default=None, help="continue the finished run to this many episodes")
+    ap.add_argument("--resume-from", default="", help="with --resume-to: continue the run saved as <name><tag> (e.g. _e20k)")
+    ap.add_argument("--learner", choices=("generator", "reader_shared", "reader_unshared", "reader_lstm"),
+                    default="generator", help="learn the embeddings by generation (the RCC's Generator) or classification")
+    ap.add_argument("--reuse", type=int, default=1, help="optimizer steps per fresh batch")
+    ap.add_argument("--zin", choices=("shared", "per_channel", "per_channel_random", "shared_random"), default=None,
+                    help="the Generator's Z input layer: one for every channel (as built) or one per channel")
     ap.add_argument("--arch", choices=("new", "old"), default=None,
                     help="Generator architecture, named in the run: new = the Z-flow fix (the default), old = the paper's")
     a = ap.parse_args()
@@ -110,15 +141,20 @@ def main():
             a.episodes = EPISODES_FROM_20
     B, episodes, test_every = (256, 6, 3) if a.smoke else (a.batch, a.episodes, a.test_every)
     name = (f"{a.label}_S{a.S}_d{a.d}_s{a.seed}" + ("" if a.lr == LR else f"_lr{-int(round(np.log10(a.lr)))}") +
-            (f"_{a.arch}" if a.arch else ""))
+            (f"_{a.arch}" if a.arch else "") + (f"_{a.zin}" if a.zin else "") +
+            (f"_{a.learner}" if a.learner != "generator" else "") + (f"_reuse{a.reuse}" if a.reuse > 1 else ""))
     if a.arch == "old":
         assert not a.label.endswith("1"), "predict() hard-codes the new Generator; single-variable labels need it"
     sub = "smoke" if a.smoke else "bayes_gen"
     os.makedirs(os.path.join(ROOT, "runs", sub), exist_ok=True)
     start, old = 0, []
     if a.resume_to:
-        old = [json.loads(l) for l in open(os.path.join(ROOT, "runs", sub, name + ".jsonl")) if l.strip()]
-        start, src, episodes = old[-1]["ep"], name, a.resume_to
+        # 11-15 (John: the band figure's Generators to 30,000 episodes, the RCC's length): --resume-from _e20k continues the
+        # 20k run (its log and net) instead of the original
+        src = name + a.resume_from
+        old = [json.loads(l) for l in open(os.path.join(ROOT, "runs", sub, src + ".jsonl")) if l.strip()]
+        start, episodes = old[-1]["ep"], a.resume_to
+        assert start < episodes, f"{src} is already at {start} episodes"
         name = f"{name}_e{a.resume_to // 1000}k"
     log_path = os.path.join(ROOT, "runs", sub, name + ".jsonl")
     if os.path.exists(log_path):
@@ -138,7 +174,8 @@ def main():
                              show_plots=False, cuda=0, load_env=f"/{sub}/{src}" if start else None)
     m, dev, R, C = env.model, env.device, env.realization_num, env.ctx_num
     if start:                                            # same environments and held-out variables, new episodes
-        np.random.seed(a.seed + 1000); torch.manual_seed(a.seed + 1000)
+        k = 2000 if a.resume_from else 1000              # a second resume must not replay the first one's episode stream
+        np.random.seed(a.seed + k); torch.manual_seed(a.seed + k)
         # load() replaces all_K / all_Q with new Parameters after the optimizer took the old ones (which load_state_dict
         # already filled with the same saved values): give the model back the optimizer's, or the embeddings never train
         held = [p for g in m.generator_optim.param_groups for p in g["params"]]
@@ -146,6 +183,35 @@ def main():
             same = [p for p in held if p.shape == getattr(m, k).shape and torch.equal(p.data, getattr(m, k).data)]
             assert len(same) == 1, k
             setattr(m, k, same[0])
+    if a.zin == "shared_random":                         # the shared layer without the Z-flow alignment (in place, so
+        m.Z_to_pobs.reset_parameters()                   # the optimizer keeps its tensors)
+    if a.zin in ("per_channel", "per_channel_random"):   # one Z input layer per channel, in the optimizer's place
+        assert not start, "a resumed run would load the shared layer"
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        from fresh_generator import per_channel_linear
+        old_ids = {id(p) for p in m.Z_to_pobs.parameters()}
+        pcl = per_channel_linear(env.obs_num, m.Z_to_pobs.in_features, m.Z_to_pobs.out_features).to(dev)
+        if a.zin == "per_channel":                       # every channel starts as the shared layer, then they train apart
+            with torch.no_grad():
+                pcl.W.copy_(m.Z_to_pobs.weight.T[None].expand_as(pcl.W))
+                pcl.b.copy_(m.Z_to_pobs.bias[None].expand_as(pcl.b))
+        m.Z_to_pobs = pcl
+        assert len(m.generator_optim.param_groups) == 1
+        group = m.generator_optim.param_groups[0]
+        kept = [p for p in group["params"] if id(p) not in old_ids]
+        assert len(kept) == len(group["params"]) - 2
+        m.generator_optim = torch.optim.Adam([{"params": kept + list(m.Z_to_pobs.parameters()), "lr": group["lr"]}])
+    reader = None
+    if a.learner != "generator":                         # classification: a reader trained with the embeddings
+        assert a.label == "truth" and not start and not a.zin
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        import transfer_reader as trd
+        rng_state = torch.get_rng_state()
+        torch.manual_seed(a.seed + 100)
+        reader = trd.readers()[a.learner[len("reader_"):]]().to(dev)
+        torch.set_rng_state(rng_state)
+        emb = [m.all_K, m.all_Q] + list(m.K_downscale.parameters()) + list(m.Q_downscale.parameters())
+        reader_optim = torch.optim.Adam([{"params": emb + list(reader.parameters()), "lr": a.lr}])
     labels_rng = torch.Generator(device=dev).manual_seed(a.seed + 7 + (1000 if start else 0))
     BR = torch.arange(B, device=dev)
     amp = dict(device_type="cuda", enabled=env.device_type != "cpu")
@@ -289,6 +355,24 @@ def main():
             rec[f"{key}_{k}"] = float(v.mean())
             rec[f"{key}_{k}_low"], rec[f"{key}_{k}_high"] = float(v[low].mean()), float(v[~low].mean())
 
+    def test_reader(test_set, rec, key):
+        """the reader's goal accuracy (marginal of its joint posterior), with the observers' on the same episodes"""
+        jb, nb, low = episode(test_set)
+        g = m.goal_ind.long()
+        o = torch.as_tensor(env.obs_flat, device=dev, dtype=torch.float32)
+        with torch.no_grad():
+            m.MC_to_interactions()
+            post = torch.softmax(reader(m.active_Z.float(), o), -1).reshape(B, R, R)
+        marg = torch.where(g[:, None] == 0, post.sum(2), post.sum(1))
+        res = dict(reader=(marg.argmax(-1) == m.goal_value).float(),
+                   joint=(jb[BR, g].argmax(-1) == m.goal_value).float(), naive=(nb[BR, g].argmax(-1) == m.goal_value).float())
+        rec[key + "_frac_low"] = float(low.float().mean())
+        for k, v in res.items():
+            rec[f"{key}_{k}"] = float(v.mean())
+            rec[f"{key}_{k}_low"], rec[f"{key}_{k}_high"] = float(v[low].mean()), float(v[~low].mean())
+
+    run_test = test if reader is None else test_reader
+    acc_key = "plugin" if reader is None else "reader"
     t0, lab_ok, ctx_ok, losses = time.time(), [], [], []
     test_at = set(range(0, episodes + 1, test_every)) | (set() if a.smoke else {t for t in TEST_AT if t <= episodes})
     for e in range(start, episodes + 1):
@@ -300,27 +384,42 @@ def main():
                            label_acc_high=float(acc_[~low_].mean()), gen_loss=float(np.mean(losses)),
                            label_ctx_acc=float(np.mean(ctx_ok)))
             lab_ok, losses, ctx_ok = [], [], []
-            test(True, rec, "novel")
-            test(False, rec, "train")
+            run_test(True, rec, "novel")
+            if a.zin or reader is not None:              # this novel batch's codes, for the frame analysis
+                np.savez(log_path[:-6] + "_codes.npz", z=m.active_Z.detach().float().cpu().numpy(),
+                         ztrue=np.asarray(env.joint_Z), ep=e)
+            run_test(False, rec, "train")
             with open(log_path, "a") as fh:
                 fh.write(json.dumps(rec) + "\n")
-            print(f"ep {e:5d} {rec['t']:7.0f}s | novel plugin {rec['novel_plugin']:.3f} (low {rec['novel_plugin_low']:.3f} "
-                  f"high {rec['novel_plugin_high']:.3f}) kl_env {rec['novel_kl_env']:.4f} | train plugin "
-                  f"{rec['train_plugin']:.3f} | joint {rec['novel_joint']:.3f} naive {rec['novel_naive']:.3f}", flush=True)
+            print(f"ep {e:5d} {rec['t']:7.0f}s | novel {acc_key} {rec[f'novel_{acc_key}']:.3f} (low "
+                  f"{rec[f'novel_{acc_key}_low']:.3f} high {rec[f'novel_{acc_key}_high']:.3f}) kl_env "
+                  f"{rec.get('novel_kl_env', float('nan')):.4f} | train {acc_key} {rec[f'train_{acc_key}']:.3f} | joint "
+                  f"{rec['novel_joint']:.3f} naive {rec['novel_naive']:.3f}", flush=True)
             if e == episodes:
                 break
         jb, nb, low = episode(False)
         sample, conf, acc = answers(jb, nb)
-        with torch.autocast(**amp):
-            m.MC_to_interactions()
-            m.ACC = acc[:, None]
-            if single:
-                predict(*goal_only(sample, conf))
-            else:
-                m.get_prediction(sample, conf)
-            m.SSL_loss()
-            m.generator_loss = m.generator_loss + m.reg_loss()
-        m.update(m.generator_loss, m.generator_optim)
+        for _ in range(a.reuse):                         # the same batch, a.reuse optimizer steps
+            if reader is not None:
+                o = torch.as_tensor(env.obs_flat, device=dev, dtype=torch.float32)
+                m.MC_to_interactions()
+                loss = (torch.nn.functional.cross_entropy(reader(m.active_Z.float(), o), sample[:, 0] * R + sample[:, 1]) +
+                        m.reg_loss())
+                reader_optim.zero_grad()
+                loss.backward()
+                reader_optim.step()
+                m.generator_loss = loss.detach()
+                continue
+            with torch.autocast(**amp):
+                m.MC_to_interactions()
+                m.ACC = acc[:, None]
+                if single:
+                    predict(*goal_only(sample, conf))
+                else:
+                    m.get_prediction(sample, conf)
+                m.SSL_loss()
+                m.generator_loss = m.generator_loss + m.reg_loss()
+            m.update(m.generator_loss, m.generator_optim)
         lab_ok.append((acc.detach(), low))
         losses.append(float(m.generator_loss))
         ctx_ok.append(float((sample == m.ctx_vals.long()).float().sum(1).sub(acc).mean()) / (C - 1))

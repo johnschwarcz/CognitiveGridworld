@@ -98,9 +98,10 @@ def figure(step=cmp.STEP, path=None):
     for at, ae, (title, echoes, trained) in zip((t2, t3), (e2, e3), pj.PANELS):
         for run, (name, width, col) in zip(echoes, ((r"Echo ($N{=}200$)", 200, pj.C_E200), (r"Echo ($N{=}500$)", 500, pj.C_E500),
                                                     (r"Echo ($N{=}1k$)", 1000, c_echo), (r"Echo ($N{=}2k$)", 2000, c_2k),
-                                                    (r"Echo ($N{=}10k$)", 10000, c_10k))):
+                                                    (r"Echo ($N{=}3k$)", 3000, pj.C_E3K), (r"Echo ($N{=}10k$)", 10000, c_10k)),
+                                           strict=True):                          # pj.PANELS' runs, in its order
             draw(ae, run, name, width, col)
-        for run, spec in zip(trained, TRAINED):
+        for run, spec in zip(trained, TRAINED, strict=True):
             draw(at, run, *spec)
         at.set_title(title, fontsize=15)
     pm._style(t1, J, b, step, label=False)                                        # the trained curves start on the bound at

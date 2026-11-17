@@ -29,6 +29,8 @@ class Env_model_data_manager(Env_control_manager):
             if self.training and (self.mode == "SANITY") and (self.skip_training_analyses is False):
                 self.perform_sanity_training_analyses()
             self.test_e += 1
+        elif getattr(self, "defer_train_outputs", False):
+            self._train_log_due = self.test_e           # written by flush_train_log, from the block's last training iteration
         else:
             # Overwrites until test
             self.classifier_loss_log[self.test_e] = self.classifier_loss
@@ -39,6 +41,20 @@ class Env_model_data_manager(Env_control_manager):
             self.train_TPs[self.test_e, :] = self.model_TP.mean(0)
             self.train_mses[self.test_e, :] = self.model_mse.mean(0)
         
+    def flush_train_log(self):
+        """defer_train_outputs: write the training slots log_model skipped, from the latest training iteration's outputs (the
+        values the overwrites would have left). Called before each test episode, after the episode loop and by save()."""
+        e = self.__dict__.pop("_train_log_due", None)
+        if e is None:
+            return
+        self.classifier_loss_log[e] = self.classifier_loss
+        self.generator_loss_log[e] = self.generator_loss
+        self.readout_grad_log[e] = self.readout_grad
+        self.readin_grad_log[e] = self.readin_grad
+        self.train_accs[e, :] = self.model_acc.mean(0)
+        self.train_TPs[e, :] = self.model_TP.mean(0)
+        self.train_mses[e, :] = self.model_mse.mean(0)
+
     def perform_sanity_training_analyses(self):
             self.test_net_joint_DKL[self.test_e, :] = self.DKL(self.model_goal_belief, self.joint_goal_belief)
             self.test_net_naive_DKL[self.test_e, :] = self.DKL(self.model_goal_belief, self.naive_goal_belief)
@@ -64,6 +80,7 @@ class Env_model_data_manager(Env_control_manager):
 
 
     def save(self):
+        self.flush_train_log()
         save_path = self.DATA_path + self.save_env + "_net.pth"
         os.makedirs(os.path.dirname(save_path), exist_ok=True)
         save_dict = {                         
@@ -116,6 +133,7 @@ class Env_model_data_manager(Env_control_manager):
             self.gen_loss_through_training = self.skippable_load(load_dict, "gen_loss_through_training")
             self.pol_loss_through_training = self.skippable_load(load_dict, "pol_loss_through_training")
 
+            self.loaded = True      # checked by run_model for freeze_generator (the except branch below does not set it)
             print("ENV LOADED")
         except:
             print("LOADING FAILED")

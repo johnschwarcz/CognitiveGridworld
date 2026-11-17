@@ -37,7 +37,8 @@ class Bayes_inference(Plotters):
     def gpu_belief(self, L, naive = False):
         """the belief at every step as a GPU tensor: forward_inference's gpu_inference path, before anything leaves the GPU"""
         B, T, R, C = self.batch_num, self.step_num, self.realization_num, self.ctx_num
-        Lt = torch.as_tensor(L, device = self.device)
+        gpu = getattr(self, "gpu_table", None)                                 # C >= 3: the table is already on the GPU
+        Lt = gpu[1] if gpu is not None and gpu[0] is L else torch.as_tensor(L, device = self.device)
         ot = torch.as_tensor(self.obs_flat, device = self.device).to(Lt.dtype)
         flat = Lt.reshape(B, self.obs_num, -1)
         cum = (torch.einsum('bto,bok->btk', ot, torch.log(flat)) + torch.einsum('bto,bok->btk', 1 - ot, torch.log1p(-flat))).cumsum(1)
@@ -69,11 +70,11 @@ class Bayes_inference(Plotters):
             marginalized[:,:,c,:] = self.avg_over_ctx(p_x__s, keep=c, override='sum')  
         return marginalized                                                    # Dims: batch, time, ctx, realizations        
 
-    def get_goal_performance(self, belief):
-
+    def get_goal_performance(self, belief, goal_ind = None, goal_value = None):
+        # goal_ind / goal_value: an earlier episode's (defer_train_outputs); default: this episode's
         R = self.realization_range[None, None, None,:]
-        I = self.goal_ind[:,None,None]
-        V = self.goal_value[:,None]
+        I = (self.goal_ind if goal_ind is None else goal_ind)[:,None,None]
+        V = (self.goal_value if goal_value is None else goal_value)[:,None]
         est = (belief * R).sum(-1)
 
         GB = np.take_along_axis(belief, I[:,None], 2).squeeze()

@@ -3,6 +3,38 @@ from main.utils import tnp; from .Env_Customization import Env_Customization
 
 class Env_helpers(Env_Customization):
 
+    # Lazily computed attributes (2026-11-13, speed). A training iteration of modes RL / oracle reads few of the values the
+    # episode produces (the full likelihood tables, the network's numpy outputs and losses); those are computed on their
+    # first read, by exactly the code that computed them eagerly before, so every reader gets the same values (bitwise).
+    def __getattr__(self, name):                       # only called for names missing from __dict__
+        lazy = self.__dict__.get("_lazy")
+        if lazy is not None and name in lazy:
+            lazy[name](self)
+            if name in self.__dict__:
+                return self.__dict__[name]
+        raise AttributeError(f"{type(self).__name__!r} object has no attribute {name!r}")
+
+    def set_lazy(self, names, compute):
+        """names leave __dict__; the first read of any of them runs compute(env) once, which returns {name: value} for all
+        of them. compute gets the env as its argument and must hold no reference to it (no closure over self), so a pending
+        value never keeps the env alive (no reference cycle). A name assigned in the meantime keeps its new value; a later
+        set_lazy of the same name replaces this one. An error inside compute is raised as RuntimeError (never as an
+        AttributeError, which getattr(env, name, default) / hasattr would take for a missing attribute) and leaves the names
+        pending."""
+        lazy = self.__dict__.setdefault("_lazy", {})
+        group = _LazyGroup(tuple(names), compute)
+        for n in group.names:
+            self.__dict__.pop(n, None)
+            lazy[n] = group
+
+    def drop_lazy(self, names):
+        """forget the pending values of names (their compute and what it holds, e.g. GPU tensors); the names stay unset until
+        assigned or set_lazy again"""
+        lazy = self.__dict__.get("_lazy")
+        if lazy:
+            for n in names:
+                lazy.pop(n, None)
+
     def for_each_ctx(self, function, L):
         # Move context self.c to end, apply function and move back.
         for self.c in self.ctx_range:
@@ -72,3 +104,30 @@ class Env_helpers(Env_Customization):
 
     def DKL_helper(self, x, y):
         return (x * np.log(x/y)).sum(-1)
+
+
+class _LazyGroup:
+    """one set_lazy call: names computed together by compute(env) (Env_helpers.set_lazy)"""
+    __slots__ = ("names", "compute", "busy")
+
+    def __init__(self, names, compute):
+        self.names, self.compute, self.busy = names, compute, False
+
+    def __call__(self, env):
+        d, lazy = env.__dict__, env.__dict__["_lazy"]
+        pending = [n for n in self.names if lazy.get(n) is self and n not in d]
+        if pending:
+            if self.busy:
+                raise RuntimeError(f"lazy attributes {pending} read while being computed")
+            self.busy = True
+            try:
+                values = self.compute(env)                 # first compute; the entries go only once it succeeded
+            except Exception as err:
+                raise RuntimeError(f"computing the lazy attributes {pending} failed: {err!r}") from err
+            finally:
+                self.busy = False
+            for n in pending:
+                d[n] = values[n]
+        for n in self.names:
+            if lazy.get(n) is self:
+                del lazy[n]

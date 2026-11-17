@@ -38,7 +38,8 @@ for name, f in (("quenched", fq), ("annealed", fa)):
     r = minimize_scalar(f, bounds=(0, 20), method="bounded"); print(f"  {name} Chernoff rate I = {-r.fun:.5f} at s = {r.x:.3f}")
 Iq = -minimize_scalar(fq, bounds=(0, 20), method="bounded").fun; Ia = -minimize_scalar(fa, bounds=(0, 20), method="bounded").fun
 x, w, qq = F.step_atoms(pool); mu, sd = F.step_moments(x, w); print(f"  mean step {mu:.4f}, s.d. {sd:.4f}, SNR {mu/sd:.4f}, SNR^2/2 = {(mu/sd)**2/2:.5f}")
-Ts = [1, 10, 100, 1000, 10**4, 10**5, 10**6, 10**7, 10**8]
+Ts = [1, 2, 3, 5, 10, 20, 30, 50, 100, 200, 300, 500, 1000, 2000, 3000, 5000, 10**4, 10**5, 10**6, 10**7, 10**8]   # 11-11 night: the T of the
+                                                                  # simulated markers of w (fr_theory_dipsim.py) too; the rest unchanged
 Ns = np.unique(np.round(np.logspace(np.log10(5), np.log10(8000), 70)).astype(int))
 t0 = time.time(); m, se = F.monotone_theory(pool, Ns, Ts, 1500, 9191, workers=int(os.environ.get("FR_WORKERS", 10)))
 print(f"theory computed in {time.time() - t0:.0f} s"); Pd = 1 - m

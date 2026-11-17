@@ -43,6 +43,10 @@ TASKS = ([(rho, 1., .1, 1000) for rho in (.9, 0., .5, 1.2)] + [(.9, a, .1, 1000)
          [(.9, 1., p, 1000) for p in (.01, 1.)] + [(.9, 1., .1, N) for N in (500, 2000)] + [("lstm", 1., 1., 1000)] +
          [(.9, 1., .1, N) for N in (4000, 8000, 1000)])
 TF32_TASKS = (11, 12, 13)
+# tasks 14-17 (appended 11-13, John: "spanning the same range as the channel readin for all panels"): the knobs' ends among
+# the channel-local settings (rho 1.49, alpha .033, density .0065 -> 1.5, .03, .006) and the best N 1,000 run by validation
+# (rho 1.2) again, which now also stores its read-out paths (the read-out-regularization panel)
+TASKS += [(1.5, 1., .1, 1000), (.9, .03, .1, 1000), (.9, 1., .006, 1000), (1.2, 1., .1, 1000)]
 
 
 def make_env(batch=1000):
@@ -263,6 +267,10 @@ def main():
         loss.backward()
         opt.step()
 
+    # the trained read-in / read-out (the reservoir is rebuilt from rho, alpha, density, N, seed): later read-out fits need no
+    # retraining (11-13)
+    torch.save(dict(params=[p.detach().cpu() for p in net.params], rho=a.rho, alpha=a.alpha, density=a.density, N=a.N,
+                    seed=a.seed, tf32=a.tf32), os.path.join(RUNS, name + "_net.pt"))
     # exact read-out refit on the trained network's summed states (soft targets: the Joint posterior at T)
     with torch.no_grad():
         S, post, fit_vals = {s: [] for s in ("fit", *tests)}, [], []
@@ -277,8 +285,17 @@ def main():
     exact = E.report_log(E.logistic_path(S["fit"], torch.cat(fit_vals).numpy(),
                                          {s: (S[s], d["vals"].cpu().numpy(), d["goal"].cpu().numpy()) for s, d in tests.items()},
                                          soft=torch.cat(post)))
+    # 11-13 (John: trained networks in the read-out-regularization panel too): the whole logistic path (LOG_LAMS) and a ridge
+    # path (LAMS x the mean eigenvalue) on the same summed states, as esn_convex.py stores them for the fixed reservoirs.
+    # Under "paths": no "val" key at its top level, so picking the best read-out by validation still sees final / exact_soft.
+    rid, vals_fit = E.Ridge(a.N), torch.cat(fit_vals)
+    for j in range(0, len(vals_fit), 20000):
+        rid.add(S["fit"][j:j + 20000], vals_fit[j:j + 20000])
+    ridge = E.report(rid.path({s: (S[s], d["vals"].cpu().numpy(), d["goal"].cpu().numpy()) for s, d in tests.items()}))
     out = dict(name=name, rho=a.rho, alpha=a.alpha, density=a.density, N=a.N, seed=a.seed, updates=a.updates, batch=a.batch, tf32=a.tf32,
                bayes=bayes, final={k: rec[k] for k in tests}, exact_soft={k: exact[k] for k in ("lam", "val", "test", "test_train")},
+               paths=dict(logistic_soft=exact["curves"], ridge=ridge["curves"],
+                          ridge_chosen={k: ridge[k] for k in ("lam_rel", "val", "test", "test_train")}),
                secs=round(time.time() - t0, 1))
     json.dump(out, open(os.path.join(RUNS, name + ".json"), "w"))
     print(f"=== {name} done: own read-out test {rec['test']:.3f}; exact soft read-out on its states test {exact['test']:.3f} "

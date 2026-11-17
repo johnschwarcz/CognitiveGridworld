@@ -59,12 +59,40 @@ x2.9, on its floor (the true marginal .47 -> 1.23); plug-in .30-.39 -> .32-.41 (
 Training environments: the same picture (joint x1.2, naive x7.6, truth1 x3.1 on its floor). |S| <= 100: no transfer
 (novel 1-3.4 nats at every FR; joint at |S| 100 .19).
 
+11-14 00:30 IST (John: "20 percentiles (with cbar instead of a list) instead of tenths" + "on the last panel ... shade the
+region where there is a potential architectural gain (to reach joint bayes)"): the lines figure uses NQL = 20 equal-count
+FR bins of the same pooled FR with a colour bar (the heat maps keep tenths). Last panel: shaded = the mean KL (over each
+run's novel test episodes) of the RCC's Generator minus that of the Generator trained on Joint Bayes' answers, at the
+sizes both have: |S| 50 .29, 100 2.19, 125 2.42, 150 2.48, 200 2.64, 250 .002, 500 .003, 1000 .005 nats. So the gain an
+architecture answering like Joint Bayes could bring is all at |S| 100-200 (where Joint's answers already transfer and
+the RCC's do not); from |S| 250 on the RCC's learned likelihood is as close to the truth as Joint's (within .005 nats).
+11-14 04:02 IST FINAL: all 12 RCC sizes measured (|S| 25 / 75: rcc_rl_S25/75_s0, run with the speed patch, 1.73 it/s on
+a V100S; at chance, accuracy .11 / .10). Gap at |S| 25 .041, 75 -.116 (the RCC slightly closer than Joint's answers
+there: both at ~2.5-3 nats, no transfer), 50 .29, 100-200 2.19-2.64, 250-1000 .002-.005 nats.
+
+11-14 04:30 IST (John: "RCC panel only"): the paper's Generator in the RCC panel = the 6 stored paper-era RCC runs
+(DATA/RL_state_num_reps, |S| 400 / 800 x 3 seeds, the paper's protocol (11-10 check: batch 5k, 150k episodes); measured
+here with gen_zflow=False, 20,000 novel episodes each, --compute rccorig, local GPU). Mean KL per seed: |S| 400 2.363 /
+2.480 / .020 (2 stuck, 1 escaped), |S| 800 1.578 / .023 / .023 (1 stuck, 2 escaped); each matches the run's stored final
+accuracy (.120 / .118 / .723; .127 / .709 / .719). An escaped seed is as close to the truth as the updated RCC (.020 vs
+.035 at 400): the paper's Generator fails by not escaping, not by fitting worse. Mean 1.621 at 400 vs .035 updated:
+blue band = the updated Generator's gain there (1.59 nats); 800 has no updated run. REVERTED from the figure the same
+hour (John: "this doesn't come out great"): measured files rccorig_S*_s*.npz kept, not drawn.
+
 --tag _e20k: the same runs resumed to 20,000 episodes (train_bayes_generator.py --resume-to 20000; John 11-10: "train
 more episodes, I think things haven't converged") -> <label>_S<S>_e20k.npz, bayes_gen_fr_div_e20k.png.
 
     cluster:  python bayes_gen_fr_div.py --compute <label> [--batches 4] [--tag _e20k]   (bayes_gen_fr_div.sbatch)
-    local:    python bayes_gen_fr_div.py [--pull] [--tag _e20k]
+    local:    python bayes_gen_fr_div.py [--pull] [--tag _e20k] [--pdf]
 -> main/DATA/experimental/bayes_gen_fr/<label>_S<S><tag>.npz (per episode: fr, div, div_floor, novel), figure bayes_gen_fr_div<tag>.png
+John 11-14 ~13:30 ET (lines figure): notes moved to the caption, gain shaded gray, panel letters. CAPTION (draft):
+How close the Generator's learned likelihood is to the true one. y: -sum_o KL(P(o|r) || P^(o|r)) at the episode's state, in
+nats on a log axis (up = better, 0 = exact), on 20,000 novel-environment test episodes per run; one line per bin of 20
+equal-count bins of the episode's factorization regret (FR, colour). (a-c) The Generator alone, conditioned on the true goal
+value (8,000 episodes) or on both variables' actions from Naive or Joint Bayes (6,000 episodes); d_E = 30, one run per |S|.
+(d) The RCC, its Generator conditioned on its own Classifier's actions (main-text protocol, 30,000 episodes; 14 runs, three
+at |S| = 500); solid: the RCC's mean over episodes, dashed: the Generator on Joint Bayes actions (c); gray: the
+generalization error between them (John's term, 11-14; was "potential architectural gain").
 """
 import os, sys, glob, argparse, subprocess
 import numpy as np
@@ -77,6 +105,7 @@ ROWS = (("truth1", "goal's true value only"), ("naive", "both answers from Naive
         ("joint", "both answers from Joint Bayes"))
 B, R, C = 5000, 10, 2
 NQ = 10                                      # FR tenths (John 11-10 14:20: "a larger range of FR? Maybe 10 percentiles")
+NQL = 20                                     # the lines figure: 20 equal-count FR bins + colour bar (John 11-14 00:20 IST)
 NETS = os.environ.get("BG_NETS", "")         # local copies: BG_NETS=/experimental/bayes_gen_fr/nets (under main/DATA)
 
 
@@ -85,8 +114,9 @@ def bern_kl(p, q):
     return (p * (p / q).log() + (1 - p) * ((1 - p) / (1 - q)).log()).sum(-1)
 
 
-RCC_SIZES = (25, 50, 75, 100, 125, 250, 400, 500, 1000)
+RCC_SIZES = (25, 50, 75, 100, 125, 150, 200, 250, 300, 400, 500, 1000)   # 150 / 200 / 300 added 11-12 (Fig 12 sizes, John 11-11)
 RCC_RUNS = lambda S: [f"rcc_rl_S{S}_s0"] + ([f"zflow_s{k}" for k in range(3)] if S == 500 else [])
+ORIG_SIZES = (400, 800)      # the paper's Generator: the only stored runs of the paper-era RCC (DATA/RL_state_num_reps)
 
 
 def single_predict(m, sample, keep):
@@ -129,16 +159,17 @@ def plugin_hit(m, env, single):
     return (ll.argmax(-1) == m.goal_value.long()).float()
 
 
-def measure(label, S, batches, tag="", run=None, plugin=True):
-    """novel environments only (11-10 12:40): per episode fr, div (at the own state), div_floor, plugin / joint / naive hit"""
+def measure(label, S, batches, tag="", run=None, plugin=True, load=None, gen_zflow=True):
+    """novel environments only (11-10 12:40): per episode fr, div (at the own state), div_floor, plugin / joint / naive hit.
+    load / gen_zflow (11-14): another saved net (path under main/DATA) and its Generator architecture (False = the paper's)"""
     import torch
     from main.CognitiveGridworld import CognitiveGridworld
     seed = int(run.rsplit("_s", 1)[1]) if run else 0                 # the run's seed rebuilds its environments' split
     np.random.seed(seed); torch.manual_seed(seed)
     env = CognitiveGridworld(mode="RL", ctx_num=C, obs_num=5, realization_num=R, state_num=S, KQ_dim=30, hid_dim=1000,
-                             batch_num=B, step_num=30, learn_embeddings=True, gen_zflow=True, episodes=1, training=False,
+                             batch_num=B, step_num=30, learn_embeddings=True, gen_zflow=gen_zflow, episodes=1, training=False,
                              checkpoint_every=1, gpu_inference=True, show_plots=False, cuda=0,
-                             load_env=f"{NETS}/cluster_runs/{run}" if run else f"{NETS}/bayes_gen/{label}_S{S}_d30_s0{tag}")
+                             load_env=load or (f"{NETS}/cluster_runs/{run}" if run else f"{NETS}/bayes_gen/{label}_S{S}_d30_s0{tag}"))
     m, dev = env.model, env.device
     BR = torch.arange(B, device=dev)
     single = label.endswith("1")
@@ -196,6 +227,13 @@ def add_lik(path, res):
 def compute(label, batches, tag="", lik_only=False):
     """lik_only (11-10 14:30): recompute without the plug-in and add LIK to the existing files (same episodes, checked)"""
     os.makedirs(OUT, exist_ok=True)
+    if label == "rccorig":                               # 11-14 (John: "RCC panel only"): the paper's Generator, RCC with its
+        for S in ORIG_SIZES:                             # own feedback = the stored paper-era runs, one file per seed
+            for r in range(3):
+                np.savez(os.path.join(OUT, f"rccorig_S{S}_s{r}.npz"),
+                         **measure(label, S, batches, run=f"rccorig_S{S}_s{r}", plugin=False,
+                                   load=f"/RL_state_num_reps/{S}_{r}", gen_zflow=False))
+        return
     if label == "rcc":                                   # the RCC's own Generator, main-text protocol, every run per |S|
         for S in RCC_SIZES:
             runs = [r for r in RCC_RUNS(S)
@@ -215,7 +253,7 @@ def compute(label, batches, tag="", lik_only=False):
             np.savez(os.path.join(OUT, f"{label}_S{S}{tag}.npz"), **measure(label, S, batches, tag))
 
 
-def plot(tag=""):
+def plot(tag="", pdf=False):
     """novel environments only, FR in NQ quantile bins of all novel test episodes pooled over the goal-only runs (fifths
     11:40, tenths 14:20): bayes_gen_fr_div.png = heat maps (y = FR bin, x = |S|), bayes_gen_fr_div_lines.png = the same
     numbers as one line per bin (x = |S|, log y)"""
@@ -274,49 +312,206 @@ def plot(tag=""):
 
     # 11-10 13:00 (John: a measure where up is better, "just show the -KL"; the RCC as a 4th column as its data arrive):
     # -div per FR bin, drawn as KL on an inverted log axis with negative tick labels (0 = a perfect likelihood is up)
-    cols = plt.cm.viridis(np.linspace(0, .9, NQ))
+    # 11-14 (John: "with 20 percentiles (with cbar instead of a list) instead of tenths"): NQL equal-count bins of the same
+    # pooled FR, colour bar labelled with the bin edges in nats
+    edges = np.quantile(pooled, np.linspace(0, 1, NQL + 1))
+    cols = plt.cm.viridis(np.linspace(0, .9, NQL))
     COLS = ROWS + (("rcc", "the RCC, its own feedback"),)
+    # John 11-14: "simplify the text, remove the note if this can be in a caption", the gain shaded gray: short panel
+    # titles, no suptitle (settings, counts and bins go in the caption), panel letters under the panels
+    # John 11-14 later: suptitle "Generator conditioned on:", "actions instead of answers (e.g. Classifier actions)"
+    LINE_TITLES = {"truth1": "True goal value", "naive": "Naive Bayes actions", "joint": "Joint Bayes actions",
+                   "rcc": "Classifier actions"}
+    GAIN = "0.55"
     rcc = {S: dict(np.load(f)) for S in RCC_SIZES if os.path.exists(f := os.path.join(OUT, f"rcc_S{S}.npz"))}
     fig, ax = plt.subplots(1, len(COLS), figsize=(len(COLS) * 3.0 + 1.6, 3.5), sharey=True, constrained_layout=True)
     for a, (lab, title) in zip(ax, COLS):
         runs = rcc if lab == "rcc" else {S: data[lab, S] for S in SIZES if (lab, S) in data}
         xs = sorted(runs)
-        for k in range(NQ):
+        for k in range(NQL):
             y = []
             for S in xs:
                 d = runs[S]
                 sel = d["novel"] == 1
-                b = np.clip(np.searchsorted(edges, d["fr"][sel], side="right") - 1, 0, NQ - 1) == k
+                b = np.clip(np.searchsorted(edges, d["fr"][sel], side="right") - 1, 0, NQL - 1) == k
                 y.append(np.mean(d["div"][sel][b]))
-            a.plot(xs, y, color=cols[k], lw=1.8, marker="o", ms=3, label=names[k])
+            a.plot(xs, y, color=cols[k], lw=1.4, marker="o", ms=2.4)
+        if lab == "rcc":
+            # John 11-14: shade the potential architectural gain = how far the RCC's Generator is from the Generator trained
+            # on Joint Bayes' answers (its feedback if its Classifier answered as Joint Bayes); means over each run's novel
+            # test episodes, at the sizes both have
+            common = [S for S in xs if ("joint", S) in data]
+            m_rcc = np.array([runs[S]["div"][runs[S]["novel"] == 1].mean() for S in common])
+            m_joint = np.array([data["joint", S]["div"][data["joint", S]["novel"] == 1].mean() for S in common])
+            a.fill_between(common, m_rcc, m_joint, where=m_joint < m_rcc, interpolate=True, color=GAIN, alpha=.3,
+                           lw=0, zorder=1)
+            a.plot(common, m_joint, color="k", ls="--", lw=1.4, zorder=5)
+            a.plot(common, m_rcc, color="k", lw=1.0, zorder=5)
+            # John 11-14: "put the legend in the relevant panel"; later: larger, "Generalization error", no "RCC" entry ->
+            # the empty middle right (the large-|S| lines run along the top, the small-|S| ones along the bottom)
+            a.legend(handles=[plt.Rectangle((0, 0), 1, 1, color=GAIN, alpha=.3, lw=0, label="Generalization\nerror"),
+                              plt.Line2D([], [], color="k", ls="--", lw=1.4, label="Panel c")],
+                     loc="center right", frameon=False, fontsize=fs["legend"] - 1, handlelength=1.4, handletextpad=.5,
+                     borderaxespad=.3, labelspacing=.8)
+            print("architectural gap (RCC - Joint answers, mean KL):",
+                  {S: round(float(r - j), 3) for S, r, j in zip(common, m_rcc, m_joint)})
         a.set_xscale("log")
         a.set_yscale("log")
-        a.set_xticks(SIZES if lab != "rcc" else RCC_SIZES)
-        a.set_xticklabels([str(S) for S in (SIZES if lab != "rcc" else RCC_SIZES)], rotation=90)
+        ticks = SIZES if lab != "rcc" else RCC_SIZES
+        a.set_xticks(ticks)
+        a.set_xticklabels([str(S) for S in ticks], rotation=90)
         a.minorticks_off()
         a.set_xlim(20, 1250)
         n_runs = sum(len(runs[S].get("runs", [0])) for S in xs) if lab == "rcc" else len(xs)
-        a.set_title(title[0].upper() + title[1:] + ("" if lab != "rcc" else f"\n({n_runs} runs so far)"),
-                    fontsize=fs["title"] - 4)
-        a.set_xlabel(r"number of variables $|\mathcal{S}|$")
+        print(f"lines figure, {lab}: {n_runs} runs at {len(xs)} sizes")             # for the caption
+        a.set_title(LINE_TITLES[lab], fontsize=fs["title"] - 4)
+        a.set_xlabel(r"number of variables $|\mathcal{S}|$" + "\n" +           # + the paper's panel letter, sans-serif
+                     rf"$\mathsf{{({'abcd'[COLS.index((lab, title))]})}}$")
         a.grid(alpha=.25, lw=.6)
         a.spines["top"].set_visible(False)
         a.spines["right"].set_visible(False)
     ax[0].invert_yaxis()                                 # shared y: up = smaller divergence = better
     ax[0].yaxis.set_major_locator(matplotlib.ticker.LogLocator(subs=(1., 3.)))
     ax[0].yaxis.set_minor_formatter(matplotlib.ticker.NullFormatter())
-    ax[0].yaxis.set_major_formatter(plt.FuncFormatter(lambda v, _: f"$-${v:g}"))
-    ax[0].set_ylabel(r"$-\Sigma_o\,\mathrm{KL}(P(o\,|\,r) \,\|\, \hat P(o\,|\,r))$" + "\nat the episode's state (nats, log scale)")
-    ax[-1].legend(handles=[plt.Line2D([], [], color=c, lw=1.8, marker="o", ms=3, label=n) for c, n in zip(cols, names)],
-                  title="FR tenth (nats)", frameon=False, fontsize=fs["legend"] - 2, title_fontsize=fs["legend"] - 2,
-                  loc="center left", bbox_to_anchor=(1.02, .5))
-    fig.suptitle("How far the learned likelihood is from the true one, by FR tenth, novel environments (up = better, "
-                 "0 = exact)\n" + sub.replace(", 10% in each tenth of FR", "") +
-                 "; RCC: its own Generator, main-text protocol, 30,000 episodes",
-                 fontsize=fs["legend"] - 1)
+    # 11-14: the label says "likelihood error", so the ticks show the error itself (positive; the axis stays inverted, up =
+    # better) instead of -KL
+    ax[0].yaxis.set_major_formatter(plt.FuncFormatter(lambda v, _: f"$-${v:g}"))    # John 11-14: negative divergence
+    ax[0].set_ylabel("negative divergence (nats)")          # John 11-14: no math in the label; down = more negative = worse
+    from matplotlib.colors import ListedColormap, BoundaryNorm
+    sm = plt.cm.ScalarMappable(norm=BoundaryNorm(np.arange(NQL + 1), NQL), cmap=ListedColormap(cols))
+    cb = fig.colorbar(sm, ax=ax, shrink=.9, pad=.01, aspect=30)
+    cb.set_ticks(np.arange(0, NQL + 1, 2))
+    cb.set_ticklabels(["0"] + [f"{edges[i]:.2g}" for i in range(2, NQL + 1, 2)])        # the lowest edge is ~3e-4
+    cb.set_label("FR of the episode (nats)", fontsize=fs["legend"] - 2)
+    cb.ax.tick_params(labelsize=fs["legend"] - 3)
+    fig.suptitle("Generalization of Generator conditioned on:", fontsize=fs["title"] - 2)
     out = fig_path(f"bayes_gen_fr_div_lines{tag}.png")
     fig.savefig(out, dpi=200)
     print(out)
+    if pdf:                                                       # John 11-14: "send the fr_div_lines ... as pdfs"
+        with plt.rc_context({"pdf.fonttype": 42}):                # TrueType fonts, not Type 3
+            fig.savefig(out[:-4] + ".pdf")
+        print(out[:-4] + ".pdf")
+
+
+def plot_band(tag="", pdf=False, pct=1., step=10, fr_min=None, fr_max=None, ylinear=False, ylog=False):
+    """John 11-14 ("a semi-transparent fill from min to max FR instead of individual lines (that are noisy) ... a more extreme
+    range of FR where performance differences may be more dramatic"): the lines figure's panels with, per |S|, a band from
+    the mean likelihood error of the episodes in the lowest pct% of FR to that of the highest pct% (edges in the colour
+    bar's end colours) and the mean over all episodes (black); the FR tails are quantiles of the same pooled goal-only FR
+    as the bins. -> bayes_gen_fr_div_band<tag>.png / .pdf. At pct 1 the tails hold ~180-460 of a run's 20,000 novel
+    episodes (s.e. <= ~10% of the tail mean), except |S| 25's high tail: 54 episodes."""
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    from main.utils import fig_path, apply_fig_style
+    fs = apply_fig_style()
+    data = {(lab, S): dict(np.load(f)) for lab, _ in ROWS for S in SIZES
+            if os.path.exists(f := os.path.join(OUT, f"{lab}_S{S}{tag}.npz"))}
+    pooled = np.concatenate([np.load(f)["fr"] for S in SIZES if os.path.exists(f := os.path.join(OUT, f"truth1_S{S}.npz"))])
+    # John 11-14, next: "the fill should be colorful, colored by FR": FR bins with the extreme pct% tails at both ends and
+    # step% bins between (5 first; 10 after "maybe larger bins of FR?" to soften the curves); the strip between
+    # successive bins' curves is filled in the colour of its FR
+    qs = [0, pct] + list(range(step, 100, step)) + [100 - pct, 100]
+    edges = np.quantile(pooled, np.array(qs) / 100)
+    if fr_min is not None:      # John 11-14: "start FR at .1" (the lowest bins looked funky for Naive): the band begins at
+        keep = edges > fr_min   # FR = fr_min nats; episodes below it leave the band only (the mean line keeps every episode)
+        qs = [None] + [q for q, k in zip(qs, keep) if k]
+        edges = np.concatenate([[fr_min], edges[keep]])
+    if fr_max is not None:      # and "the same for the top FR" (the top 1% held only 54 episodes at |S| 25): ends at fr_max
+        keep = edges < fr_max
+        qs = [q for q, k in zip(qs, keep) if k] + [None]
+        edges = np.concatenate([edges[keep], [fr_max]])
+    K = len(edges) - 1
+    cmap_cols = plt.cm.viridis(np.linspace(0, .9, K))
+    strip = plt.cm.viridis(np.linspace(0, .9, K)[:-1] + .45 / (K - 1))       # the colour between bins k and k + 1
+    rcc = {S: dict(np.load(f)) for S in RCC_SIZES if os.path.exists(f := os.path.join(OUT, f"rcc_S{S}.npz"))}
+    cols = ROWS + (("rcc", "the RCC, its own feedback"),)
+    titles = {"truth1": "True goal value", "naive": "Naive Bayes actions", "joint": "Joint Bayes actions",
+              "rcc": "Classifier actions"}
+    GAIN = "0.55"
+    fig, ax = plt.subplots(1, len(cols), figsize=(len(cols) * 3.0 + 1.6, 3.5), sharey=True, constrained_layout=True)
+    all_y = []
+    # John 11-14: "show only (and all) |S| where we have samples from all 4 agents" (the RCC's 300 / 400 have no Generator runs)
+    sizes = sorted(set(rcc).intersection(*({S for (l, S) in data if l == lab} for lab, _ in ROWS)))
+    print(f"band figure |S| (all 4 agents): {sizes}")
+    for a, (lab, _), letter in zip(ax, cols, "abcd"):
+        runs = {S: rcc[S] for S in sizes} if lab == "rcc" else {S: data[lab, S] for S in sizes}
+        xs = sorted(runs)
+        nov = {S: runs[S]["novel"] == 1 for S in xs}
+        Y = np.array([[runs[S]["div"][nov[S]][np.clip(np.searchsorted(edges, runs[S]["fr"][nov[S]], side="right") - 1,
+                                                      0 if fr_min is None else -1, K - 1 if fr_max is None else K)
+                                              == k].mean() for S in xs]
+                      for k in range(K)])
+        all_y.append(Y)
+        mean = np.array([runs[S]["div"][nov[S]].mean() for S in xs])
+        for k in range(K - 1):
+            a.fill_between(xs, Y[k], Y[k + 1], color=strip[k], alpha=.6, lw=0, zorder=2)
+        a.plot(xs, Y[0], color=cmap_cols[0], lw=.8, zorder=3)
+        a.plot(xs, Y[-1], color=cmap_cols[-1], lw=.8, zorder=3)
+        a.plot(xs, mean, color="k", lw=1.4, zorder=5)
+        print(f"band {lab}: " + ", ".join(f"S{S} {l:.3g}-{h:.3g} (mean {m:.3g})" for S, l, h, m in zip(xs, Y[0], Y[-1], mean)))
+        if lab == "rcc":                                 # as in the lines figure: the gap to the Joint-actions Generator
+            common = [S for S in xs if ("joint", S) in data]
+            m_rcc = np.array([runs[S]["div"][nov[S]].mean() for S in common])
+            m_joint = np.array([data["joint", S]["div"][data["joint", S]["novel"] == 1].mean() for S in common])
+            a.fill_between(common, m_rcc, m_joint, where=m_joint < m_rcc, interpolate=True, color=GAIN, alpha=.3,
+                           lw=0, zorder=1)
+            a.plot(common, m_joint, color="k", ls="--", lw=1.4, zorder=5)
+            a.legend(handles=[plt.Rectangle((0, 0), 1, 1, color=GAIN, alpha=.3, lw=0, label="Generalization\nerror"),
+                              plt.Line2D([], [], color="k", ls="--", lw=1.4, label="Panel c")],
+                     loc="center right", frameon=False, fontsize=fs["legend"] - 1, handlelength=1.4, handletextpad=.5,
+                     borderaxespad=.3, labelspacing=.8)
+        a.set_xscale("log")
+        if ylog:                                         # (John 11-14: "how about log-log scaling?": pure log, no 0 tick)
+            a.set_yscale("log")
+        elif not ylinear:                                # (John 11-14: "how does it look with a linear y-scale?" -> ylinear)
+            a.set_yscale("symlog", linthresh=.01, linscale=.4)  # John: "the top ytick be y = 0" -> linear below .01
+        ticks = sizes
+        a.set_xticks(ticks)
+        a.set_xticklabels([str(S) for S in ticks], rotation=90)
+        a.minorticks_off()
+        a.set_xlim(20, 1250)
+        a.set_title(titles[lab], fontsize=fs["title"] - 4)
+        a.set_xlabel(r"number of variables $|\mathcal{S}|$" + "\n" + rf"$\mathsf{{({letter})}}$")
+        a.grid(alpha=.25, lw=.6)
+        a.spines["top"].set_visible(False)
+        a.spines["right"].set_visible(False)
+    # John 11-14: top tick y = 0 (an exact likelihood), the label in the paper's notation: what is plotted is the KL from the
+    # true likelihood at the episode's true state to the Generator's (the 5 channels are independent given r, so the sum of
+    # their Bernoulli KLs is exactly this KL); not the training loss J(P~ || P^(. | r^))
+    y_max = (1.05 if ylinear else 1.4) * max(np.nanmax(np.concatenate([Y.ravel() for Y in all_y])),
+                      max(np.nanmax(l.get_ydata()) for a in ax for l in a.get_lines()))
+    y_min = .7 * min(np.nanmin(np.concatenate([Y.ravel() for Y in all_y])),
+                     min(np.nanmin(l.get_ydata()) for a in ax for l in a.get_lines()))
+    ax[0].set_ylim(y_max, y_min if ylog else 0)          # shared y, inverted: 0 on top, down = more negative = worse
+    ax[0].yaxis.set_major_locator(matplotlib.ticker.MaxNLocator(7) if ylinear else
+                                  matplotlib.ticker.FixedLocator([.01, .03, .1, .3, 1, 3] if ylog else
+                                                                 [0, .01, .03, .1, .3, 1, 3]))
+    ax[0].yaxis.set_minor_locator(matplotlib.ticker.NullLocator())
+    ax[0].yaxis.set_major_formatter(plt.FuncFormatter(lambda v, _: "0" if v == 0 else f"$-${v:g}"))
+    ax[0].set_ylabel(r"$-\mathrm{KL}\,(P_Z(\mathbf{o} \mid \mathbf{r}) \,\|\, \hat{P}_{\hat{Z}}(\mathbf{o} \mid \mathbf{r}))$ (nats)")
+    ax[0].legend(handles=[plt.Line2D([], [], color="k", lw=1.4, label="mean over episodes")],
+                 loc="upper left", frameon=False, fontsize=fs["legend"] - 1, handlelength=1.6)
+    from matplotlib.colors import ListedColormap, BoundaryNorm
+    sm = plt.cm.ScalarMappable(norm=BoundaryNorm(np.arange(K + 1), K), cmap=ListedColormap(cmap_cols))
+    cb = fig.colorbar(sm, ax=ax, shrink=.9, pad=.01, aspect=30)
+    if fr_min is not None or fr_max is not None:        # the band's two ends and the median
+        shown = sorted({0, K} | {i for i, q in enumerate(qs) if q == 50})
+    else:
+        shown = [i for i, q in enumerate(qs) if q in (pct, step, 50, 100 - pct)]      # (100 - step would crowd 100 - pct)
+    cb.set_ticks(shown)
+    cb.set_ticklabels([f"{edges[i]:.2g}" for i in shown])
+    cb.set_label("FR of the episode (nats)", fontsize=fs["legend"] - 2)
+    cb.ax.tick_params(labelsize=fs["legend"] - 3)
+    fig.suptitle("Generalization of Generator conditioned on:", fontsize=fs["title"] - 2)
+    out = fig_path(f"bayes_gen_fr_div_band{tag}" + ("_linear" if ylinear else "_loglog" if ylog else "") + ".png")
+    fig.savefig(out, dpi=200)
+    print(out)
+    if pdf:
+        with plt.rc_context({"pdf.fonttype": 42}):
+            fig.savefig(out[:-4] + ".pdf")
+        print(out[:-4] + ".pdf")
 
 
 def main():
@@ -326,6 +521,12 @@ def main():
     ap.add_argument("--pull", action="store_true")
     ap.add_argument("--tag", default="")
     ap.add_argument("--lik-only", action="store_true", help="add pred / lik / lik_m / goal to the existing files")
+    ap.add_argument("--pdf", action="store_true", help="also save the lines figure as a PDF")
+    ap.add_argument("--band", type=float, default=None, help="draw the FR-tail band figure with these tails (percent)")
+    ap.add_argument("--fr-min", type=float, default=None, help="band figure: start the FR band at this FR (nats)")
+    ap.add_argument("--fr-max", type=float, default=None, help="band figure: end the FR band at this FR (nats)")
+    ap.add_argument("--ylinear", action="store_true", help="band figure: linear y axis -> ..._linear.png")
+    ap.add_argument("--ylog", action="store_true", help="band figure: pure log y axis (no 0 tick) -> ..._loglog.png")
     a = ap.parse_args()
     if a.compute:
         import torch
@@ -335,7 +536,10 @@ def main():
     if a.pull:
         os.makedirs(OUT, exist_ok=True)
         subprocess.run(f"scp -q -o BatchMode=yes 'elsc-cluster:cgw/main/DATA/experimental/bayes_gen_fr/*{a.tag}.npz' {OUT}/", shell=True)
-    plot(a.tag)
+    if a.band:
+        plot_band(a.tag, a.pdf, a.band, fr_min=a.fr_min, fr_max=a.fr_max, ylinear=a.ylinear, ylog=a.ylog)
+        return
+    plot(a.tag, a.pdf)
 
 
 if __name__ == "__main__":

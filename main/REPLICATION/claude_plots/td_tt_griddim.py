@@ -15,7 +15,12 @@ the shared grid's purity along its own axes holding 50 / 80 / 90% of its varianc
 (pureG*, kG*), and the shared grid's share of all the variance (share_cell).
 -> main/DATA/experimental/training_dynamics/through_training/griddim/<run>.npz
 Run from the repository root (CPU, ~1 min per checkpoint):
-    OMP_NUM_THREADS=8 /home/johns/anaconda3/envs/eureka/bin/python main/REPLICATION/claude_plots/td_tt_griddim.py"""
+    OMP_NUM_THREADS=8 /home/johns/anaconda3/envs/eureka/bin/python main/REPLICATION/claude_plots/td_tt_griddim.py
+11-13 (John: "are we able to have them all with full data?"): at T = 30 only, at all 114 saved checkpoints per run
+(RAWS are 13 of them), the eigenvalue spectra of the total, each factor and the total without each factor, and run()'s
+PR / variance keys from them (run_full; ~55 core-s per checkpoint, the replay). In shards, then joined:
+    for i in 0 1 2 3 4 5 6; do OMP_NUM_THREADS=3 nohup python td_tt_griddim.py full $i 7 & done; python td_tt_griddim.py merge
+-> main/DATA/experimental/training_dynamics/through_training/griddim_full/<run>.npz"""
 import os
 import sys
 import numpy as np
@@ -28,6 +33,7 @@ import td_tt_intervene as ti                                                    
 import td_tt_chaos_ent as ce                                                                  # noqa: E402
 
 OUT = os.path.join(gap.TT, "griddim")
+OUT_FULL = os.path.join(gap.TT, "griddim_full")
 RAWS = (0, 100, 250, 500, 800, 1100, 1500, 2000, 3000, 6000, 10000, 25000, 49995)
 STEPS = (15, 30)
 FACT = ("env", "cell", "envcell", "res")
@@ -37,6 +43,12 @@ QS = (.5, .8, .9)
 
 def pr(S):
     ev = np.clip(np.linalg.eigvalsh(S), 0, None)
+    return ev.sum() ** 2 / (ev ** 2).sum()
+
+
+def pr_ev(ev):
+    """the participation ratio from an eigenvalue spectrum (as pr)"""
+    ev = np.clip(ev, 0, None)
     return ev.sum() ** 2 / (ev ** 2).sum()
 
 
@@ -114,6 +126,56 @@ def run(name):
 
 
 
+def run_full(shard=0, nshards=1):
+    """every nshards-th (run, checkpoint) pair from shard, of both runs' saved checkpoints (ti.checkpoints): u_30 of the
+    10,000 probes (as run()), split; per row the spectra t30_ev_{total, <factor>, loo_<factor>} (H each) and t30_pr_total,
+    t30_pr_<factor>, t30_loo_<factor>, t30_var_<factor>, t30_share_cell computed from them -> OUT_FULL/<run>_shard<i>of<n>"""
+    os.makedirs(OUT_FULL, exist_ok=True)
+    torch.set_num_threads(int(os.environ.get("OMP_NUM_THREADS", 3)))
+    P = ti.probes()
+    env, r = P["env"], P["r"]
+    cell = r[:, 0] * 10 + r[:, 1]
+    pairs = [(nm, raw) for nm in ("trained", "echo") for raw in ti.checkpoints(nm)][shard::nshards]
+    rows = {}
+    for nm, raw in pairs:
+        p, table = ce.setup(nm, raw, torch.device("cpu"))
+        U = []
+        with torch.no_grad():
+            for b0 in range(0, len(env), 2500):
+                envt, code = ce.codes(np.arange(b0, b0 + 2500), torch.device("cpu"))
+                _, u, _, _ = ce.replay(p, table, envt, code)
+                U.append(u[:, 30].double().numpy())                    # after 30 observations
+        S = split(np.concatenate(U), env, cell)
+        tot = sum(S.values())
+        ev = {"total": np.linalg.eigvalsh(tot)}
+        for f in FACT:
+            ev[f], ev["loo_" + f] = np.linalg.eigvalsh(S[f]), np.linalg.eigvalsh(tot - S[f])
+        row = {"raw": raw, "x": float(gap.train_x(raw)), "t30_pr_total": pr_ev(ev["total"]),
+               "t30_share_cell": np.trace(S["cell"]) / np.trace(tot)}
+        for f in FACT:
+            row.update({f"t30_pr_{f}": pr_ev(ev[f]), f"t30_loo_{f}": pr_ev(ev["loo_" + f]), f"t30_var_{f}": np.trace(S[f])})
+        row.update({f"t30_ev_{k}": v for k, v in ev.items()})
+        rows.setdefault(nm, []).append(row)
+        print(nm, raw, round(row["t30_pr_total"], 2), round(row["t30_loo_cell"], 2), flush=True)
+    for nm, rw in rows.items():
+        np.savez(os.path.join(OUT_FULL, f"{nm}_shard{shard}of{nshards}.npz"), **{k: np.array([x[k] for x in rw]) for k in rw[0]})
+
+
+def merge_full():
+    """the shards of run_full -> OUT_FULL/<run>.npz, in checkpoint order (all 114 checked), shards removed"""
+    import glob
+    for nm in ("trained", "echo"):
+        fs = sorted(glob.glob(os.path.join(OUT_FULL, f"{nm}_shard*of*.npz")))
+        parts = [np.load(f) for f in fs]
+        D = {k: np.concatenate([q[k] for q in parts]) for k in parts[0].files}
+        o = np.argsort(D["raw"])
+        D = {k: v[o] for k, v in D.items()}
+        assert np.array_equal(D["raw"], ti.checkpoints(nm)), nm
+        np.savez(os.path.join(OUT_FULL, f"{nm}.npz"), **D)
+        for f in fs:
+            os.remove(f)
+        print(nm, len(D["raw"]), "checkpoints ->", os.path.join(OUT_FULL, f"{nm}.npz"))
+
 
 def figure():
     """-> figure_bin/td_tt_griddim.png: a PR of each factor (Trained RNN solid, ESN dashed); b total PR and the total
@@ -175,6 +237,10 @@ def figure():
 if __name__ == "__main__":
     if sys.argv[1:] == ["figure"]:
         figure()
+    elif sys.argv[1:2] == ["full"]:
+        run_full(int(sys.argv[2]), int(sys.argv[3]))
+    elif sys.argv[1:] == ["merge"]:
+        merge_full()
     else:
         for nm in sys.argv[1:] or ("trained", "echo"):
             run(nm)

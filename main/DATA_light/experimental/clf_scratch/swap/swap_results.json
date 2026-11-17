@@ -1,0 +1,6723 @@
+{
+ "definition": "swap pi: obs[..., pi(o)] <- channel o's bits; world likelihood table and the net's per-channel embedding tables (all_K/all_Q) relabelled the same way; read-in, LSTM, Generator, map unchanged. Same 2000 novel episodes (np seed 4321) for every permutation; goal accuracy at T (argmax of the goal marginal). (c) = least-squares 10->10 code map (fitted on unswapped codes of 2000 training-variable pairs) in front of the same-seed gen60k Generator + exact Bayes.",
+ "nets": {
+  "gen60k_lr4_s0": {
+   "route": "Generator",
+   "feedback": "oracle",
+   "B": 2000,
+   "naive": 0.4525,
+   "perms": [
+    {
+     "kind": "identity",
+     "pi": [
+      0,
+      1,
+      2,
+      3,
+      4
+     ],
+     "moved": 0,
+     "clf": 0.7335,
+     "plugin": 0.7435,
+     "joint": 0.7715
+    },
+    {
+     "kind": "cyclic+1",
+     "pi": [
+      1,
+      2,
+      3,
+      4,
+      0
+     ],
+     "moved": 5,
+     "clf": 0.725,
+     "plugin": 0.7435,
+     "joint": 0.7715
+    },
+    {
+     "kind": "cyclic+2",
+     "pi": [
+      2,
+      3,
+      4,
+      0,
+      1
+     ],
+     "moved": 5,
+     "clf": 0.7265,
+     "plugin": 0.7435,
+     "joint": 0.7715
+    },
+    {
+     "kind": "cyclic+3",
+     "pi": [
+      3,
+      4,
+      0,
+      1,
+      2
+     ],
+     "moved": 5,
+     "clf": 0.732,
+     "plugin": 0.7435,
+     "joint": 0.7715
+    },
+    {
+     "kind": "cyclic+4",
+     "pi": [
+      4,
+      0,
+      1,
+      2,
+      3
+     ],
+     "moved": 5,
+     "clf": 0.724,
+     "plugin": 0.7435,
+     "joint": 0.7715
+    },
+    {
+     "kind": "swap01",
+     "pi": [
+      1,
+      0,
+      2,
+      3,
+      4
+     ],
+     "moved": 2,
+     "clf": 0.7245,
+     "plugin": 0.7435,
+     "joint": 0.7715
+    },
+    {
+     "kind": "swap02",
+     "pi": [
+      2,
+      1,
+      0,
+      3,
+      4
+     ],
+     "moved": 2,
+     "clf": 0.7275,
+     "plugin": 0.7435,
+     "joint": 0.7715
+    },
+    {
+     "kind": "swap03",
+     "pi": [
+      3,
+      1,
+      2,
+      0,
+      4
+     ],
+     "moved": 2,
+     "clf": 0.72,
+     "plugin": 0.7435,
+     "joint": 0.7715
+    },
+    {
+     "kind": "swap04",
+     "pi": [
+      4,
+      1,
+      2,
+      3,
+      0
+     ],
+     "moved": 2,
+     "clf": 0.7295,
+     "plugin": 0.7435,
+     "joint": 0.7715
+    },
+    {
+     "kind": "swap12",
+     "pi": [
+      0,
+      2,
+      1,
+      3,
+      4
+     ],
+     "moved": 2,
+     "clf": 0.7345,
+     "plugin": 0.7435,
+     "joint": 0.7715
+    },
+    {
+     "kind": "swap13",
+     "pi": [
+      0,
+      3,
+      2,
+      1,
+      4
+     ],
+     "moved": 2,
+     "clf": 0.7295,
+     "plugin": 0.7435,
+     "joint": 0.7715
+    },
+    {
+     "kind": "swap14",
+     "pi": [
+      0,
+      4,
+      2,
+      3,
+      1
+     ],
+     "moved": 2,
+     "clf": 0.727,
+     "plugin": 0.7435,
+     "joint": 0.7715
+    },
+    {
+     "kind": "swap23",
+     "pi": [
+      0,
+      1,
+      3,
+      2,
+      4
+     ],
+     "moved": 2,
+     "clf": 0.733,
+     "plugin": 0.7435,
+     "joint": 0.7715
+    },
+    {
+     "kind": "swap24",
+     "pi": [
+      0,
+      1,
+      4,
+      3,
+      2
+     ],
+     "moved": 2,
+     "clf": 0.7265,
+     "plugin": 0.7435,
+     "joint": 0.7715
+    },
+    {
+     "kind": "swap34",
+     "pi": [
+      0,
+      1,
+      2,
+      4,
+      3
+     ],
+     "moved": 2,
+     "clf": 0.72,
+     "plugin": 0.7435,
+     "joint": 0.7715
+    },
+    {
+     "kind": "random",
+     "pi": [
+      3,
+      1,
+      4,
+      0,
+      2
+     ],
+     "moved": 4,
+     "clf": 0.7245,
+     "plugin": 0.7435,
+     "joint": 0.7715
+    },
+    {
+     "kind": "random",
+     "pi": [
+      0,
+      3,
+      4,
+      1,
+      2
+     ],
+     "moved": 4,
+     "clf": 0.735,
+     "plugin": 0.7435,
+     "joint": 0.7715
+    },
+    {
+     "kind": "random",
+     "pi": [
+      2,
+      3,
+      1,
+      0,
+      4
+     ],
+     "moved": 4,
+     "clf": 0.722,
+     "plugin": 0.7435,
+     "joint": 0.7715
+    },
+    {
+     "kind": "random",
+     "pi": [
+      4,
+      0,
+      1,
+      3,
+      2
+     ],
+     "moved": 4,
+     "clf": 0.724,
+     "plugin": 0.7435,
+     "joint": 0.7715
+    },
+    {
+     "kind": "random",
+     "pi": [
+      4,
+      3,
+      0,
+      2,
+      1
+     ],
+     "moved": 5,
+     "clf": 0.732,
+     "plugin": 0.7435,
+     "joint": 0.7715
+    },
+    {
+     "kind": "random",
+     "pi": [
+      2,
+      4,
+      0,
+      1,
+      3
+     ],
+     "moved": 5,
+     "clf": 0.7335,
+     "plugin": 0.7435,
+     "joint": 0.7715
+    },
+    {
+     "kind": "random",
+     "pi": [
+      4,
+      0,
+      3,
+      1,
+      2
+     ],
+     "moved": 5,
+     "clf": 0.7315,
+     "plugin": 0.7435,
+     "joint": 0.7715
+    },
+    {
+     "kind": "random",
+     "pi": [
+      4,
+      0,
+      2,
+      1,
+      3
+     ],
+     "moved": 4,
+     "clf": 0.7255,
+     "plugin": 0.7435,
+     "joint": 0.7715
+    },
+    {
+     "kind": "random",
+     "pi": [
+      4,
+      2,
+      3,
+      1,
+      0
+     ],
+     "moved": 5,
+     "clf": 0.732,
+     "plugin": 0.7435,
+     "joint": 0.7715
+    },
+    {
+     "kind": "random",
+     "pi": [
+      2,
+      3,
+      1,
+      4,
+      0
+     ],
+     "moved": 5,
+     "clf": 0.721,
+     "plugin": 0.7435,
+     "joint": 0.7715
+    },
+    {
+     "kind": "random",
+     "pi": [
+      1,
+      3,
+      0,
+      4,
+      2
+     ],
+     "moved": 5,
+     "clf": 0.725,
+     "plugin": 0.7435,
+     "joint": 0.7715
+    },
+    {
+     "kind": "random",
+     "pi": [
+      2,
+      1,
+      3,
+      0,
+      4
+     ],
+     "moved": 3,
+     "clf": 0.7315,
+     "plugin": 0.7435,
+     "joint": 0.7715
+    },
+    {
+     "kind": "random",
+     "pi": [
+      2,
+      4,
+      1,
+      0,
+      3
+     ],
+     "moved": 5,
+     "clf": 0.716,
+     "plugin": 0.7435,
+     "joint": 0.7715
+    },
+    {
+     "kind": "random",
+     "pi": [
+      0,
+      3,
+      1,
+      2,
+      4
+     ],
+     "moved": 3,
+     "clf": 0.743,
+     "plugin": 0.7435,
+     "joint": 0.7715
+    },
+    {
+     "kind": "random",
+     "pi": [
+      0,
+      2,
+      4,
+      1,
+      3
+     ],
+     "moved": 4,
+     "clf": 0.731,
+     "plugin": 0.7435,
+     "joint": 0.7715
+    }
+   ],
+   "time": [
+    {
+     "kind": "shuffle0",
+     "clf": 0.731,
+     "plugin": 0.7435,
+     "joint": 0.7715
+    },
+    {
+     "kind": "shuffle1",
+     "clf": 0.7255,
+     "plugin": 0.7435,
+     "joint": 0.7715
+    },
+    {
+     "kind": "shuffle2",
+     "clf": 0.728,
+     "plugin": 0.7435,
+     "joint": 0.7715
+    },
+    {
+     "kind": "reverse",
+     "clf": 0.7325,
+     "plugin": 0.7435,
+     "joint": 0.7715
+    }
+   ],
+   "generator_relabel_checks": [
+    {
+     "pi": [
+      1,
+      2,
+      3,
+      4,
+      0
+     ],
+     "max_abs_table_diff": 5.960464477539063e-08,
+     "plugin_forward": 0.7435,
+     "episodes_differing": 0
+    },
+    {
+     "pi": [
+      2,
+      3,
+      4,
+      0,
+      1
+     ],
+     "max_abs_table_diff": 5.960464477539063e-08,
+     "plugin_forward": 0.7435,
+     "episodes_differing": 0
+    },
+    {
+     "pi": [
+      3,
+      4,
+      0,
+      1,
+      2
+     ],
+     "max_abs_table_diff": 5.960464477539063e-08,
+     "plugin_forward": 0.7435,
+     "episodes_differing": 0
+    },
+    {
+     "pi": [
+      4,
+      0,
+      1,
+      2,
+      3
+     ],
+     "max_abs_table_diff": 5.960464477539063e-08,
+     "plugin_forward": 0.7435,
+     "episodes_differing": 0
+    }
+   ],
+   "clf_discordant_vs_identity": {
+    "mean": 0.08028947368421052,
+    "max": 0.105
+   },
+   "controls": {
+    "sigma": [
+     0,
+     1,
+     2,
+     3,
+     4
+    ],
+    "slot_best_r2": [
+     0.998,
+     0.998,
+     0.998,
+     0.998,
+     0.998
+    ],
+    "frames": [
+     [
+      [
+       -0.0024,
+       -1.0041
+      ],
+      [
+       -1.0021,
+       0.0006
+      ]
+     ],
+     [
+      [
+       0.0007,
+       -1.0041
+      ],
+      [
+       -1.0047,
+       0.0014
+      ]
+     ],
+     [
+      [
+       -0.003,
+       -1.0027
+      ],
+      [
+       -1.0039,
+       0.0014
+      ]
+     ],
+     [
+      [
+       0.0012,
+       -1.0064
+      ],
+      [
+       -1.0058,
+       0.0021
+      ]
+     ],
+     [
+      [
+       -0.0017,
+       -1.0034
+      ],
+      [
+       -1.0014,
+       -0.0019
+      ]
+     ]
+    ],
+    "perms": [
+     {
+      "kind": "cyclic+1",
+      "pi": [
+       1,
+       2,
+       3,
+       4,
+       0
+      ],
+      "pinv": [
+       4,
+       0,
+       1,
+       2,
+       3
+      ],
+      "moved": 5,
+      "bits_only": 0.101,
+      "joint_old_wiring": 0.113
+     },
+     {
+      "kind": "cyclic+2",
+      "pi": [
+       2,
+       3,
+       4,
+       0,
+       1
+      ],
+      "pinv": [
+       3,
+       4,
+       0,
+       1,
+       2
+      ],
+      "moved": 5,
+      "bits_only": 0.1,
+      "joint_old_wiring": 0.094
+     },
+     {
+      "kind": "cyclic+3",
+      "pi": [
+       3,
+       4,
+       0,
+       1,
+       2
+      ],
+      "pinv": [
+       2,
+       3,
+       4,
+       0,
+       1
+      ],
+      "moved": 5,
+      "bits_only": 0.1125,
+      "joint_old_wiring": 0.1025
+     },
+     {
+      "kind": "cyclic+4",
+      "pi": [
+       4,
+       0,
+       1,
+       2,
+       3
+      ],
+      "pinv": [
+       1,
+       2,
+       3,
+       4,
+       0
+      ],
+      "moved": 5,
+      "bits_only": 0.1045,
+      "joint_old_wiring": 0.098
+     },
+     {
+      "kind": "swap01",
+      "pi": [
+       1,
+       0,
+       2,
+       3,
+       4
+      ],
+      "pinv": [
+       1,
+       0,
+       2,
+       3,
+       4
+      ],
+      "moved": 2,
+      "bits_only": 0.34,
+      "joint_old_wiring": 0.3535
+     },
+     {
+      "kind": "swap02",
+      "pi": [
+       2,
+       1,
+       0,
+       3,
+       4
+      ],
+      "pinv": [
+       2,
+       1,
+       0,
+       3,
+       4
+      ],
+      "moved": 2,
+      "bits_only": 0.354,
+      "joint_old_wiring": 0.355
+     },
+     {
+      "kind": "swap03",
+      "pi": [
+       3,
+       1,
+       2,
+       0,
+       4
+      ],
+      "pinv": [
+       3,
+       1,
+       2,
+       0,
+       4
+      ],
+      "moved": 2,
+      "bits_only": 0.343,
+      "joint_old_wiring": 0.355
+     }
+    ],
+    "identity": 0.7335,
+    "code_shuffle": 0.1125,
+    "frame_rel_dist": [
+     [
+      0.0,
+      0.003,
+      0.002,
+      0.004,
+      0.002
+     ],
+     [
+      0.003,
+      0.0,
+      0.003,
+      0.002,
+      0.004
+     ],
+     [
+      0.002,
+      0.003,
+      0.0,
+      0.004,
+      0.003
+     ],
+     [
+      0.004,
+      0.002,
+      0.004,
+      0.0,
+      0.005
+     ],
+     [
+      0.002,
+      0.004,
+      0.003,
+      0.005,
+      0.0
+     ]
+    ],
+    "frame_rel_dist_signflip": [
+     [
+      2.0,
+      2.0,
+      2.0,
+      2.0,
+      2.0
+     ],
+     [
+      2.0,
+      2.0,
+      2.0,
+      2.0,
+      2.0
+     ],
+     [
+      2.0,
+      2.0,
+      2.0,
+      2.0,
+      2.0
+     ],
+     [
+      2.0,
+      2.0,
+      2.0,
+      2.0,
+      2.0
+     ],
+     [
+      2.0,
+      2.0,
+      2.0,
+      2.0,
+      2.0
+     ]
+    ]
+   },
+   "clf_discordant_vs_identity_time_orders": {
+    "mean": 0.056,
+    "max": 0.06
+   }
+  },
+  "gen60k_lr4_s1": {
+   "route": "Generator",
+   "feedback": "oracle",
+   "B": 2000,
+   "naive": 0.4585,
+   "perms": [
+    {
+     "kind": "identity",
+     "pi": [
+      0,
+      1,
+      2,
+      3,
+      4
+     ],
+     "moved": 0,
+     "clf": 0.7345,
+     "plugin": 0.7425,
+     "joint": 0.7715
+    },
+    {
+     "kind": "cyclic+1",
+     "pi": [
+      1,
+      2,
+      3,
+      4,
+      0
+     ],
+     "moved": 5,
+     "clf": 0.739,
+     "plugin": 0.7425,
+     "joint": 0.7715
+    },
+    {
+     "kind": "cyclic+2",
+     "pi": [
+      2,
+      3,
+      4,
+      0,
+      1
+     ],
+     "moved": 5,
+     "clf": 0.7295,
+     "plugin": 0.7425,
+     "joint": 0.7715
+    },
+    {
+     "kind": "cyclic+3",
+     "pi": [
+      3,
+      4,
+      0,
+      1,
+      2
+     ],
+     "moved": 5,
+     "clf": 0.7365,
+     "plugin": 0.7425,
+     "joint": 0.7715
+    },
+    {
+     "kind": "cyclic+4",
+     "pi": [
+      4,
+      0,
+      1,
+      2,
+      3
+     ],
+     "moved": 5,
+     "clf": 0.738,
+     "plugin": 0.7425,
+     "joint": 0.7715
+    },
+    {
+     "kind": "swap01",
+     "pi": [
+      1,
+      0,
+      2,
+      3,
+      4
+     ],
+     "moved": 2,
+     "clf": 0.7395,
+     "plugin": 0.7425,
+     "joint": 0.7715
+    },
+    {
+     "kind": "swap02",
+     "pi": [
+      2,
+      1,
+      0,
+      3,
+      4
+     ],
+     "moved": 2,
+     "clf": 0.733,
+     "plugin": 0.7425,
+     "joint": 0.7715
+    },
+    {
+     "kind": "swap03",
+     "pi": [
+      3,
+      1,
+      2,
+      0,
+      4
+     ],
+     "moved": 2,
+     "clf": 0.731,
+     "plugin": 0.7425,
+     "joint": 0.7715
+    },
+    {
+     "kind": "swap04",
+     "pi": [
+      4,
+      1,
+      2,
+      3,
+      0
+     ],
+     "moved": 2,
+     "clf": 0.732,
+     "plugin": 0.7425,
+     "joint": 0.7715
+    },
+    {
+     "kind": "swap12",
+     "pi": [
+      0,
+      2,
+      1,
+      3,
+      4
+     ],
+     "moved": 2,
+     "clf": 0.7325,
+     "plugin": 0.7425,
+     "joint": 0.7715
+    },
+    {
+     "kind": "swap13",
+     "pi": [
+      0,
+      3,
+      2,
+      1,
+      4
+     ],
+     "moved": 2,
+     "clf": 0.7315,
+     "plugin": 0.7425,
+     "joint": 0.7715
+    },
+    {
+     "kind": "swap14",
+     "pi": [
+      0,
+      4,
+      2,
+      3,
+      1
+     ],
+     "moved": 2,
+     "clf": 0.726,
+     "plugin": 0.7425,
+     "joint": 0.7715
+    },
+    {
+     "kind": "swap23",
+     "pi": [
+      0,
+      1,
+      3,
+      2,
+      4
+     ],
+     "moved": 2,
+     "clf": 0.7295,
+     "plugin": 0.7425,
+     "joint": 0.7715
+    },
+    {
+     "kind": "swap24",
+     "pi": [
+      0,
+      1,
+      4,
+      3,
+      2
+     ],
+     "moved": 2,
+     "clf": 0.7355,
+     "plugin": 0.7425,
+     "joint": 0.7715
+    },
+    {
+     "kind": "swap34",
+     "pi": [
+      0,
+      1,
+      2,
+      4,
+      3
+     ],
+     "moved": 2,
+     "clf": 0.731,
+     "plugin": 0.7425,
+     "joint": 0.7715
+    },
+    {
+     "kind": "random",
+     "pi": [
+      3,
+      1,
+      4,
+      0,
+      2
+     ],
+     "moved": 4,
+     "clf": 0.733,
+     "plugin": 0.7425,
+     "joint": 0.7715
+    },
+    {
+     "kind": "random",
+     "pi": [
+      0,
+      3,
+      4,
+      1,
+      2
+     ],
+     "moved": 4,
+     "clf": 0.727,
+     "plugin": 0.7425,
+     "joint": 0.7715
+    },
+    {
+     "kind": "random",
+     "pi": [
+      2,
+      3,
+      1,
+      0,
+      4
+     ],
+     "moved": 4,
+     "clf": 0.728,
+     "plugin": 0.7425,
+     "joint": 0.7715
+    },
+    {
+     "kind": "random",
+     "pi": [
+      4,
+      0,
+      1,
+      3,
+      2
+     ],
+     "moved": 4,
+     "clf": 0.739,
+     "plugin": 0.7425,
+     "joint": 0.7715
+    },
+    {
+     "kind": "random",
+     "pi": [
+      4,
+      3,
+      0,
+      2,
+      1
+     ],
+     "moved": 5,
+     "clf": 0.735,
+     "plugin": 0.7425,
+     "joint": 0.7715
+    },
+    {
+     "kind": "random",
+     "pi": [
+      2,
+      4,
+      0,
+      1,
+      3
+     ],
+     "moved": 5,
+     "clf": 0.7275,
+     "plugin": 0.7425,
+     "joint": 0.7715
+    },
+    {
+     "kind": "random",
+     "pi": [
+      4,
+      0,
+      3,
+      1,
+      2
+     ],
+     "moved": 5,
+     "clf": 0.739,
+     "plugin": 0.7425,
+     "joint": 0.7715
+    },
+    {
+     "kind": "random",
+     "pi": [
+      4,
+      0,
+      2,
+      1,
+      3
+     ],
+     "moved": 4,
+     "clf": 0.741,
+     "plugin": 0.7425,
+     "joint": 0.7715
+    },
+    {
+     "kind": "random",
+     "pi": [
+      4,
+      2,
+      3,
+      1,
+      0
+     ],
+     "moved": 5,
+     "clf": 0.743,
+     "plugin": 0.7425,
+     "joint": 0.7715
+    },
+    {
+     "kind": "random",
+     "pi": [
+      2,
+      3,
+      1,
+      4,
+      0
+     ],
+     "moved": 5,
+     "clf": 0.733,
+     "plugin": 0.7425,
+     "joint": 0.7715
+    },
+    {
+     "kind": "random",
+     "pi": [
+      1,
+      3,
+      0,
+      4,
+      2
+     ],
+     "moved": 5,
+     "clf": 0.733,
+     "plugin": 0.7425,
+     "joint": 0.7715
+    },
+    {
+     "kind": "random",
+     "pi": [
+      2,
+      1,
+      3,
+      0,
+      4
+     ],
+     "moved": 3,
+     "clf": 0.7275,
+     "plugin": 0.7425,
+     "joint": 0.7715
+    },
+    {
+     "kind": "random",
+     "pi": [
+      2,
+      4,
+      1,
+      0,
+      3
+     ],
+     "moved": 5,
+     "clf": 0.7345,
+     "plugin": 0.7425,
+     "joint": 0.7715
+    },
+    {
+     "kind": "random",
+     "pi": [
+      0,
+      3,
+      1,
+      2,
+      4
+     ],
+     "moved": 3,
+     "clf": 0.7265,
+     "plugin": 0.7425,
+     "joint": 0.7715
+    },
+    {
+     "kind": "random",
+     "pi": [
+      0,
+      2,
+      4,
+      1,
+      3
+     ],
+     "moved": 4,
+     "clf": 0.736,
+     "plugin": 0.7425,
+     "joint": 0.7715
+    }
+   ],
+   "time": [
+    {
+     "kind": "shuffle0",
+     "clf": 0.736,
+     "plugin": 0.7425,
+     "joint": 0.7715
+    },
+    {
+     "kind": "shuffle1",
+     "clf": 0.731,
+     "plugin": 0.7425,
+     "joint": 0.7715
+    },
+    {
+     "kind": "shuffle2",
+     "clf": 0.738,
+     "plugin": 0.7425,
+     "joint": 0.7715
+    },
+    {
+     "kind": "reverse",
+     "clf": 0.739,
+     "plugin": 0.7425,
+     "joint": 0.7715
+    }
+   ],
+   "generator_relabel_checks": [
+    {
+     "pi": [
+      1,
+      2,
+      3,
+      4,
+      0
+     ],
+     "max_abs_table_diff": 5.960464477539063e-08,
+     "plugin_forward": 0.7425,
+     "episodes_differing": 0
+    },
+    {
+     "pi": [
+      2,
+      3,
+      4,
+      0,
+      1
+     ],
+     "max_abs_table_diff": 5.960464477539063e-08,
+     "plugin_forward": 0.7425,
+     "episodes_differing": 0
+    },
+    {
+     "pi": [
+      3,
+      4,
+      0,
+      1,
+      2
+     ],
+     "max_abs_table_diff": 2.9802322387695312e-08,
+     "plugin_forward": 0.7425,
+     "episodes_differing": 0
+    },
+    {
+     "pi": [
+      4,
+      0,
+      1,
+      2,
+      3
+     ],
+     "max_abs_table_diff": 2.9802322387695312e-08,
+     "plugin_forward": 0.7425,
+     "episodes_differing": 0
+    }
+   ],
+   "clf_discordant_vs_identity": {
+    "mean": 0.08410526315789472,
+    "max": 0.1045
+   },
+   "controls": {
+    "sigma": [
+     0,
+     1,
+     2,
+     3,
+     4
+    ],
+    "slot_best_r2": [
+     0.998,
+     0.998,
+     0.998,
+     0.998,
+     0.998
+    ],
+    "frames": [
+     [
+      [
+       -0.0013,
+       -1.0031
+      ],
+      [
+       -1.0031,
+       -0.0018
+      ]
+     ],
+     [
+      [
+       -0.0009,
+       -1.0066
+      ],
+      [
+       -1.0054,
+       -0.0019
+      ]
+     ],
+     [
+      [
+       -0.0003,
+       -1.0049
+      ],
+      [
+       -1.0055,
+       0.0015
+      ]
+     ],
+     [
+      [
+       -0.0008,
+       -1.0026
+      ],
+      [
+       -1.0048,
+       0.0001
+      ]
+     ],
+     [
+      [
+       -0.0019,
+       -1.0004
+      ],
+      [
+       -0.9997,
+       0.0013
+      ]
+     ]
+    ],
+    "perms": [
+     {
+      "kind": "cyclic+1",
+      "pi": [
+       1,
+       2,
+       3,
+       4,
+       0
+      ],
+      "pinv": [
+       4,
+       0,
+       1,
+       2,
+       3
+      ],
+      "moved": 5,
+      "bits_only": 0.1035,
+      "joint_old_wiring": 0.0985
+     },
+     {
+      "kind": "cyclic+2",
+      "pi": [
+       2,
+       3,
+       4,
+       0,
+       1
+      ],
+      "pinv": [
+       3,
+       4,
+       0,
+       1,
+       2
+      ],
+      "moved": 5,
+      "bits_only": 0.108,
+      "joint_old_wiring": 0.113
+     },
+     {
+      "kind": "cyclic+3",
+      "pi": [
+       3,
+       4,
+       0,
+       1,
+       2
+      ],
+      "pinv": [
+       2,
+       3,
+       4,
+       0,
+       1
+      ],
+      "moved": 5,
+      "bits_only": 0.103,
+      "joint_old_wiring": 0.101
+     },
+     {
+      "kind": "cyclic+4",
+      "pi": [
+       4,
+       0,
+       1,
+       2,
+       3
+      ],
+      "pinv": [
+       1,
+       2,
+       3,
+       4,
+       0
+      ],
+      "moved": 5,
+      "bits_only": 0.1025,
+      "joint_old_wiring": 0.1005
+     },
+     {
+      "kind": "swap01",
+      "pi": [
+       1,
+       0,
+       2,
+       3,
+       4
+      ],
+      "pinv": [
+       1,
+       0,
+       2,
+       3,
+       4
+      ],
+      "moved": 2,
+      "bits_only": 0.3225,
+      "joint_old_wiring": 0.3275
+     },
+     {
+      "kind": "swap02",
+      "pi": [
+       2,
+       1,
+       0,
+       3,
+       4
+      ],
+      "pinv": [
+       2,
+       1,
+       0,
+       3,
+       4
+      ],
+      "moved": 2,
+      "bits_only": 0.333,
+      "joint_old_wiring": 0.3405
+     },
+     {
+      "kind": "swap03",
+      "pi": [
+       3,
+       1,
+       2,
+       0,
+       4
+      ],
+      "pinv": [
+       3,
+       1,
+       2,
+       0,
+       4
+      ],
+      "moved": 2,
+      "bits_only": 0.3095,
+      "joint_old_wiring": 0.323
+     }
+    ],
+    "identity": 0.7345,
+    "code_shuffle": 0.1005,
+    "frame_rel_dist": [
+     [
+      0.0,
+      0.003,
+      0.003,
+      0.002,
+      0.004
+     ],
+     [
+      0.003,
+      0.0,
+      0.003,
+      0.003,
+      0.006
+     ],
+     [
+      0.003,
+      0.003,
+      0.0,
+      0.002,
+      0.005
+     ],
+     [
+      0.002,
+      0.003,
+      0.002,
+      0.0,
+      0.004
+     ],
+     [
+      0.004,
+      0.006,
+      0.005,
+      0.004,
+      0.0
+     ]
+    ],
+    "frame_rel_dist_signflip": [
+     [
+      2.0,
+      2.0,
+      2.0,
+      2.0,
+      2.0
+     ],
+     [
+      2.0,
+      2.0,
+      2.0,
+      2.0,
+      2.0
+     ],
+     [
+      2.0,
+      2.0,
+      2.0,
+      2.0,
+      2.0
+     ],
+     [
+      2.0,
+      2.0,
+      2.0,
+      2.0,
+      2.0
+     ],
+     [
+      2.0,
+      2.0,
+      2.0,
+      2.0,
+      2.0
+     ]
+    ]
+   },
+   "clf_discordant_vs_identity_time_orders": {
+    "mean": 0.07225000000000001,
+    "max": 0.0815
+   }
+  },
+  "rcc60k_lr4_s0": {
+   "route": "Generator",
+   "feedback": "RCC own",
+   "B": 2000,
+   "naive": 0.4525,
+   "perms": [
+    {
+     "kind": "identity",
+     "pi": [
+      0,
+      1,
+      2,
+      3,
+      4
+     ],
+     "moved": 0,
+     "clf": 0.693,
+     "plugin": 0.691,
+     "joint": 0.7715
+    },
+    {
+     "kind": "cyclic+1",
+     "pi": [
+      1,
+      2,
+      3,
+      4,
+      0
+     ],
+     "moved": 5,
+     "clf": 0.705,
+     "plugin": 0.691,
+     "joint": 0.7715
+    },
+    {
+     "kind": "cyclic+2",
+     "pi": [
+      2,
+      3,
+      4,
+      0,
+      1
+     ],
+     "moved": 5,
+     "clf": 0.697,
+     "plugin": 0.691,
+     "joint": 0.7715
+    },
+    {
+     "kind": "cyclic+3",
+     "pi": [
+      3,
+      4,
+      0,
+      1,
+      2
+     ],
+     "moved": 5,
+     "clf": 0.6965,
+     "plugin": 0.691,
+     "joint": 0.7715
+    },
+    {
+     "kind": "cyclic+4",
+     "pi": [
+      4,
+      0,
+      1,
+      2,
+      3
+     ],
+     "moved": 5,
+     "clf": 0.6975,
+     "plugin": 0.691,
+     "joint": 0.7715
+    },
+    {
+     "kind": "swap01",
+     "pi": [
+      1,
+      0,
+      2,
+      3,
+      4
+     ],
+     "moved": 2,
+     "clf": 0.701,
+     "plugin": 0.691,
+     "joint": 0.7715
+    },
+    {
+     "kind": "swap02",
+     "pi": [
+      2,
+      1,
+      0,
+      3,
+      4
+     ],
+     "moved": 2,
+     "clf": 0.6955,
+     "plugin": 0.691,
+     "joint": 0.7715
+    },
+    {
+     "kind": "swap03",
+     "pi": [
+      3,
+      1,
+      2,
+      0,
+      4
+     ],
+     "moved": 2,
+     "clf": 0.689,
+     "plugin": 0.691,
+     "joint": 0.7715
+    },
+    {
+     "kind": "swap04",
+     "pi": [
+      4,
+      1,
+      2,
+      3,
+      0
+     ],
+     "moved": 2,
+     "clf": 0.6945,
+     "plugin": 0.691,
+     "joint": 0.7715
+    },
+    {
+     "kind": "swap12",
+     "pi": [
+      0,
+      2,
+      1,
+      3,
+      4
+     ],
+     "moved": 2,
+     "clf": 0.7025,
+     "plugin": 0.691,
+     "joint": 0.7715
+    },
+    {
+     "kind": "swap13",
+     "pi": [
+      0,
+      3,
+      2,
+      1,
+      4
+     ],
+     "moved": 2,
+     "clf": 0.696,
+     "plugin": 0.691,
+     "joint": 0.7715
+    },
+    {
+     "kind": "swap14",
+     "pi": [
+      0,
+      4,
+      2,
+      3,
+      1
+     ],
+     "moved": 2,
+     "clf": 0.693,
+     "plugin": 0.691,
+     "joint": 0.7715
+    },
+    {
+     "kind": "swap23",
+     "pi": [
+      0,
+      1,
+      3,
+      2,
+      4
+     ],
+     "moved": 2,
+     "clf": 0.703,
+     "plugin": 0.691,
+     "joint": 0.7715
+    },
+    {
+     "kind": "swap24",
+     "pi": [
+      0,
+      1,
+      4,
+      3,
+      2
+     ],
+     "moved": 2,
+     "clf": 0.7,
+     "plugin": 0.691,
+     "joint": 0.7715
+    },
+    {
+     "kind": "swap34",
+     "pi": [
+      0,
+      1,
+      2,
+      4,
+      3
+     ],
+     "moved": 2,
+     "clf": 0.699,
+     "plugin": 0.691,
+     "joint": 0.7715
+    },
+    {
+     "kind": "random",
+     "pi": [
+      3,
+      1,
+      4,
+      0,
+      2
+     ],
+     "moved": 4,
+     "clf": 0.6895,
+     "plugin": 0.691,
+     "joint": 0.7715
+    },
+    {
+     "kind": "random",
+     "pi": [
+      0,
+      3,
+      4,
+      1,
+      2
+     ],
+     "moved": 4,
+     "clf": 0.6975,
+     "plugin": 0.691,
+     "joint": 0.7715
+    },
+    {
+     "kind": "random",
+     "pi": [
+      2,
+      3,
+      1,
+      0,
+      4
+     ],
+     "moved": 4,
+     "clf": 0.6985,
+     "plugin": 0.691,
+     "joint": 0.7715
+    },
+    {
+     "kind": "random",
+     "pi": [
+      4,
+      0,
+      1,
+      3,
+      2
+     ],
+     "moved": 4,
+     "clf": 0.6915,
+     "plugin": 0.691,
+     "joint": 0.7715
+    },
+    {
+     "kind": "random",
+     "pi": [
+      4,
+      3,
+      0,
+      2,
+      1
+     ],
+     "moved": 5,
+     "clf": 0.6975,
+     "plugin": 0.691,
+     "joint": 0.7715
+    }
+   ],
+   "time": [
+    {
+     "kind": "shuffle0",
+     "clf": 0.7025,
+     "plugin": 0.691,
+     "joint": 0.7715
+    },
+    {
+     "kind": "shuffle1",
+     "clf": 0.6925,
+     "plugin": 0.691,
+     "joint": 0.7715
+    },
+    {
+     "kind": "shuffle2",
+     "clf": 0.6915,
+     "plugin": 0.691,
+     "joint": 0.7715
+    },
+    {
+     "kind": "reverse",
+     "clf": 0.695,
+     "plugin": 0.691,
+     "joint": 0.7715
+    }
+   ],
+   "generator_relabel_checks": [
+    {
+     "pi": [
+      1,
+      2,
+      3,
+      4,
+      0
+     ],
+     "max_abs_table_diff": 2.9802322387695312e-08,
+     "plugin_forward": 0.691,
+     "episodes_differing": 0
+    },
+    {
+     "pi": [
+      2,
+      3,
+      4,
+      0,
+      1
+     ],
+     "max_abs_table_diff": 2.9802322387695312e-08,
+     "plugin_forward": 0.691,
+     "episodes_differing": 0
+    },
+    {
+     "pi": [
+      3,
+      4,
+      0,
+      1,
+      2
+     ],
+     "max_abs_table_diff": 5.960464477539063e-08,
+     "plugin_forward": 0.691,
+     "episodes_differing": 0
+    },
+    {
+     "pi": [
+      4,
+      0,
+      1,
+      2,
+      3
+     ],
+     "max_abs_table_diff": 5.960464477539063e-08,
+     "plugin_forward": 0.691,
+     "episodes_differing": 0
+    }
+   ],
+   "clf_discordant_vs_identity": {
+    "mean": 0.09515789473684211,
+    "max": 0.1245
+   },
+   "controls": {
+    "sigma": [
+     0,
+     1,
+     2,
+     3,
+     4
+    ],
+    "slot_best_r2": [
+     0.995,
+     0.995,
+     0.995,
+     0.995,
+     0.995
+    ],
+    "frames": [
+     [
+      [
+       -0.003,
+       -1.0172
+      ],
+      [
+       -1.0146,
+       0.001
+      ]
+     ],
+     [
+      [
+       0.0026,
+       -1.0131
+      ],
+      [
+       -1.0192,
+       -0.0042
+      ]
+     ],
+     [
+      [
+       0.0005,
+       -1.0111
+      ],
+      [
+       -1.0094,
+       -0.0019
+      ]
+     ],
+     [
+      [
+       0.0028,
+       -1.0186
+      ],
+      [
+       -1.0154,
+       0.0039
+      ]
+     ],
+     [
+      [
+       -0.0011,
+       -1.0155
+      ],
+      [
+       -1.0139,
+       -0.0005
+      ]
+     ]
+    ],
+    "perms": [
+     {
+      "kind": "cyclic+1",
+      "pi": [
+       1,
+       2,
+       3,
+       4,
+       0
+      ],
+      "pinv": [
+       4,
+       0,
+       1,
+       2,
+       3
+      ],
+      "moved": 5,
+      "bits_only": 0.111,
+      "joint_old_wiring": 0.113
+     },
+     {
+      "kind": "cyclic+2",
+      "pi": [
+       2,
+       3,
+       4,
+       0,
+       1
+      ],
+      "pinv": [
+       3,
+       4,
+       0,
+       1,
+       2
+      ],
+      "moved": 5,
+      "bits_only": 0.094,
+      "joint_old_wiring": 0.094
+     },
+     {
+      "kind": "cyclic+3",
+      "pi": [
+       3,
+       4,
+       0,
+       1,
+       2
+      ],
+      "pinv": [
+       2,
+       3,
+       4,
+       0,
+       1
+      ],
+      "moved": 5,
+      "bits_only": 0.101,
+      "joint_old_wiring": 0.1025
+     },
+     {
+      "kind": "cyclic+4",
+      "pi": [
+       4,
+       0,
+       1,
+       2,
+       3
+      ],
+      "pinv": [
+       1,
+       2,
+       3,
+       4,
+       0
+      ],
+      "moved": 5,
+      "bits_only": 0.1105,
+      "joint_old_wiring": 0.098
+     },
+     {
+      "kind": "swap01",
+      "pi": [
+       1,
+       0,
+       2,
+       3,
+       4
+      ],
+      "pinv": [
+       1,
+       0,
+       2,
+       3,
+       4
+      ],
+      "moved": 2,
+      "bits_only": 0.3335,
+      "joint_old_wiring": 0.3535
+     },
+     {
+      "kind": "swap02",
+      "pi": [
+       2,
+       1,
+       0,
+       3,
+       4
+      ],
+      "pinv": [
+       2,
+       1,
+       0,
+       3,
+       4
+      ],
+      "moved": 2,
+      "bits_only": 0.332,
+      "joint_old_wiring": 0.355
+     },
+     {
+      "kind": "swap03",
+      "pi": [
+       3,
+       1,
+       2,
+       0,
+       4
+      ],
+      "pinv": [
+       3,
+       1,
+       2,
+       0,
+       4
+      ],
+      "moved": 2,
+      "bits_only": 0.3305,
+      "joint_old_wiring": 0.355
+     }
+    ],
+    "identity": 0.693,
+    "code_shuffle": 0.107,
+    "frame_rel_dist": [
+     [
+      0.0,
+      0.007,
+      0.006,
+      0.005,
+      0.002
+     ],
+     [
+      0.007,
+      0.0,
+      0.007,
+      0.007,
+      0.005
+     ],
+     [
+      0.006,
+      0.007,
+      0.0,
+      0.008,
+      0.005
+     ],
+     [
+      0.005,
+      0.007,
+      0.008,
+      0.0,
+      0.005
+     ],
+     [
+      0.002,
+      0.005,
+      0.005,
+      0.005,
+      0.0
+     ]
+    ],
+    "frame_rel_dist_signflip": [
+     [
+      2.0,
+      2.0,
+      2.0,
+      2.0,
+      2.0
+     ],
+     [
+      2.0,
+      2.0,
+      2.0,
+      2.0,
+      2.0
+     ],
+     [
+      2.0,
+      2.0,
+      2.0,
+      2.0,
+      2.0
+     ],
+     [
+      2.0,
+      2.0,
+      2.0,
+      2.0,
+      2.0
+     ],
+     [
+      2.0,
+      2.0,
+      2.0,
+      2.0,
+      2.0
+     ]
+    ]
+   },
+   "clf_discordant_vs_identity_time_orders": {
+    "mean": 0.076625,
+    "max": 0.0795
+   }
+  },
+  "rcc60k_lr4_s1": {
+   "route": "Generator",
+   "feedback": "RCC own",
+   "B": 2000,
+   "naive": 0.4585,
+   "perms": [
+    {
+     "kind": "identity",
+     "pi": [
+      0,
+      1,
+      2,
+      3,
+      4
+     ],
+     "moved": 0,
+     "clf": 0.699,
+     "plugin": 0.6935,
+     "joint": 0.7715
+    },
+    {
+     "kind": "cyclic+1",
+     "pi": [
+      1,
+      2,
+      3,
+      4,
+      0
+     ],
+     "moved": 5,
+     "clf": 0.713,
+     "plugin": 0.6935,
+     "joint": 0.7715
+    },
+    {
+     "kind": "cyclic+2",
+     "pi": [
+      2,
+      3,
+      4,
+      0,
+      1
+     ],
+     "moved": 5,
+     "clf": 0.6975,
+     "plugin": 0.6935,
+     "joint": 0.7715
+    },
+    {
+     "kind": "cyclic+3",
+     "pi": [
+      3,
+      4,
+      0,
+      1,
+      2
+     ],
+     "moved": 5,
+     "clf": 0.705,
+     "plugin": 0.6935,
+     "joint": 0.7715
+    },
+    {
+     "kind": "cyclic+4",
+     "pi": [
+      4,
+      0,
+      1,
+      2,
+      3
+     ],
+     "moved": 5,
+     "clf": 0.6945,
+     "plugin": 0.6935,
+     "joint": 0.7715
+    },
+    {
+     "kind": "swap01",
+     "pi": [
+      1,
+      0,
+      2,
+      3,
+      4
+     ],
+     "moved": 2,
+     "clf": 0.7055,
+     "plugin": 0.6935,
+     "joint": 0.7715
+    },
+    {
+     "kind": "swap02",
+     "pi": [
+      2,
+      1,
+      0,
+      3,
+      4
+     ],
+     "moved": 2,
+     "clf": 0.6985,
+     "plugin": 0.6935,
+     "joint": 0.7715
+    },
+    {
+     "kind": "swap03",
+     "pi": [
+      3,
+      1,
+      2,
+      0,
+      4
+     ],
+     "moved": 2,
+     "clf": 0.7005,
+     "plugin": 0.6935,
+     "joint": 0.7715
+    },
+    {
+     "kind": "swap04",
+     "pi": [
+      4,
+      1,
+      2,
+      3,
+      0
+     ],
+     "moved": 2,
+     "clf": 0.7105,
+     "plugin": 0.6935,
+     "joint": 0.7715
+    },
+    {
+     "kind": "swap12",
+     "pi": [
+      0,
+      2,
+      1,
+      3,
+      4
+     ],
+     "moved": 2,
+     "clf": 0.703,
+     "plugin": 0.6935,
+     "joint": 0.7715
+    },
+    {
+     "kind": "swap13",
+     "pi": [
+      0,
+      3,
+      2,
+      1,
+      4
+     ],
+     "moved": 2,
+     "clf": 0.704,
+     "plugin": 0.6935,
+     "joint": 0.7715
+    },
+    {
+     "kind": "swap14",
+     "pi": [
+      0,
+      4,
+      2,
+      3,
+      1
+     ],
+     "moved": 2,
+     "clf": 0.7075,
+     "plugin": 0.6935,
+     "joint": 0.7715
+    },
+    {
+     "kind": "swap23",
+     "pi": [
+      0,
+      1,
+      3,
+      2,
+      4
+     ],
+     "moved": 2,
+     "clf": 0.693,
+     "plugin": 0.6935,
+     "joint": 0.7715
+    },
+    {
+     "kind": "swap24",
+     "pi": [
+      0,
+      1,
+      4,
+      3,
+      2
+     ],
+     "moved": 2,
+     "clf": 0.6935,
+     "plugin": 0.6935,
+     "joint": 0.7715
+    },
+    {
+     "kind": "swap34",
+     "pi": [
+      0,
+      1,
+      2,
+      4,
+      3
+     ],
+     "moved": 2,
+     "clf": 0.705,
+     "plugin": 0.6935,
+     "joint": 0.7715
+    },
+    {
+     "kind": "random",
+     "pi": [
+      3,
+      1,
+      4,
+      0,
+      2
+     ],
+     "moved": 4,
+     "clf": 0.6965,
+     "plugin": 0.6935,
+     "joint": 0.7715
+    },
+    {
+     "kind": "random",
+     "pi": [
+      0,
+      3,
+      4,
+      1,
+      2
+     ],
+     "moved": 4,
+     "clf": 0.7025,
+     "plugin": 0.6935,
+     "joint": 0.7715
+    },
+    {
+     "kind": "random",
+     "pi": [
+      2,
+      3,
+      1,
+      0,
+      4
+     ],
+     "moved": 4,
+     "clf": 0.7005,
+     "plugin": 0.6935,
+     "joint": 0.7715
+    },
+    {
+     "kind": "random",
+     "pi": [
+      4,
+      0,
+      1,
+      3,
+      2
+     ],
+     "moved": 4,
+     "clf": 0.697,
+     "plugin": 0.6935,
+     "joint": 0.7715
+    },
+    {
+     "kind": "random",
+     "pi": [
+      4,
+      3,
+      0,
+      2,
+      1
+     ],
+     "moved": 5,
+     "clf": 0.702,
+     "plugin": 0.6935,
+     "joint": 0.7715
+    }
+   ],
+   "time": [
+    {
+     "kind": "shuffle0",
+     "clf": 0.7055,
+     "plugin": 0.6935,
+     "joint": 0.7715
+    },
+    {
+     "kind": "shuffle1",
+     "clf": 0.698,
+     "plugin": 0.6935,
+     "joint": 0.7715
+    },
+    {
+     "kind": "shuffle2",
+     "clf": 0.7105,
+     "plugin": 0.6935,
+     "joint": 0.7715
+    },
+    {
+     "kind": "reverse",
+     "clf": 0.7085,
+     "plugin": 0.6935,
+     "joint": 0.7715
+    }
+   ],
+   "generator_relabel_checks": [
+    {
+     "pi": [
+      1,
+      2,
+      3,
+      4,
+      0
+     ],
+     "max_abs_table_diff": 1.1920928955078125e-07,
+     "plugin_forward": 0.6935,
+     "episodes_differing": 0
+    },
+    {
+     "pi": [
+      2,
+      3,
+      4,
+      0,
+      1
+     ],
+     "max_abs_table_diff": 5.960464477539063e-08,
+     "plugin_forward": 0.6935,
+     "episodes_differing": 0
+    },
+    {
+     "pi": [
+      3,
+      4,
+      0,
+      1,
+      2
+     ],
+     "max_abs_table_diff": 1.4901161193847656e-08,
+     "plugin_forward": 0.6935,
+     "episodes_differing": 0
+    },
+    {
+     "pi": [
+      4,
+      0,
+      1,
+      2,
+      3
+     ],
+     "max_abs_table_diff": 5.960464477539063e-08,
+     "plugin_forward": 0.6935,
+     "episodes_differing": 0
+    }
+   ],
+   "clf_discordant_vs_identity": {
+    "mean": 0.10523684210526316,
+    "max": 0.1305
+   },
+   "controls": {
+    "sigma": [
+     0,
+     1,
+     2,
+     3,
+     4
+    ],
+    "slot_best_r2": [
+     0.995,
+     0.995,
+     0.995,
+     0.995,
+     0.995
+    ],
+    "frames": [
+     [
+      [
+       -1.0215,
+       0.0023
+      ],
+      [
+       -0.0014,
+       -1.0156
+      ]
+     ],
+     [
+      [
+       -1.0219,
+       -0.0013
+      ],
+      [
+       -0.0016,
+       -1.0183
+      ]
+     ],
+     [
+      [
+       -1.0158,
+       0.0002
+      ],
+      [
+       -0.001,
+       -1.0133
+      ]
+     ],
+     [
+      [
+       -1.013,
+       -0.0018
+      ],
+      [
+       0.0029,
+       -1.0119
+      ]
+     ],
+     [
+      [
+       -1.0112,
+       -0.0056
+      ],
+      [
+       -0.0026,
+       -1.0115
+      ]
+     ]
+    ],
+    "perms": [
+     {
+      "kind": "cyclic+1",
+      "pi": [
+       1,
+       2,
+       3,
+       4,
+       0
+      ],
+      "pinv": [
+       4,
+       0,
+       1,
+       2,
+       3
+      ],
+      "moved": 5,
+      "bits_only": 0.103,
+      "joint_old_wiring": 0.0985
+     },
+     {
+      "kind": "cyclic+2",
+      "pi": [
+       2,
+       3,
+       4,
+       0,
+       1
+      ],
+      "pinv": [
+       3,
+       4,
+       0,
+       1,
+       2
+      ],
+      "moved": 5,
+      "bits_only": 0.1095,
+      "joint_old_wiring": 0.113
+     },
+     {
+      "kind": "cyclic+3",
+      "pi": [
+       3,
+       4,
+       0,
+       1,
+       2
+      ],
+      "pinv": [
+       2,
+       3,
+       4,
+       0,
+       1
+      ],
+      "moved": 5,
+      "bits_only": 0.106,
+      "joint_old_wiring": 0.101
+     },
+     {
+      "kind": "cyclic+4",
+      "pi": [
+       4,
+       0,
+       1,
+       2,
+       3
+      ],
+      "pinv": [
+       1,
+       2,
+       3,
+       4,
+       0
+      ],
+      "moved": 5,
+      "bits_only": 0.105,
+      "joint_old_wiring": 0.1005
+     },
+     {
+      "kind": "swap01",
+      "pi": [
+       1,
+       0,
+       2,
+       3,
+       4
+      ],
+      "pinv": [
+       1,
+       0,
+       2,
+       3,
+       4
+      ],
+      "moved": 2,
+      "bits_only": 0.305,
+      "joint_old_wiring": 0.3275
+     },
+     {
+      "kind": "swap02",
+      "pi": [
+       2,
+       1,
+       0,
+       3,
+       4
+      ],
+      "pinv": [
+       2,
+       1,
+       0,
+       3,
+       4
+      ],
+      "moved": 2,
+      "bits_only": 0.3275,
+      "joint_old_wiring": 0.3405
+     },
+     {
+      "kind": "swap03",
+      "pi": [
+       3,
+       1,
+       2,
+       0,
+       4
+      ],
+      "pinv": [
+       3,
+       1,
+       2,
+       0,
+       4
+      ],
+      "moved": 2,
+      "bits_only": 0.3055,
+      "joint_old_wiring": 0.323
+     }
+    ],
+    "identity": 0.699,
+    "code_shuffle": 0.098,
+    "frame_rel_dist": [
+     [
+      0.0,
+      0.003,
+      0.005,
+      0.008,
+      0.01
+     ],
+     [
+      0.003,
+      0.0,
+      0.006,
+      0.008,
+      0.009
+     ],
+     [
+      0.005,
+      0.006,
+      0.0,
+      0.004,
+      0.005
+     ],
+     [
+      0.008,
+      0.008,
+      0.004,
+      0.0,
+      0.005
+     ],
+     [
+      0.01,
+      0.009,
+      0.005,
+      0.005,
+      0.0
+     ]
+    ],
+    "frame_rel_dist_signflip": [
+     [
+      2.0,
+      2.0,
+      2.0,
+      2.0,
+      2.0
+     ],
+     [
+      2.0,
+      2.0,
+      2.0,
+      2.0,
+      2.0
+     ],
+     [
+      2.0,
+      2.0,
+      2.0,
+      2.0,
+      2.0
+     ],
+     [
+      2.0,
+      2.0,
+      2.0,
+      2.0,
+      2.0
+     ],
+     [
+      2.0,
+      2.0,
+      2.0,
+      2.0,
+      2.0
+     ]
+    ]
+   },
+   "clf_discordant_vs_identity_time_orders": {
+    "mean": 0.081625,
+    "max": 0.0875
+   }
+  },
+  "clf60k_lr4_s0": {
+   "route": "Classifier",
+   "feedback": "oracle",
+   "B": 2000,
+   "naive": 0.4525,
+   "perms": [
+    {
+     "kind": "identity",
+     "pi": [
+      0,
+      1,
+      2,
+      3,
+      4
+     ],
+     "moved": 0,
+     "clf": 0.707,
+     "plugin": 0.142,
+     "joint": 0.7715,
+     "map_plugin": 0.7225
+    },
+    {
+     "kind": "cyclic+1",
+     "pi": [
+      1,
+      2,
+      3,
+      4,
+      0
+     ],
+     "moved": 5,
+     "clf": 0.1115,
+     "plugin": 0.142,
+     "joint": 0.7715,
+     "map_plugin": 0.1095
+    },
+    {
+     "kind": "cyclic+2",
+     "pi": [
+      2,
+      3,
+      4,
+      0,
+      1
+     ],
+     "moved": 5,
+     "clf": 0.1365,
+     "plugin": 0.142,
+     "joint": 0.7715,
+     "map_plugin": 0.131
+    },
+    {
+     "kind": "cyclic+3",
+     "pi": [
+      3,
+      4,
+      0,
+      1,
+      2
+     ],
+     "moved": 5,
+     "clf": 0.126,
+     "plugin": 0.142,
+     "joint": 0.7715,
+     "map_plugin": 0.1255
+    },
+    {
+     "kind": "cyclic+4",
+     "pi": [
+      4,
+      0,
+      1,
+      2,
+      3
+     ],
+     "moved": 5,
+     "clf": 0.0985,
+     "plugin": 0.142,
+     "joint": 0.7715,
+     "map_plugin": 0.093
+    },
+    {
+     "kind": "swap01",
+     "pi": [
+      1,
+      0,
+      2,
+      3,
+      4
+     ],
+     "moved": 2,
+     "clf": 0.2605,
+     "plugin": 0.142,
+     "joint": 0.7715,
+     "map_plugin": 0.2665
+    },
+    {
+     "kind": "swap02",
+     "pi": [
+      2,
+      1,
+      0,
+      3,
+      4
+     ],
+     "moved": 2,
+     "clf": 0.16,
+     "plugin": 0.142,
+     "joint": 0.7715,
+     "map_plugin": 0.162
+    },
+    {
+     "kind": "swap03",
+     "pi": [
+      3,
+      1,
+      2,
+      0,
+      4
+     ],
+     "moved": 2,
+     "clf": 0.1885,
+     "plugin": 0.142,
+     "joint": 0.7715,
+     "map_plugin": 0.1825
+    },
+    {
+     "kind": "swap04",
+     "pi": [
+      4,
+      1,
+      2,
+      3,
+      0
+     ],
+     "moved": 2,
+     "clf": 0.1565,
+     "plugin": 0.142,
+     "joint": 0.7715,
+     "map_plugin": 0.156
+    },
+    {
+     "kind": "swap12",
+     "pi": [
+      0,
+      2,
+      1,
+      3,
+      4
+     ],
+     "moved": 2,
+     "clf": 0.1655,
+     "plugin": 0.142,
+     "joint": 0.7715,
+     "map_plugin": 0.165
+    },
+    {
+     "kind": "swap13",
+     "pi": [
+      0,
+      3,
+      2,
+      1,
+      4
+     ],
+     "moved": 2,
+     "clf": 0.1585,
+     "plugin": 0.142,
+     "joint": 0.7715,
+     "map_plugin": 0.154
+    },
+    {
+     "kind": "swap14",
+     "pi": [
+      0,
+      4,
+      2,
+      3,
+      1
+     ],
+     "moved": 2,
+     "clf": 0.154,
+     "plugin": 0.142,
+     "joint": 0.7715,
+     "map_plugin": 0.1575
+    },
+    {
+     "kind": "swap23",
+     "pi": [
+      0,
+      1,
+      3,
+      2,
+      4
+     ],
+     "moved": 2,
+     "clf": 0.184,
+     "plugin": 0.142,
+     "joint": 0.7715,
+     "map_plugin": 0.186
+    },
+    {
+     "kind": "swap24",
+     "pi": [
+      0,
+      1,
+      4,
+      3,
+      2
+     ],
+     "moved": 2,
+     "clf": 0.209,
+     "plugin": 0.142,
+     "joint": 0.7715,
+     "map_plugin": 0.199
+    },
+    {
+     "kind": "swap34",
+     "pi": [
+      0,
+      1,
+      2,
+      4,
+      3
+     ],
+     "moved": 2,
+     "clf": 0.198,
+     "plugin": 0.142,
+     "joint": 0.7715,
+     "map_plugin": 0.2035
+    },
+    {
+     "kind": "random",
+     "pi": [
+      3,
+      1,
+      4,
+      0,
+      2
+     ],
+     "moved": 4,
+     "clf": 0.103,
+     "plugin": 0.142,
+     "joint": 0.7715,
+     "map_plugin": 0.1035
+    },
+    {
+     "kind": "random",
+     "pi": [
+      0,
+      3,
+      4,
+      1,
+      2
+     ],
+     "moved": 4,
+     "clf": 0.1105,
+     "plugin": 0.142,
+     "joint": 0.7715,
+     "map_plugin": 0.104
+    },
+    {
+     "kind": "random",
+     "pi": [
+      2,
+      3,
+      1,
+      0,
+      4
+     ],
+     "moved": 4,
+     "clf": 0.143,
+     "plugin": 0.142,
+     "joint": 0.7715,
+     "map_plugin": 0.1415
+    },
+    {
+     "kind": "random",
+     "pi": [
+      4,
+      0,
+      1,
+      3,
+      2
+     ],
+     "moved": 4,
+     "clf": 0.0955,
+     "plugin": 0.142,
+     "joint": 0.7715,
+     "map_plugin": 0.0925
+    },
+    {
+     "kind": "random",
+     "pi": [
+      4,
+      3,
+      0,
+      2,
+      1
+     ],
+     "moved": 5,
+     "clf": 0.108,
+     "plugin": 0.142,
+     "joint": 0.7715,
+     "map_plugin": 0.107
+    },
+    {
+     "kind": "random",
+     "pi": [
+      2,
+      4,
+      0,
+      1,
+      3
+     ],
+     "moved": 5,
+     "clf": 0.099,
+     "plugin": 0.142,
+     "joint": 0.7715,
+     "map_plugin": 0.109
+    },
+    {
+     "kind": "random",
+     "pi": [
+      4,
+      0,
+      3,
+      1,
+      2
+     ],
+     "moved": 5,
+     "clf": 0.098,
+     "plugin": 0.142,
+     "joint": 0.7715,
+     "map_plugin": 0.098
+    },
+    {
+     "kind": "random",
+     "pi": [
+      4,
+      0,
+      2,
+      1,
+      3
+     ],
+     "moved": 4,
+     "clf": 0.112,
+     "plugin": 0.142,
+     "joint": 0.7715,
+     "map_plugin": 0.1105
+    },
+    {
+     "kind": "random",
+     "pi": [
+      4,
+      2,
+      3,
+      1,
+      0
+     ],
+     "moved": 5,
+     "clf": 0.1165,
+     "plugin": 0.142,
+     "joint": 0.7715,
+     "map_plugin": 0.1145
+    },
+    {
+     "kind": "random",
+     "pi": [
+      2,
+      3,
+      1,
+      4,
+      0
+     ],
+     "moved": 5,
+     "clf": 0.119,
+     "plugin": 0.142,
+     "joint": 0.7715,
+     "map_plugin": 0.118
+    },
+    {
+     "kind": "random",
+     "pi": [
+      1,
+      3,
+      0,
+      4,
+      2
+     ],
+     "moved": 5,
+     "clf": 0.1165,
+     "plugin": 0.142,
+     "joint": 0.7715,
+     "map_plugin": 0.118
+    },
+    {
+     "kind": "random",
+     "pi": [
+      2,
+      1,
+      3,
+      0,
+      4
+     ],
+     "moved": 3,
+     "clf": 0.1035,
+     "plugin": 0.142,
+     "joint": 0.7715,
+     "map_plugin": 0.1025
+    },
+    {
+     "kind": "random",
+     "pi": [
+      2,
+      4,
+      1,
+      0,
+      3
+     ],
+     "moved": 5,
+     "clf": 0.1585,
+     "plugin": 0.142,
+     "joint": 0.7715,
+     "map_plugin": 0.1525
+    },
+    {
+     "kind": "random",
+     "pi": [
+      0,
+      3,
+      1,
+      2,
+      4
+     ],
+     "moved": 3,
+     "clf": 0.103,
+     "plugin": 0.142,
+     "joint": 0.7715,
+     "map_plugin": 0.1055
+    },
+    {
+     "kind": "random",
+     "pi": [
+      0,
+      2,
+      4,
+      1,
+      3
+     ],
+     "moved": 4,
+     "clf": 0.123,
+     "plugin": 0.142,
+     "joint": 0.7715,
+     "map_plugin": 0.1135
+    }
+   ],
+   "time": [
+    {
+     "kind": "shuffle0",
+     "clf": 0.717,
+     "plugin": 0.142,
+     "joint": 0.7715
+    },
+    {
+     "kind": "shuffle1",
+     "clf": 0.7095,
+     "plugin": 0.142,
+     "joint": 0.7715
+    },
+    {
+     "kind": "shuffle2",
+     "clf": 0.7155,
+     "plugin": 0.142,
+     "joint": 0.7715
+    },
+    {
+     "kind": "reverse",
+     "clf": 0.7115,
+     "plugin": 0.142,
+     "joint": 0.7715
+    }
+   ],
+   "generator_relabel_checks": [
+    {
+     "pi": [
+      1,
+      2,
+      3,
+      4,
+      0
+     ],
+     "max_abs_table_diff": 5.960464477539063e-08,
+     "plugin_forward": 0.142,
+     "episodes_differing": 0
+    },
+    {
+     "pi": [
+      2,
+      3,
+      4,
+      0,
+      1
+     ],
+     "max_abs_table_diff": 5.960464477539063e-08,
+     "plugin_forward": 0.142,
+     "episodes_differing": 0
+    },
+    {
+     "pi": [
+      3,
+      4,
+      0,
+      1,
+      2
+     ],
+     "max_abs_table_diff": 5.960464477539063e-08,
+     "plugin_forward": 0.142,
+     "episodes_differing": 0
+    },
+    {
+     "pi": [
+      4,
+      0,
+      1,
+      2,
+      3
+     ],
+     "max_abs_table_diff": 5.960464477539063e-08,
+     "plugin_forward": 0.142,
+     "episodes_differing": 0
+    }
+   ],
+   "clf_discordant_vs_identity": {
+    "mean": 0.6231052631578948,
+    "max": 0.67
+   },
+   "map": {
+    "donor": "gen60k_lr4_s0",
+    "map_r2_train_fit": 0.9968014059826089,
+    "map_r2_train_heldout": 0.9966841082361863,
+    "map_r2_novel": 0.9963138674978838,
+    "donor_own_plugin": 0.7435
+   },
+   "controls": {
+    "sigma": [
+     1,
+     0,
+     3,
+     4,
+     2
+    ],
+    "slot_best_r2": [
+     0.996,
+     0.997,
+     0.996,
+     0.996,
+     0.996
+    ],
+    "frames": [
+     [
+      [
+       1.0463,
+       0.0006
+      ],
+      [
+       -0.0002,
+       1.0468
+      ]
+     ],
+     [
+      [
+       -1.0474,
+       -0.0005
+      ],
+      [
+       -0.0018,
+       -1.0488
+      ]
+     ],
+     [
+      [
+       -1.0518,
+       -0.001
+      ],
+      [
+       0.0021,
+       -1.0482
+      ]
+     ],
+     [
+      [
+       1.057,
+       0.0025
+      ],
+      [
+       0.0006,
+       1.0589
+      ]
+     ],
+     [
+      [
+       -0.0017,
+       -1.0526
+      ],
+      [
+       -1.0533,
+       0.0028
+      ]
+     ]
+    ],
+    "perms": [
+     {
+      "kind": "cyclic+1",
+      "pi": [
+       1,
+       2,
+       3,
+       4,
+       0
+      ],
+      "pinv": [
+       4,
+       0,
+       1,
+       2,
+       3
+      ],
+      "moved": 5,
+      "bits_only": 0.1085,
+      "joint_old_wiring": 0.113,
+      "pairing": 0.1,
+      "tau": [
+       4,
+       0,
+       3,
+       1,
+       2
+      ]
+     },
+     {
+      "kind": "cyclic+2",
+      "pi": [
+       2,
+       3,
+       4,
+       0,
+       1
+      ],
+      "pinv": [
+       3,
+       4,
+       0,
+       1,
+       2
+      ],
+      "moved": 5,
+      "bits_only": 0.1,
+      "joint_old_wiring": 0.094,
+      "pairing": 0.2615,
+      "tau": [
+       2,
+       4,
+       1,
+       0,
+       3
+      ]
+     },
+     {
+      "kind": "cyclic+3",
+      "pi": [
+       3,
+       4,
+       0,
+       1,
+       2
+      ],
+      "pinv": [
+       2,
+       3,
+       4,
+       0,
+       1
+      ],
+      "moved": 5,
+      "bits_only": 0.1125,
+      "joint_old_wiring": 0.1025,
+      "pairing": 0.2305,
+      "tau": [
+       3,
+       2,
+       0,
+       4,
+       1
+      ]
+     },
+     {
+      "kind": "cyclic+4",
+      "pi": [
+       4,
+       0,
+       1,
+       2,
+       3
+      ],
+      "pinv": [
+       1,
+       2,
+       3,
+       4,
+       0
+      ],
+      "moved": 5,
+      "bits_only": 0.1065,
+      "joint_old_wiring": 0.098,
+      "pairing": 0.1185,
+      "tau": [
+       1,
+       3,
+       4,
+       2,
+       0
+      ]
+     },
+     {
+      "kind": "swap01",
+      "pi": [
+       1,
+       0,
+       2,
+       3,
+       4
+      ],
+      "pinv": [
+       1,
+       0,
+       2,
+       3,
+       4
+      ],
+      "moved": 2,
+      "bits_only": 0.336,
+      "joint_old_wiring": 0.3535,
+      "pairing": 0.2605,
+      "tau": [
+       1,
+       0,
+       2,
+       3,
+       4
+      ]
+     },
+     {
+      "kind": "swap02",
+      "pi": [
+       2,
+       1,
+       0,
+       3,
+       4
+      ],
+      "pinv": [
+       2,
+       1,
+       0,
+       3,
+       4
+      ],
+      "moved": 2,
+      "bits_only": 0.342,
+      "joint_old_wiring": 0.355,
+      "pairing": 0.3395,
+      "tau": [
+       0,
+       4,
+       2,
+       3,
+       1
+      ]
+     },
+     {
+      "kind": "swap03",
+      "pi": [
+       3,
+       1,
+       2,
+       0,
+       4
+      ],
+      "pinv": [
+       3,
+       1,
+       2,
+       0,
+       4
+      ],
+      "moved": 2,
+      "bits_only": 0.3245,
+      "joint_old_wiring": 0.355,
+      "pairing": 0.717,
+      "tau": [
+       0,
+       2,
+       1,
+       3,
+       4
+      ]
+     }
+    ],
+    "identity": 0.707,
+    "code_shuffle": 0.1145,
+    "frame_rel_dist": [
+     [
+      0.0,
+      2.0,
+      2.0,
+      0.011,
+      1.414
+     ],
+     [
+      2.0,
+      0.0,
+      0.004,
+      2.0,
+      1.414
+     ],
+     [
+      2.0,
+      0.004,
+      0.0,
+      2.0,
+      1.415
+     ],
+     [
+      0.011,
+      2.0,
+      2.0,
+      0.0,
+      1.415
+     ],
+     [
+      1.414,
+      1.414,
+      1.415,
+      1.415,
+      0.0
+     ]
+    ],
+    "frame_rel_dist_signflip": [
+     [
+      2.0,
+      0.002,
+      0.004,
+      2.0,
+      1.414
+     ],
+     [
+      0.002,
+      2.0,
+      2.0,
+      0.009,
+      1.415
+     ],
+     [
+      0.004,
+      2.0,
+      2.0,
+      0.008,
+      1.413
+     ],
+     [
+      2.0,
+      0.009,
+      0.008,
+      2.0,
+      1.414
+     ],
+     [
+      1.414,
+      1.415,
+      1.413,
+      1.414,
+      2.0
+     ]
+    ]
+   },
+   "pairing_preserving_slot_exchanges": [
+    {
+     "slots": [
+      0,
+      1
+     ],
+     "channels": [
+      1,
+      0
+     ],
+     "frame_dist": 2.0,
+     "frame_dist_signflip": 0.002,
+     "slot_r2": [
+      0.996,
+      0.997
+     ],
+     "acc": 0.2605
+    },
+    {
+     "slots": [
+      0,
+      2
+     ],
+     "channels": [
+      1,
+      3
+     ],
+     "frame_dist": 2.0,
+     "frame_dist_signflip": 0.004,
+     "slot_r2": [
+      0.996,
+      0.996
+     ],
+     "acc": 0.2725
+    },
+    {
+     "slots": [
+      0,
+      3
+     ],
+     "channels": [
+      1,
+      4
+     ],
+     "frame_dist": 0.011,
+     "frame_dist_signflip": 2.0,
+     "slot_r2": [
+      0.996,
+      0.996
+     ],
+     "acc": 0.716
+    },
+    {
+     "slots": [
+      0,
+      4
+     ],
+     "channels": [
+      1,
+      2
+     ],
+     "frame_dist": 1.414,
+     "frame_dist_signflip": 1.414,
+     "slot_r2": [
+      0.996,
+      0.996
+     ],
+     "acc": 0.3735
+    },
+    {
+     "slots": [
+      1,
+      2
+     ],
+     "channels": [
+      0,
+      3
+     ],
+     "frame_dist": 0.004,
+     "frame_dist_signflip": 2.0,
+     "slot_r2": [
+      0.997,
+      0.996
+     ],
+     "acc": 0.717
+    },
+    {
+     "slots": [
+      1,
+      3
+     ],
+     "channels": [
+      0,
+      4
+     ],
+     "frame_dist": 2.0,
+     "frame_dist_signflip": 0.009,
+     "slot_r2": [
+      0.997,
+      0.996
+     ],
+     "acc": 0.261
+    },
+    {
+     "slots": [
+      1,
+      4
+     ],
+     "channels": [
+      0,
+      2
+     ],
+     "frame_dist": 1.414,
+     "frame_dist_signflip": 1.415,
+     "slot_r2": [
+      0.997,
+      0.996
+     ],
+     "acc": 0.3395
+    },
+    {
+     "slots": [
+      2,
+      3
+     ],
+     "channels": [
+      3,
+      4
+     ],
+     "frame_dist": 2.0,
+     "frame_dist_signflip": 0.008,
+     "slot_r2": [
+      0.996,
+      0.996
+     ],
+     "acc": 0.255
+    },
+    {
+     "slots": [
+      2,
+      4
+     ],
+     "channels": [
+      3,
+      2
+     ],
+     "frame_dist": 1.415,
+     "frame_dist_signflip": 1.413,
+     "slot_r2": [
+      0.996,
+      0.996
+     ],
+     "acc": 0.342
+    },
+    {
+     "slots": [
+      3,
+      4
+     ],
+     "channels": [
+      4,
+      2
+     ],
+     "frame_dist": 1.415,
+     "frame_dist_signflip": 1.414,
+     "slot_r2": [
+      0.996,
+      0.996
+     ],
+     "acc": 0.3845
+    }
+   ],
+   "env_joint_T": 0.7715,
+   "clf_discordant_vs_identity_time_orders": {
+    "mean": 0.060375,
+    "max": 0.0665
+   }
+  },
+  "clf60k_lr4_s1": {
+   "route": "Classifier",
+   "feedback": "oracle",
+   "B": 2000,
+   "naive": 0.4585,
+   "perms": [
+    {
+     "kind": "identity",
+     "pi": [
+      0,
+      1,
+      2,
+      3,
+      4
+     ],
+     "moved": 0,
+     "clf": 0.7085,
+     "plugin": 0.142,
+     "joint": 0.7715,
+     "map_plugin": 0.723
+    },
+    {
+     "kind": "cyclic+1",
+     "pi": [
+      1,
+      2,
+      3,
+      4,
+      0
+     ],
+     "moved": 5,
+     "clf": 0.1015,
+     "plugin": 0.142,
+     "joint": 0.7715,
+     "map_plugin": 0.0945
+    },
+    {
+     "kind": "cyclic+2",
+     "pi": [
+      2,
+      3,
+      4,
+      0,
+      1
+     ],
+     "moved": 5,
+     "clf": 0.119,
+     "plugin": 0.142,
+     "joint": 0.7715,
+     "map_plugin": 0.1195
+    },
+    {
+     "kind": "cyclic+3",
+     "pi": [
+      3,
+      4,
+      0,
+      1,
+      2
+     ],
+     "moved": 5,
+     "clf": 0.1135,
+     "plugin": 0.142,
+     "joint": 0.7715,
+     "map_plugin": 0.11
+    },
+    {
+     "kind": "cyclic+4",
+     "pi": [
+      4,
+      0,
+      1,
+      2,
+      3
+     ],
+     "moved": 5,
+     "clf": 0.1085,
+     "plugin": 0.142,
+     "joint": 0.7715,
+     "map_plugin": 0.1065
+    },
+    {
+     "kind": "swap01",
+     "pi": [
+      1,
+      0,
+      2,
+      3,
+      4
+     ],
+     "moved": 2,
+     "clf": 0.1935,
+     "plugin": 0.142,
+     "joint": 0.7715,
+     "map_plugin": 0.1865
+    },
+    {
+     "kind": "swap02",
+     "pi": [
+      2,
+      1,
+      0,
+      3,
+      4
+     ],
+     "moved": 2,
+     "clf": 0.184,
+     "plugin": 0.142,
+     "joint": 0.7715,
+     "map_plugin": 0.18
+    },
+    {
+     "kind": "swap03",
+     "pi": [
+      3,
+      1,
+      2,
+      0,
+      4
+     ],
+     "moved": 2,
+     "clf": 0.2055,
+     "plugin": 0.142,
+     "joint": 0.7715,
+     "map_plugin": 0.1895
+    },
+    {
+     "kind": "swap04",
+     "pi": [
+      4,
+      1,
+      2,
+      3,
+      0
+     ],
+     "moved": 2,
+     "clf": 0.153,
+     "plugin": 0.142,
+     "joint": 0.7715,
+     "map_plugin": 0.1495
+    },
+    {
+     "kind": "swap12",
+     "pi": [
+      0,
+      2,
+      1,
+      3,
+      4
+     ],
+     "moved": 2,
+     "clf": 0.205,
+     "plugin": 0.142,
+     "joint": 0.7715,
+     "map_plugin": 0.203
+    },
+    {
+     "kind": "swap13",
+     "pi": [
+      0,
+      3,
+      2,
+      1,
+      4
+     ],
+     "moved": 2,
+     "clf": 0.2005,
+     "plugin": 0.142,
+     "joint": 0.7715,
+     "map_plugin": 0.202
+    },
+    {
+     "kind": "swap14",
+     "pi": [
+      0,
+      4,
+      2,
+      3,
+      1
+     ],
+     "moved": 2,
+     "clf": 0.201,
+     "plugin": 0.142,
+     "joint": 0.7715,
+     "map_plugin": 0.197
+    },
+    {
+     "kind": "swap23",
+     "pi": [
+      0,
+      1,
+      3,
+      2,
+      4
+     ],
+     "moved": 2,
+     "clf": 0.155,
+     "plugin": 0.142,
+     "joint": 0.7715,
+     "map_plugin": 0.1465
+    },
+    {
+     "kind": "swap24",
+     "pi": [
+      0,
+      1,
+      4,
+      3,
+      2
+     ],
+     "moved": 2,
+     "clf": 0.202,
+     "plugin": 0.142,
+     "joint": 0.7715,
+     "map_plugin": 0.1995
+    },
+    {
+     "kind": "swap34",
+     "pi": [
+      0,
+      1,
+      2,
+      4,
+      3
+     ],
+     "moved": 2,
+     "clf": 0.195,
+     "plugin": 0.142,
+     "joint": 0.7715,
+     "map_plugin": 0.1935
+    },
+    {
+     "kind": "random",
+     "pi": [
+      3,
+      1,
+      4,
+      0,
+      2
+     ],
+     "moved": 4,
+     "clf": 0.1545,
+     "plugin": 0.142,
+     "joint": 0.7715,
+     "map_plugin": 0.147
+    },
+    {
+     "kind": "random",
+     "pi": [
+      0,
+      3,
+      4,
+      1,
+      2
+     ],
+     "moved": 4,
+     "clf": 0.108,
+     "plugin": 0.142,
+     "joint": 0.7715,
+     "map_plugin": 0.103
+    },
+    {
+     "kind": "random",
+     "pi": [
+      2,
+      3,
+      1,
+      0,
+      4
+     ],
+     "moved": 4,
+     "clf": 0.1185,
+     "plugin": 0.142,
+     "joint": 0.7715,
+     "map_plugin": 0.1245
+    },
+    {
+     "kind": "random",
+     "pi": [
+      4,
+      0,
+      1,
+      3,
+      2
+     ],
+     "moved": 4,
+     "clf": 0.1055,
+     "plugin": 0.142,
+     "joint": 0.7715,
+     "map_plugin": 0.107
+    },
+    {
+     "kind": "random",
+     "pi": [
+      4,
+      3,
+      0,
+      2,
+      1
+     ],
+     "moved": 5,
+     "clf": 0.127,
+     "plugin": 0.142,
+     "joint": 0.7715,
+     "map_plugin": 0.1255
+    }
+   ],
+   "time": [
+    {
+     "kind": "shuffle0",
+     "clf": 0.7065,
+     "plugin": 0.142,
+     "joint": 0.7715
+    },
+    {
+     "kind": "shuffle1",
+     "clf": 0.703,
+     "plugin": 0.142,
+     "joint": 0.7715
+    },
+    {
+     "kind": "shuffle2",
+     "clf": 0.705,
+     "plugin": 0.142,
+     "joint": 0.7715
+    },
+    {
+     "kind": "reverse",
+     "clf": 0.708,
+     "plugin": 0.142,
+     "joint": 0.7715
+    }
+   ],
+   "generator_relabel_checks": [
+    {
+     "pi": [
+      1,
+      2,
+      3,
+      4,
+      0
+     ],
+     "max_abs_table_diff": 5.960464477539063e-08,
+     "plugin_forward": 0.142,
+     "episodes_differing": 0
+    },
+    {
+     "pi": [
+      2,
+      3,
+      4,
+      0,
+      1
+     ],
+     "max_abs_table_diff": 5.960464477539063e-08,
+     "plugin_forward": 0.142,
+     "episodes_differing": 0
+    },
+    {
+     "pi": [
+      3,
+      4,
+      0,
+      1,
+      2
+     ],
+     "max_abs_table_diff": 5.960464477539063e-08,
+     "plugin_forward": 0.142,
+     "episodes_differing": 0
+    },
+    {
+     "pi": [
+      4,
+      0,
+      1,
+      2,
+      3
+     ],
+     "max_abs_table_diff": 5.960464477539063e-08,
+     "plugin_forward": 0.142,
+     "episodes_differing": 0
+    }
+   ],
+   "clf_discordant_vs_identity": {
+    "mean": 0.6199473684210526,
+    "max": 0.66
+   },
+   "map": {
+    "donor": "gen60k_lr4_s1",
+    "map_r2_train_fit": 0.996868053679016,
+    "map_r2_train_heldout": 0.9968022761458956,
+    "map_r2_novel": 0.996496379410412,
+    "donor_own_plugin": 0.7425
+   },
+   "controls": {
+    "sigma": [
+     2,
+     1,
+     4,
+     0,
+     3
+    ],
+    "slot_best_r2": [
+     0.996,
+     0.996,
+     0.996,
+     0.996,
+     0.996
+    ],
+    "frames": [
+     [
+      [
+       0.0008,
+       1.0454
+      ],
+      [
+       1.0494,
+       0.0031
+      ]
+     ],
+     [
+      [
+       -1.0471,
+       0.0021
+      ],
+      [
+       -0.0052,
+       -1.0513
+      ]
+     ],
+     [
+      [
+       -1.0423,
+       0.0006
+      ],
+      [
+       -0.0004,
+       -1.0448
+      ]
+     ],
+     [
+      [
+       1.05,
+       -0.0006
+      ],
+      [
+       -0.0026,
+       1.0464
+      ]
+     ],
+     [
+      [
+       -1.046,
+       0.0021
+      ],
+      [
+       -0.0024,
+       -1.0497
+      ]
+     ]
+    ],
+    "perms": [
+     {
+      "kind": "cyclic+1",
+      "pi": [
+       1,
+       2,
+       3,
+       4,
+       0
+      ],
+      "pinv": [
+       4,
+       0,
+       1,
+       2,
+       3
+      ],
+      "moved": 5,
+      "bits_only": 0.105,
+      "joint_old_wiring": 0.0985,
+      "pairing": 0.1705,
+      "tau": [
+       4,
+       0,
+       3,
+       1,
+       2
+      ]
+     },
+     {
+      "kind": "cyclic+2",
+      "pi": [
+       2,
+       3,
+       4,
+       0,
+       1
+      ],
+      "pinv": [
+       3,
+       4,
+       0,
+       1,
+       2
+      ],
+      "moved": 5,
+      "bits_only": 0.103,
+      "joint_old_wiring": 0.113,
+      "pairing": 0.2525,
+      "tau": [
+       2,
+       4,
+       1,
+       0,
+       3
+      ]
+     },
+     {
+      "kind": "cyclic+3",
+      "pi": [
+       3,
+       4,
+       0,
+       1,
+       2
+      ],
+      "pinv": [
+       2,
+       3,
+       4,
+       0,
+       1
+      ],
+      "moved": 5,
+      "bits_only": 0.102,
+      "joint_old_wiring": 0.101,
+      "pairing": 0.2285,
+      "tau": [
+       3,
+       2,
+       0,
+       4,
+       1
+      ]
+     },
+     {
+      "kind": "cyclic+4",
+      "pi": [
+       4,
+       0,
+       1,
+       2,
+       3
+      ],
+      "pinv": [
+       1,
+       2,
+       3,
+       4,
+       0
+      ],
+      "moved": 5,
+      "bits_only": 0.0965,
+      "joint_old_wiring": 0.1005,
+      "pairing": 0.167,
+      "tau": [
+       1,
+       3,
+       4,
+       2,
+       0
+      ]
+     },
+     {
+      "kind": "swap01",
+      "pi": [
+       1,
+       0,
+       2,
+       3,
+       4
+      ],
+      "pinv": [
+       1,
+       0,
+       2,
+       3,
+       4
+      ],
+      "moved": 2,
+      "bits_only": 0.3135,
+      "joint_old_wiring": 0.3275,
+      "pairing": 0.2685,
+      "tau": [
+       0,
+       3,
+       2,
+       1,
+       4
+      ]
+     },
+     {
+      "kind": "swap02",
+      "pi": [
+       2,
+       1,
+       0,
+       3,
+       4
+      ],
+      "pinv": [
+       2,
+       1,
+       0,
+       3,
+       4
+      ],
+      "moved": 2,
+      "bits_only": 0.3325,
+      "joint_old_wiring": 0.3405,
+      "pairing": 0.3715,
+      "tau": [
+       3,
+       1,
+       2,
+       0,
+       4
+      ]
+     },
+     {
+      "kind": "swap03",
+      "pi": [
+       3,
+       1,
+       2,
+       0,
+       4
+      ],
+      "pinv": [
+       3,
+       1,
+       2,
+       0,
+       4
+      ],
+      "moved": 2,
+      "bits_only": 0.307,
+      "joint_old_wiring": 0.323,
+      "pairing": 0.276,
+      "tau": [
+       0,
+       1,
+       2,
+       4,
+       3
+      ]
+     }
+    ],
+    "identity": 0.7085,
+    "code_shuffle": 0.1025,
+    "frame_rel_dist": [
+     [
+      0.0,
+      1.417,
+      1.415,
+      1.414,
+      1.416
+     ],
+     [
+      1.417,
+      0.0,
+      0.006,
+      2.0,
+      0.002
+     ],
+     [
+      1.415,
+      0.006,
+      0.0,
+      2.0,
+      0.004
+     ],
+     [
+      1.414,
+      2.0,
+      2.0,
+      0.0,
+      2.0
+     ],
+     [
+      1.416,
+      0.002,
+      0.004,
+      2.0,
+      0.0
+     ]
+    ],
+    "frame_rel_dist_signflip": [
+     [
+      2.0,
+      1.412,
+      1.413,
+      1.414,
+      1.413
+     ],
+     [
+      1.412,
+      2.0,
+      2.0,
+      0.007,
+      2.0
+     ],
+     [
+      1.413,
+      2.0,
+      2.0,
+      0.006,
+      2.0
+     ],
+     [
+      1.414,
+      0.007,
+      0.006,
+      2.0,
+      0.005
+     ],
+     [
+      1.413,
+      2.0,
+      2.0,
+      0.005,
+      2.0
+     ]
+    ]
+   },
+   "pairing_preserving_slot_exchanges": [
+    {
+     "slots": [
+      0,
+      1
+     ],
+     "channels": [
+      2,
+      1
+     ],
+     "frame_dist": 1.417,
+     "frame_dist_signflip": 1.412,
+     "slot_r2": [
+      0.996,
+      0.996
+     ],
+     "acc": 0.362
+    },
+    {
+     "slots": [
+      0,
+      2
+     ],
+     "channels": [
+      2,
+      4
+     ],
+     "frame_dist": 1.415,
+     "frame_dist_signflip": 1.413,
+     "slot_r2": [
+      0.996,
+      0.996
+     ],
+     "acc": 0.3615
+    },
+    {
+     "slots": [
+      0,
+      3
+     ],
+     "channels": [
+      2,
+      0
+     ],
+     "frame_dist": 1.414,
+     "frame_dist_signflip": 1.414,
+     "slot_r2": [
+      0.996,
+      0.996
+     ],
+     "acc": 0.3715
+    },
+    {
+     "slots": [
+      0,
+      4
+     ],
+     "channels": [
+      2,
+      3
+     ],
+     "frame_dist": 1.416,
+     "frame_dist_signflip": 1.413,
+     "slot_r2": [
+      0.996,
+      0.996
+     ],
+     "acc": 0.3635
+    },
+    {
+     "slots": [
+      1,
+      2
+     ],
+     "channels": [
+      1,
+      4
+     ],
+     "frame_dist": 0.006,
+     "frame_dist_signflip": 2.0,
+     "slot_r2": [
+      0.996,
+      0.996
+     ],
+     "acc": 0.718
+    },
+    {
+     "slots": [
+      1,
+      3
+     ],
+     "channels": [
+      1,
+      0
+     ],
+     "frame_dist": 2.0,
+     "frame_dist_signflip": 0.007,
+     "slot_r2": [
+      0.996,
+      0.996
+     ],
+     "acc": 0.2685
+    },
+    {
+     "slots": [
+      1,
+      4
+     ],
+     "channels": [
+      1,
+      3
+     ],
+     "frame_dist": 0.002,
+     "frame_dist_signflip": 2.0,
+     "slot_r2": [
+      0.996,
+      0.996
+     ],
+     "acc": 0.707
+    },
+    {
+     "slots": [
+      2,
+      3
+     ],
+     "channels": [
+      4,
+      0
+     ],
+     "frame_dist": 2.0,
+     "frame_dist_signflip": 0.006,
+     "slot_r2": [
+      0.996,
+      0.996
+     ],
+     "acc": 0.266
+    },
+    {
+     "slots": [
+      2,
+      4
+     ],
+     "channels": [
+      4,
+      3
+     ],
+     "frame_dist": 0.004,
+     "frame_dist_signflip": 2.0,
+     "slot_r2": [
+      0.996,
+      0.996
+     ],
+     "acc": 0.713
+    },
+    {
+     "slots": [
+      3,
+      4
+     ],
+     "channels": [
+      0,
+      3
+     ],
+     "frame_dist": 2.0,
+     "frame_dist_signflip": 0.005,
+     "slot_r2": [
+      0.996,
+      0.996
+     ],
+     "acc": 0.276
+    }
+   ],
+   "env_joint_T": 0.7715,
+   "clf_discordant_vs_identity_time_orders": {
+    "mean": 0.069375,
+    "max": 0.0735
+   }
+  },
+  "rccclf60k_lr4_s0": {
+   "route": "Classifier",
+   "feedback": "RCC own",
+   "B": 2000,
+   "naive": 0.4525,
+   "perms": [
+    {
+     "kind": "identity",
+     "pi": [
+      0,
+      1,
+      2,
+      3,
+      4
+     ],
+     "moved": 0,
+     "clf": 0.592,
+     "plugin": 0.138,
+     "joint": 0.7715,
+     "map_plugin": 0.419
+    },
+    {
+     "kind": "cyclic+1",
+     "pi": [
+      1,
+      2,
+      3,
+      4,
+      0
+     ],
+     "moved": 5,
+     "clf": 0.094,
+     "plugin": 0.138,
+     "joint": 0.7715,
+     "map_plugin": 0.1035
+    },
+    {
+     "kind": "cyclic+2",
+     "pi": [
+      2,
+      3,
+      4,
+      0,
+      1
+     ],
+     "moved": 5,
+     "clf": 0.114,
+     "plugin": 0.138,
+     "joint": 0.7715,
+     "map_plugin": 0.109
+    },
+    {
+     "kind": "cyclic+3",
+     "pi": [
+      3,
+      4,
+      0,
+      1,
+      2
+     ],
+     "moved": 5,
+     "clf": 0.119,
+     "plugin": 0.138,
+     "joint": 0.7715,
+     "map_plugin": 0.1125
+    },
+    {
+     "kind": "cyclic+4",
+     "pi": [
+      4,
+      0,
+      1,
+      2,
+      3
+     ],
+     "moved": 5,
+     "clf": 0.121,
+     "plugin": 0.138,
+     "joint": 0.7715,
+     "map_plugin": 0.111
+    },
+    {
+     "kind": "swap01",
+     "pi": [
+      1,
+      0,
+      2,
+      3,
+      4
+     ],
+     "moved": 2,
+     "clf": 0.222,
+     "plugin": 0.138,
+     "joint": 0.7715,
+     "map_plugin": 0.1875
+    },
+    {
+     "kind": "swap02",
+     "pi": [
+      2,
+      1,
+      0,
+      3,
+      4
+     ],
+     "moved": 2,
+     "clf": 0.1545,
+     "plugin": 0.138,
+     "joint": 0.7715,
+     "map_plugin": 0.149
+    },
+    {
+     "kind": "swap03",
+     "pi": [
+      3,
+      1,
+      2,
+      0,
+      4
+     ],
+     "moved": 2,
+     "clf": 0.223,
+     "plugin": 0.138,
+     "joint": 0.7715,
+     "map_plugin": 0.1845
+    },
+    {
+     "kind": "swap04",
+     "pi": [
+      4,
+      1,
+      2,
+      3,
+      0
+     ],
+     "moved": 2,
+     "clf": 0.157,
+     "plugin": 0.138,
+     "joint": 0.7715,
+     "map_plugin": 0.1415
+    },
+    {
+     "kind": "swap12",
+     "pi": [
+      0,
+      2,
+      1,
+      3,
+      4
+     ],
+     "moved": 2,
+     "clf": 0.1045,
+     "plugin": 0.138,
+     "joint": 0.7715,
+     "map_plugin": 0.1045
+    },
+    {
+     "kind": "swap13",
+     "pi": [
+      0,
+      3,
+      2,
+      1,
+      4
+     ],
+     "moved": 2,
+     "clf": 0.1615,
+     "plugin": 0.138,
+     "joint": 0.7715,
+     "map_plugin": 0.151
+    },
+    {
+     "kind": "swap14",
+     "pi": [
+      0,
+      4,
+      2,
+      3,
+      1
+     ],
+     "moved": 2,
+     "clf": 0.1555,
+     "plugin": 0.138,
+     "joint": 0.7715,
+     "map_plugin": 0.146
+    },
+    {
+     "kind": "swap23",
+     "pi": [
+      0,
+      1,
+      3,
+      2,
+      4
+     ],
+     "moved": 2,
+     "clf": 0.2125,
+     "plugin": 0.138,
+     "joint": 0.7715,
+     "map_plugin": 0.1935
+    },
+    {
+     "kind": "swap24",
+     "pi": [
+      0,
+      1,
+      4,
+      3,
+      2
+     ],
+     "moved": 2,
+     "clf": 0.1515,
+     "plugin": 0.138,
+     "joint": 0.7715,
+     "map_plugin": 0.139
+    },
+    {
+     "kind": "swap34",
+     "pi": [
+      0,
+      1,
+      2,
+      4,
+      3
+     ],
+     "moved": 2,
+     "clf": 0.179,
+     "plugin": 0.138,
+     "joint": 0.7715,
+     "map_plugin": 0.173
+    },
+    {
+     "kind": "random",
+     "pi": [
+      3,
+      1,
+      4,
+      0,
+      2
+     ],
+     "moved": 4,
+     "clf": 0.119,
+     "plugin": 0.138,
+     "joint": 0.7715,
+     "map_plugin": 0.1025
+    },
+    {
+     "kind": "random",
+     "pi": [
+      0,
+      3,
+      4,
+      1,
+      2
+     ],
+     "moved": 4,
+     "clf": 0.109,
+     "plugin": 0.138,
+     "joint": 0.7715,
+     "map_plugin": 0.1115
+    },
+    {
+     "kind": "random",
+     "pi": [
+      2,
+      3,
+      1,
+      0,
+      4
+     ],
+     "moved": 4,
+     "clf": 0.1,
+     "plugin": 0.138,
+     "joint": 0.7715,
+     "map_plugin": 0.0985
+    },
+    {
+     "kind": "random",
+     "pi": [
+      4,
+      0,
+      1,
+      3,
+      2
+     ],
+     "moved": 4,
+     "clf": 0.116,
+     "plugin": 0.138,
+     "joint": 0.7715,
+     "map_plugin": 0.109
+    },
+    {
+     "kind": "random",
+     "pi": [
+      4,
+      3,
+      0,
+      2,
+      1
+     ],
+     "moved": 5,
+     "clf": 0.1075,
+     "plugin": 0.138,
+     "joint": 0.7715,
+     "map_plugin": 0.1065
+    }
+   ],
+   "time": [
+    {
+     "kind": "shuffle0",
+     "clf": 0.5785,
+     "plugin": 0.138,
+     "joint": 0.7715
+    },
+    {
+     "kind": "shuffle1",
+     "clf": 0.571,
+     "plugin": 0.138,
+     "joint": 0.7715
+    },
+    {
+     "kind": "shuffle2",
+     "clf": 0.582,
+     "plugin": 0.138,
+     "joint": 0.7715
+    },
+    {
+     "kind": "reverse",
+     "clf": 0.577,
+     "plugin": 0.138,
+     "joint": 0.7715
+    }
+   ],
+   "generator_relabel_checks": [
+    {
+     "pi": [
+      1,
+      2,
+      3,
+      4,
+      0
+     ],
+     "max_abs_table_diff": 5.960464477539063e-08,
+     "plugin_forward": 0.138,
+     "episodes_differing": 0
+    },
+    {
+     "pi": [
+      2,
+      3,
+      4,
+      0,
+      1
+     ],
+     "max_abs_table_diff": 5.960464477539063e-08,
+     "plugin_forward": 0.138,
+     "episodes_differing": 0
+    },
+    {
+     "pi": [
+      3,
+      4,
+      0,
+      1,
+      2
+     ],
+     "max_abs_table_diff": 5.960464477539063e-08,
+     "plugin_forward": 0.138,
+     "episodes_differing": 0
+    },
+    {
+     "pi": [
+      4,
+      0,
+      1,
+      2,
+      3
+     ],
+     "max_abs_table_diff": 5.960464477539063e-08,
+     "plugin_forward": 0.138,
+     "episodes_differing": 0
+    }
+   ],
+   "clf_discordant_vs_identity": {
+    "mean": 0.5391842105263158,
+    "max": 0.572
+   },
+   "map": {
+    "donor": "gen60k_lr4_s0",
+    "map_r2_train_fit": 0.8195739297117293,
+    "map_r2_train_heldout": 0.82223356046659,
+    "map_r2_novel": 0.7474107085346247,
+    "donor_own_plugin": 0.7435
+   },
+   "controls": {
+    "sigma": [
+     1,
+     4,
+     3,
+     0,
+     2
+    ],
+    "slot_best_r2": [
+     0.989,
+     0.989,
+     0.99,
+     0.004,
+     0.99
+    ],
+    "frames": [
+     [
+      [
+       1.0366,
+       0.0057
+      ],
+      [
+       0.0019,
+       1.0385
+      ]
+     ],
+     [
+      [
+       1.0446,
+       0.0003
+      ],
+      [
+       0.0061,
+       1.0331
+      ]
+     ],
+     [
+      [
+       -1.026,
+       0.0043
+      ],
+      [
+       0.0064,
+       -1.0259
+      ]
+     ],
+     [
+      [
+       -0.0095,
+       -0.0708
+      ],
+      [
+       0.013,
+       0.0564
+      ]
+     ],
+     [
+      [
+       -0.0016,
+       -1.0311
+      ],
+      [
+       -1.0259,
+       0.0014
+      ]
+     ]
+    ],
+    "perms": [
+     {
+      "kind": "cyclic+1",
+      "pi": [
+       1,
+       2,
+       3,
+       4,
+       0
+      ],
+      "pinv": [
+       4,
+       0,
+       1,
+       2,
+       3
+      ],
+      "moved": 5,
+      "bits_only": 0.1145,
+      "joint_old_wiring": 0.113,
+      "pairing": 0.116,
+      "tau": [
+       4,
+       3,
+       1,
+       0,
+       2
+      ]
+     },
+     {
+      "kind": "cyclic+2",
+      "pi": [
+       2,
+       3,
+       4,
+       0,
+       1
+      ],
+      "pinv": [
+       3,
+       4,
+       0,
+       1,
+       2
+      ],
+      "moved": 5,
+      "bits_only": 0.092,
+      "joint_old_wiring": 0.094,
+      "pairing": 0.1615,
+      "tau": [
+       2,
+       0,
+       3,
+       4,
+       1
+      ]
+     },
+     {
+      "kind": "cyclic+3",
+      "pi": [
+       3,
+       4,
+       0,
+       1,
+       2
+      ],
+      "pinv": [
+       2,
+       3,
+       4,
+       0,
+       1
+      ],
+      "moved": 5,
+      "bits_only": 0.117,
+      "joint_old_wiring": 0.1025,
+      "pairing": 0.15,
+      "tau": [
+       1,
+       4,
+       0,
+       2,
+       3
+      ]
+     },
+     {
+      "kind": "cyclic+4",
+      "pi": [
+       4,
+       0,
+       1,
+       2,
+       3
+      ],
+      "pinv": [
+       1,
+       2,
+       3,
+       4,
+       0
+      ],
+      "moved": 5,
+      "bits_only": 0.1075,
+      "joint_old_wiring": 0.098,
+      "pairing": 0.1355,
+      "tau": [
+       3,
+       2,
+       4,
+       1,
+       0
+      ]
+     },
+     {
+      "kind": "swap01",
+      "pi": [
+       1,
+       0,
+       2,
+       3,
+       4
+      ],
+      "pinv": [
+       1,
+       0,
+       2,
+       3,
+       4
+      ],
+      "moved": 2,
+      "bits_only": 0.361,
+      "joint_old_wiring": 0.3535,
+      "pairing": 0.3575,
+      "tau": [
+       3,
+       1,
+       2,
+       0,
+       4
+      ]
+     },
+     {
+      "kind": "swap02",
+      "pi": [
+       2,
+       1,
+       0,
+       3,
+       4
+      ],
+      "pinv": [
+       2,
+       1,
+       0,
+       3,
+       4
+      ],
+      "moved": 2,
+      "bits_only": 0.352,
+      "joint_old_wiring": 0.355,
+      "pairing": 0.3515,
+      "tau": [
+       0,
+       1,
+       2,
+       4,
+       3
+      ]
+     },
+     {
+      "kind": "swap03",
+      "pi": [
+       3,
+       1,
+       2,
+       0,
+       4
+      ],
+      "pinv": [
+       3,
+       1,
+       2,
+       0,
+       4
+      ],
+      "moved": 2,
+      "bits_only": 0.3585,
+      "joint_old_wiring": 0.355,
+      "pairing": 0.349,
+      "tau": [
+       0,
+       1,
+       3,
+       2,
+       4
+      ]
+     }
+    ],
+    "identity": 0.592,
+    "code_shuffle": 0.1055,
+    "frame_rel_dist": [
+     [
+      0.0,
+      0.008,
+      2.0,
+      1.843,
+      1.417
+     ],
+     [
+      0.008,
+      0.0,
+      2.0,
+      1.843,
+      1.416
+     ],
+     [
+      2.0,
+      2.0,
+      0.0,
+      1.927,
+      1.418
+     ],
+     [
+      1.843,
+      1.843,
+      1.927,
+      0.0,
+      1.831
+     ],
+     [
+      1.417,
+      1.416,
+      1.418,
+      1.831,
+      0.0
+     ]
+    ],
+    "frame_rel_dist_signflip": [
+     [
+      2.0,
+      2.0,
+      0.014,
+      1.927,
+      1.412
+     ],
+     [
+      2.0,
+      2.0,
+      0.016,
+      1.928,
+      1.412
+     ],
+     [
+      0.014,
+      0.016,
+      2.0,
+      1.841,
+      1.411
+     ],
+     [
+      1.927,
+      1.928,
+      1.841,
+      2.0,
+      1.937
+     ],
+     [
+      1.412,
+      1.412,
+      1.411,
+      1.937,
+      2.0
+     ]
+    ]
+   },
+   "pairing_preserving_slot_exchanges": [
+    {
+     "slots": [
+      0,
+      1
+     ],
+     "channels": [
+      1,
+      4
+     ],
+     "frame_dist": 0.008,
+     "frame_dist_signflip": 2.0,
+     "slot_r2": [
+      0.989,
+      0.989
+     ],
+     "acc": 0.5775
+    },
+    {
+     "slots": [
+      0,
+      2
+     ],
+     "channels": [
+      1,
+      3
+     ],
+     "frame_dist": 2.0,
+     "frame_dist_signflip": 0.014,
+     "slot_r2": [
+      0.989,
+      0.99
+     ],
+     "acc": 0.2245
+    },
+    {
+     "slots": [
+      0,
+      3
+     ],
+     "channels": [
+      1,
+      0
+     ],
+     "frame_dist": 1.843,
+     "frame_dist_signflip": 1.927,
+     "slot_r2": [
+      0.989,
+      0.004
+     ],
+     "acc": 0.3575
+    },
+    {
+     "slots": [
+      0,
+      4
+     ],
+     "channels": [
+      1,
+      2
+     ],
+     "frame_dist": 1.417,
+     "frame_dist_signflip": 1.412,
+     "slot_r2": [
+      0.989,
+      0.99
+     ],
+     "acc": 0.3005
+    },
+    {
+     "slots": [
+      1,
+      2
+     ],
+     "channels": [
+      4,
+      3
+     ],
+     "frame_dist": 2.0,
+     "frame_dist_signflip": 0.016,
+     "slot_r2": [
+      0.989,
+      0.99
+     ],
+     "acc": 0.204
+    },
+    {
+     "slots": [
+      1,
+      3
+     ],
+     "channels": [
+      4,
+      0
+     ],
+     "frame_dist": 1.843,
+     "frame_dist_signflip": 1.928,
+     "slot_r2": [
+      0.989,
+      0.004
+     ],
+     "acc": 0.345
+    },
+    {
+     "slots": [
+      1,
+      4
+     ],
+     "channels": [
+      4,
+      2
+     ],
+     "frame_dist": 1.416,
+     "frame_dist_signflip": 1.412,
+     "slot_r2": [
+      0.989,
+      0.99
+     ],
+     "acc": 0.307
+    },
+    {
+     "slots": [
+      2,
+      3
+     ],
+     "channels": [
+      3,
+      0
+     ],
+     "frame_dist": 1.927,
+     "frame_dist_signflip": 1.841,
+     "slot_r2": [
+      0.99,
+      0.004
+     ],
+     "acc": 0.349
+    },
+    {
+     "slots": [
+      2,
+      4
+     ],
+     "channels": [
+      3,
+      2
+     ],
+     "frame_dist": 1.418,
+     "frame_dist_signflip": 1.411,
+     "slot_r2": [
+      0.99,
+      0.99
+     ],
+     "acc": 0.26
+    },
+    {
+     "slots": [
+      3,
+      4
+     ],
+     "channels": [
+      0,
+      2
+     ],
+     "frame_dist": 1.831,
+     "frame_dist_signflip": 1.937,
+     "slot_r2": [
+      0.004,
+      0.99
+     ],
+     "acc": 0.3515
+    }
+   ],
+   "env_joint_T": 0.7715,
+   "clf_discordant_vs_identity_time_orders": {
+    "mean": 0.112125,
+    "max": 0.124
+   }
+  },
+  "rccclf60k_lr4_s1": {
+   "route": "Classifier",
+   "feedback": "RCC own",
+   "B": 2000,
+   "naive": 0.4585,
+   "perms": [
+    {
+     "kind": "identity",
+     "pi": [
+      0,
+      1,
+      2,
+      3,
+      4
+     ],
+     "moved": 0,
+     "clf": 0.577,
+     "plugin": 0.1495,
+     "joint": 0.7715,
+     "map_plugin": 0.605
+    },
+    {
+     "kind": "cyclic+1",
+     "pi": [
+      1,
+      2,
+      3,
+      4,
+      0
+     ],
+     "moved": 5,
+     "clf": 0.107,
+     "plugin": 0.1495,
+     "joint": 0.7715,
+     "map_plugin": 0.099
+    },
+    {
+     "kind": "cyclic+2",
+     "pi": [
+      2,
+      3,
+      4,
+      0,
+      1
+     ],
+     "moved": 5,
+     "clf": 0.1095,
+     "plugin": 0.1495,
+     "joint": 0.7715,
+     "map_plugin": 0.12
+    },
+    {
+     "kind": "cyclic+3",
+     "pi": [
+      3,
+      4,
+      0,
+      1,
+      2
+     ],
+     "moved": 5,
+     "clf": 0.1105,
+     "plugin": 0.1495,
+     "joint": 0.7715,
+     "map_plugin": 0.1
+    },
+    {
+     "kind": "cyclic+4",
+     "pi": [
+      4,
+      0,
+      1,
+      2,
+      3
+     ],
+     "moved": 5,
+     "clf": 0.0925,
+     "plugin": 0.1495,
+     "joint": 0.7715,
+     "map_plugin": 0.113
+    },
+    {
+     "kind": "swap01",
+     "pi": [
+      1,
+      0,
+      2,
+      3,
+      4
+     ],
+     "moved": 2,
+     "clf": 0.1585,
+     "plugin": 0.1495,
+     "joint": 0.7715,
+     "map_plugin": 0.167
+    },
+    {
+     "kind": "swap02",
+     "pi": [
+      2,
+      1,
+      0,
+      3,
+      4
+     ],
+     "moved": 2,
+     "clf": 0.2235,
+     "plugin": 0.1495,
+     "joint": 0.7715,
+     "map_plugin": 0.2345
+    },
+    {
+     "kind": "swap03",
+     "pi": [
+      3,
+      1,
+      2,
+      0,
+      4
+     ],
+     "moved": 2,
+     "clf": 0.164,
+     "plugin": 0.1495,
+     "joint": 0.7715,
+     "map_plugin": 0.152
+    },
+    {
+     "kind": "swap04",
+     "pi": [
+      4,
+      1,
+      2,
+      3,
+      0
+     ],
+     "moved": 2,
+     "clf": 0.1545,
+     "plugin": 0.1495,
+     "joint": 0.7715,
+     "map_plugin": 0.1515
+    },
+    {
+     "kind": "swap12",
+     "pi": [
+      0,
+      2,
+      1,
+      3,
+      4
+     ],
+     "moved": 2,
+     "clf": 0.1695,
+     "plugin": 0.1495,
+     "joint": 0.7715,
+     "map_plugin": 0.1855
+    },
+    {
+     "kind": "swap13",
+     "pi": [
+      0,
+      3,
+      2,
+      1,
+      4
+     ],
+     "moved": 2,
+     "clf": 0.198,
+     "plugin": 0.1495,
+     "joint": 0.7715,
+     "map_plugin": 0.182
+    },
+    {
+     "kind": "swap14",
+     "pi": [
+      0,
+      4,
+      2,
+      3,
+      1
+     ],
+     "moved": 2,
+     "clf": 0.209,
+     "plugin": 0.1495,
+     "joint": 0.7715,
+     "map_plugin": 0.1905
+    },
+    {
+     "kind": "swap23",
+     "pi": [
+      0,
+      1,
+      3,
+      2,
+      4
+     ],
+     "moved": 2,
+     "clf": 0.185,
+     "plugin": 0.1495,
+     "joint": 0.7715,
+     "map_plugin": 0.1685
+    },
+    {
+     "kind": "swap24",
+     "pi": [
+      0,
+      1,
+      4,
+      3,
+      2
+     ],
+     "moved": 2,
+     "clf": 0.151,
+     "plugin": 0.1495,
+     "joint": 0.7715,
+     "map_plugin": 0.1455
+    },
+    {
+     "kind": "swap34",
+     "pi": [
+      0,
+      1,
+      2,
+      4,
+      3
+     ],
+     "moved": 2,
+     "clf": 0.372,
+     "plugin": 0.1495,
+     "joint": 0.7715,
+     "map_plugin": 0.3255
+    },
+    {
+     "kind": "random",
+     "pi": [
+      3,
+      1,
+      4,
+      0,
+      2
+     ],
+     "moved": 4,
+     "clf": 0.155,
+     "plugin": 0.1495,
+     "joint": 0.7715,
+     "map_plugin": 0.14
+    },
+    {
+     "kind": "random",
+     "pi": [
+      0,
+      3,
+      4,
+      1,
+      2
+     ],
+     "moved": 4,
+     "clf": 0.1065,
+     "plugin": 0.1495,
+     "joint": 0.7715,
+     "map_plugin": 0.102
+    },
+    {
+     "kind": "random",
+     "pi": [
+      2,
+      3,
+      1,
+      0,
+      4
+     ],
+     "moved": 4,
+     "clf": 0.105,
+     "plugin": 0.1495,
+     "joint": 0.7715,
+     "map_plugin": 0.1085
+    },
+    {
+     "kind": "random",
+     "pi": [
+      4,
+      0,
+      1,
+      3,
+      2
+     ],
+     "moved": 4,
+     "clf": 0.094,
+     "plugin": 0.1495,
+     "joint": 0.7715,
+     "map_plugin": 0.085
+    },
+    {
+     "kind": "random",
+     "pi": [
+      4,
+      3,
+      0,
+      2,
+      1
+     ],
+     "moved": 5,
+     "clf": 0.103,
+     "plugin": 0.1495,
+     "joint": 0.7715,
+     "map_plugin": 0.102
+    }
+   ],
+   "time": [
+    {
+     "kind": "shuffle0",
+     "clf": 0.5615,
+     "plugin": 0.1495,
+     "joint": 0.7715
+    },
+    {
+     "kind": "shuffle1",
+     "clf": 0.567,
+     "plugin": 0.1495,
+     "joint": 0.7715
+    },
+    {
+     "kind": "shuffle2",
+     "clf": 0.5565,
+     "plugin": 0.1495,
+     "joint": 0.7715
+    },
+    {
+     "kind": "reverse",
+     "clf": 0.5775,
+     "plugin": 0.1495,
+     "joint": 0.7715
+    }
+   ],
+   "generator_relabel_checks": [
+    {
+     "pi": [
+      1,
+      2,
+      3,
+      4,
+      0
+     ],
+     "max_abs_table_diff": 5.960464477539063e-08,
+     "plugin_forward": 0.1495,
+     "episodes_differing": 0
+    },
+    {
+     "pi": [
+      2,
+      3,
+      4,
+      0,
+      1
+     ],
+     "max_abs_table_diff": 5.960464477539063e-08,
+     "plugin_forward": 0.1495,
+     "episodes_differing": 0
+    },
+    {
+     "pi": [
+      3,
+      4,
+      0,
+      1,
+      2
+     ],
+     "max_abs_table_diff": 5.960464477539063e-08,
+     "plugin_forward": 0.1495,
+     "episodes_differing": 0
+    },
+    {
+     "pi": [
+      4,
+      0,
+      1,
+      2,
+      3
+     ],
+     "max_abs_table_diff": 5.960464477539063e-08,
+     "plugin_forward": 0.1495,
+     "episodes_differing": 0
+    }
+   ],
+   "clf_discordant_vs_identity": {
+    "mean": 0.5224736842105264,
+    "max": 0.568
+   },
+   "map": {
+    "donor": "gen60k_lr4_s1",
+    "map_r2_train_fit": 0.9784481788304615,
+    "map_r2_train_heldout": 0.9774532635349844,
+    "map_r2_novel": 0.9719050277905785,
+    "donor_own_plugin": 0.7425
+   },
+   "controls": {
+    "sigma": [
+     2,
+     1,
+     0,
+     4,
+     3
+    ],
+    "slot_best_r2": [
+     0.99,
+     0.99,
+     0.988,
+     0.911,
+     0.99
+    ],
+    "frames": [
+     [
+      [
+       0.0009,
+       1.0262
+      ],
+      [
+       1.0324,
+       -0.0031
+      ]
+     ],
+     [
+      [
+       -1.0327,
+       0.002
+      ],
+      [
+       -0.0041,
+       -1.0366
+      ]
+     ],
+     [
+      [
+       0.005,
+       -1.0347
+      ],
+      [
+       -1.0388,
+       0.0001
+      ]
+     ],
+     [
+      [
+       -0.0046,
+       -0.9776
+      ],
+      [
+       -0.9744,
+       -0.0105
+      ]
+     ],
+     [
+      [
+       -1.0332,
+       0.0033
+      ],
+      [
+       -0.0022,
+       -1.0264
+      ]
+     ]
+    ],
+    "perms": [
+     {
+      "kind": "cyclic+1",
+      "pi": [
+       1,
+       2,
+       3,
+       4,
+       0
+      ],
+      "pinv": [
+       4,
+       0,
+       1,
+       2,
+       3
+      ],
+      "moved": 5,
+      "bits_only": 0.103,
+      "joint_old_wiring": 0.0985,
+      "pairing": 0.1855,
+      "tau": [
+       4,
+       0,
+       1,
+       2,
+       3
+      ]
+     },
+     {
+      "kind": "cyclic+2",
+      "pi": [
+       2,
+       3,
+       4,
+       0,
+       1
+      ],
+      "pinv": [
+       3,
+       4,
+       0,
+       1,
+       2
+      ],
+      "moved": 5,
+      "bits_only": 0.112,
+      "joint_old_wiring": 0.113,
+      "pairing": 0.1545,
+      "tau": [
+       3,
+       4,
+       0,
+       1,
+       2
+      ]
+     },
+     {
+      "kind": "cyclic+3",
+      "pi": [
+       3,
+       4,
+       0,
+       1,
+       2
+      ],
+      "pinv": [
+       2,
+       3,
+       4,
+       0,
+       1
+      ],
+      "moved": 5,
+      "bits_only": 0.103,
+      "joint_old_wiring": 0.101,
+      "pairing": 0.162,
+      "tau": [
+       2,
+       3,
+       4,
+       0,
+       1
+      ]
+     },
+     {
+      "kind": "cyclic+4",
+      "pi": [
+       4,
+       0,
+       1,
+       2,
+       3
+      ],
+      "pinv": [
+       1,
+       2,
+       3,
+       4,
+       0
+      ],
+      "moved": 5,
+      "bits_only": 0.103,
+      "joint_old_wiring": 0.1005,
+      "pairing": 0.1555,
+      "tau": [
+       1,
+       2,
+       3,
+       4,
+       0
+      ]
+     },
+     {
+      "kind": "swap01",
+      "pi": [
+       1,
+       0,
+       2,
+       3,
+       4
+      ],
+      "pinv": [
+       1,
+       0,
+       2,
+       3,
+       4
+      ],
+      "moved": 2,
+      "bits_only": 0.268,
+      "joint_old_wiring": 0.3275,
+      "pairing": 0.2785,
+      "tau": [
+       0,
+       2,
+       1,
+       3,
+       4
+      ]
+     },
+     {
+      "kind": "swap02",
+      "pi": [
+       2,
+       1,
+       0,
+       3,
+       4
+      ],
+      "pinv": [
+       2,
+       1,
+       0,
+       3,
+       4
+      ],
+      "moved": 2,
+      "bits_only": 0.274,
+      "joint_old_wiring": 0.3405,
+      "pairing": 0.2235,
+      "tau": [
+       2,
+       1,
+       0,
+       3,
+       4
+      ]
+     },
+     {
+      "kind": "swap03",
+      "pi": [
+       3,
+       1,
+       2,
+       0,
+       4
+      ],
+      "pinv": [
+       3,
+       1,
+       2,
+       0,
+       4
+      ],
+      "moved": 2,
+      "bits_only": 0.255,
+      "joint_old_wiring": 0.323,
+      "pairing": 0.2965,
+      "tau": [
+       0,
+       1,
+       4,
+       3,
+       2
+      ]
+     }
+    ],
+    "identity": 0.577,
+    "code_shuffle": 0.091,
+    "frame_rel_dist": [
+     [
+      0.0,
+      1.414,
+      2.0,
+      2.0,
+      1.413
+     ],
+     [
+      1.414,
+      0.0,
+      1.415,
+      1.409,
+      0.007
+     ],
+     [
+      2.0,
+      1.415,
+      0.0,
+      0.061,
+      1.416
+     ],
+     [
+      2.0,
+      1.409,
+      0.061,
+      0.0,
+      1.41
+     ],
+     [
+      1.413,
+      0.007,
+      1.416,
+      1.41,
+      0.0
+     ]
+    ],
+    "frame_rel_dist_signflip": [
+     [
+      2.0,
+      1.414,
+      0.009,
+      0.054,
+      1.415
+     ],
+     [
+      1.414,
+      2.0,
+      1.413,
+      1.421,
+      2.0
+     ],
+     [
+      0.009,
+      1.413,
+      2.0,
+      2.0,
+      1.412
+     ],
+     [
+      0.054,
+      1.421,
+      2.0,
+      2.0,
+      1.42
+     ],
+     [
+      1.415,
+      2.0,
+      1.412,
+      1.42,
+      2.0
+     ]
+    ]
+   },
+   "pairing_preserving_slot_exchanges": [
+    {
+     "slots": [
+      0,
+      1
+     ],
+     "channels": [
+      2,
+      1
+     ],
+     "frame_dist": 1.414,
+     "frame_dist_signflip": 1.414,
+     "slot_r2": [
+      0.99,
+      0.99
+     ],
+     "acc": 0.2795
+    },
+    {
+     "slots": [
+      0,
+      2
+     ],
+     "channels": [
+      2,
+      0
+     ],
+     "frame_dist": 2.0,
+     "frame_dist_signflip": 0.009,
+     "slot_r2": [
+      0.99,
+      0.988
+     ],
+     "acc": 0.2235
+    },
+    {
+     "slots": [
+      0,
+      3
+     ],
+     "channels": [
+      2,
+      4
+     ],
+     "frame_dist": 2.0,
+     "frame_dist_signflip": 0.054,
+     "slot_r2": [
+      0.99,
+      0.911
+     ],
+     "acc": 0.317
+    },
+    {
+     "slots": [
+      0,
+      4
+     ],
+     "channels": [
+      2,
+      3
+     ],
+     "frame_dist": 1.413,
+     "frame_dist_signflip": 1.415,
+     "slot_r2": [
+      0.99,
+      0.99
+     ],
+     "acc": 0.263
+    },
+    {
+     "slots": [
+      1,
+      2
+     ],
+     "channels": [
+      1,
+      0
+     ],
+     "frame_dist": 1.415,
+     "frame_dist_signflip": 1.413,
+     "slot_r2": [
+      0.99,
+      0.988
+     ],
+     "acc": 0.2785
+    },
+    {
+     "slots": [
+      1,
+      3
+     ],
+     "channels": [
+      1,
+      4
+     ],
+     "frame_dist": 1.409,
+     "frame_dist_signflip": 1.421,
+     "slot_r2": [
+      0.99,
+      0.911
+     ],
+     "acc": 0.3525
+    },
+    {
+     "slots": [
+      1,
+      4
+     ],
+     "channels": [
+      1,
+      3
+     ],
+     "frame_dist": 0.007,
+     "frame_dist_signflip": 2.0,
+     "slot_r2": [
+      0.99,
+      0.99
+     ],
+     "acc": 0.566
+    },
+    {
+     "slots": [
+      2,
+      3
+     ],
+     "channels": [
+      0,
+      4
+     ],
+     "frame_dist": 0.061,
+     "frame_dist_signflip": 2.0,
+     "slot_r2": [
+      0.988,
+      0.911
+     ],
+     "acc": 0.522
+    },
+    {
+     "slots": [
+      2,
+      4
+     ],
+     "channels": [
+      0,
+      3
+     ],
+     "frame_dist": 1.416,
+     "frame_dist_signflip": 1.412,
+     "slot_r2": [
+      0.988,
+      0.99
+     ],
+     "acc": 0.2965
+    },
+    {
+     "slots": [
+      3,
+      4
+     ],
+     "channels": [
+      4,
+      3
+     ],
+     "frame_dist": 1.41,
+     "frame_dist_signflip": 1.42,
+     "slot_r2": [
+      0.911,
+      0.99
+     ],
+     "acc": 0.372
+    }
+   ],
+   "env_joint_T": 0.7715,
+   "clf_discordant_vs_identity_time_orders": {
+    "mean": 0.106375,
+    "max": 0.1105
+   }
+  }
+ }
+}

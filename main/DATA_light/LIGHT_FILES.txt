@@ -1,7 +1,10 @@
 cache/calibration_ctx3.npz
 cache/matched_params_bounds.npz
 cache/sanity_default_reps.npz
+experimental/clf_scratch/swap/swap_results.json
 experimental/cluster_runs/acc_through_training.npz
+experimental/cluster_runs/final_cut.json
+experimental/cluster_runs/jsonl/cluster_status.json
 experimental/esn_convex/paper.json
 experimental/esn_convex/shared_linear/result.json
 experimental/esn_learnability/checks_11-11/per_env.npz
@@ -85,9 +88,14 @@ experimental/fig1c_compression/figdata/round7_jumps/measures_assoc_ns50.npz
 experimental/fig1c_compression/figdata/round8_two_processes/timeline.npz
 experimental/fig1c_compression/figdata/round8_two_processes/xcorr_full.npz
 experimental/fig1c_compression/figdata/round8_two_processes/xcorr_time.npz
+experimental/fr_definition/fig2b_clip.npz
 experimental/fr_definition/fr_correct.npz
+experimental/fr_definition/fr_correct_fresh.npz
+experimental/fr_definition/fr_logged_implied.npz
 experimental/fr_definition/manifold_fr_sym.npz
 experimental/fr_definition/published.npz
+experimental/fr_theory/additions/dip_sim.npz
+experimental/fr_theory/additions/horizon_scaling.npz
 experimental/fr_theory/fr_theory_observer_fixture.npz
 experimental/fr_theory/observables/observables.npz
 experimental/interaction_bounds/analyses/joint_esn_extension/runs/joint_scratch_zero/status.json
@@ -221,7 +229,6 @@ experimental/training_dynamics/learnmask_excl_bandhi_b01_1000_s0_s20261029_stuck
 experimental/training_dynamics/learnmask_excl_bandhi_b01_1000_s0_s20261029_stuck_killed/sel.npz
 experimental/training_dynamics/learnmask_excl_bandhi_b01_1000_s0_s20261029_stuck_killed/tests.npz
 experimental/training_dynamics/learnmask_excl_bandhi_b03_300_c03_300_s0_s20261029/run.json
-experimental/training_dynamics/learnmask_excl_bandhi_b03_300_c03_300_s0_s20261029/sel.npz
 experimental/training_dynamics/learnmask_excl_bandhi_b03_300_c03_300_s0_s20261029/tests.npz
 experimental/training_dynamics/learnmask_excl_bandhi_b10_100_c10_100_s0_s20261029/run.json
 experimental/training_dynamics/learnmask_excl_bandhi_b10_100_c10_100_s0_s20261029/sel.npz
@@ -233,7 +240,6 @@ experimental/training_dynamics/learnmask_excl_bandlo_b01_1000_s0_s20261029_stuck
 experimental/training_dynamics/learnmask_excl_bandlo_b01_1000_s0_s20261029_stuck_killed/sel.npz
 experimental/training_dynamics/learnmask_excl_bandlo_b01_1000_s0_s20261029_stuck_killed/tests.npz
 experimental/training_dynamics/learnmask_excl_bandlo_b03_300_c03_300_s0_s20261029/run.json
-experimental/training_dynamics/learnmask_excl_bandlo_b03_300_c03_300_s0_s20261029/sel.npz
 experimental/training_dynamics/learnmask_excl_bandlo_b03_300_c03_300_s0_s20261029/tests.npz
 experimental/training_dynamics/learnmask_excl_bandlo_b10_100_c10_100_s0_s20261029/run.json
 experimental/training_dynamics/learnmask_excl_bandlo_b10_100_c10_100_s0_s20261029/sel.npz
@@ -417,6 +423,7 @@ experimental/training_dynamics/through_training/flips/ratio/trained_48000.npz
 experimental/training_dynamics/through_training/flips/ratio/trained_49000.npz
 experimental/training_dynamics/through_training/flips/ratio/trained_49995.npz
 experimental/training_dynamics/through_training/flips/refs_classes.npz
+experimental/training_dynamics/through_training/fr_holdout/heat_primitives.npz
 experimental/training_dynamics/through_training/fr_profile/profile.npz
 experimental/training_dynamics/through_training/fr_profile/world2/probes_w2.npz
 experimental/training_dynamics/through_training/intervene/checks.json

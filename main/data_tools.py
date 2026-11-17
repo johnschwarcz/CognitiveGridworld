@@ -87,9 +87,13 @@ def tier(path, light):
     return "light" if path in light else "cache"
 
 
+# manuscript sources and their working copies stay local (.gitignore, 11-11), so the public manifest does not list them
+MANIFEST_SKIP, MANIFEST_SKIP_EXT = ("experimental/manuscript_edits/",), (".tex", ".bib", ".lyx")
+
+
 def manifest():
     light = set(light_list())
-    rows = sorted(_files())
+    rows = sorted((p, s) for p, s in _files() if not p.startswith(MANIFEST_SKIP) and not p.endswith(MANIFEST_SKIP_EXT))
     with open(os.path.join(ROOT, "main", "DATA_MANIFEST.tsv"), "w") as f:
         f.write("path\tbytes\ttier\n")
         for p, s in rows:

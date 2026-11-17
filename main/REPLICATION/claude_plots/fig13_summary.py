@@ -25,6 +25,7 @@ with it: linear (10 x 10) or MLP (identity + 10 -> 128 -> 128 -> 10), both the i
 RESULT 11-11 18:30 (end values; the plotters of the superseded figures hold the details):
     a  Joint - network at 60k: oracle Generator route .044 (4 seeds there), oracle Classifier route .092 (6), the RCC .071
        (6), original Classifier route .19 (4); Generator route faster at every stage (2-4x to each accuracy level)
+       (11-12 01:30, all 24 runs done: oracle Generator route .043; original Classifier route .225 with 6 seeds, ends .38-.63)
     b  2 novel / (novel + training) below .5 accuracy: Generator route .99 / .98 (oracle / original), Classifier route .94 /
        .92
     c  both routes copy the true Z per channel (R^2 .99); Generator route: -swap in every channel, in place; Classifier route
@@ -37,6 +38,14 @@ RESULT 11-11 18:30 (end values; the plotters of the superseded figures hold the 
        LSTM -.016
     h  plastic embeddings (lr 1e-3) under an LSTM: Generator route + its own Generator .38; Classifier route + its Generator
        .15; either alone .15
+
+FINAL 11-11 ~20:00, d-h extended 10x (d 30,000 steps, e-h 20M episodes):
+    d  Generator route .735; Classifier route as learned .135 (never leaves chance), by hand .726, linear map .712, MLP .712
+    e  LSTM: .678 / .678 (identical, as the code equivalence predicts); from scratch .134
+    f  channel-wise reader: Generator route .670; Classifier route .143, by hand .671, linear map .664, MLP .675 (the maps
+       need ~3x the episodes to reach .45)
+    g  channel 4 added: Generator route +.083, by hand +.071, as learned +.007, linear map -.175, MLP map -.162, LSTM -.012
+    h  plastic embeddings: .59-.61 for all four (no route difference; the earlier gap was transient)
 
     python fig13_summary.py [--pull]
 """
@@ -125,7 +134,7 @@ def main():
     from matplotlib.colors import hsv_to_rgb
     fs = apply_fig_style()
     fig = plt.figure(figsize=(19, 10.8))
-    G = fig.add_gridspec(2, 5, hspace=.42, wspace=.3, left=.045, right=.99, top=.86, bottom=.12)
+    G = fig.add_gridspec(2, 5, hspace=.42, wspace=.3, left=.045, right=.99, top=.86, bottom=.135)
     small, TS = 9, 11.5                                           # legend / title points at this size
 
     # a: learning
@@ -227,7 +236,7 @@ def main():
     print("e LSTM")
     lines(e, (([f"lstm_gen_frozen_s{k}" for k in (0, 1)], C_GEN, "-", "Generator route"),
               ([f"lstm_clf_frozen_s{k}" for k in (0, 1)], C_CLF, "-", "Classifier route"),
-              ([f"lstm_random_updated_s{k}" for k in (0, 1)], "0.5", (0, (1, 1.5)), "random embeddings (from scratch)")),
+              ([f"lstm_random_updated_s{k}" for k in (0, 1)], "0.5", (0, (1, 1.5)), "random embeddings,\nlearned from scratch")),
           TR, "episodes", "novel")
     e.set_title("e   A fresh LSTM reader\n     (frozen embeddings)", loc="left", fontsize=TS)
     f = fig.add_subplot(G[1, 2], sharey=d)
@@ -278,10 +287,11 @@ def main():
     fig.suptitle("Embeddings learned through the Generator or through the Classifier (Fig 13's networks: $|\\mathcal{S}| = "
                  "500$, 60,000 episodes, lr $10^{-4}$; novel environments; thin = seeds, thick = mean, (n) = runs)",
                  fontsize=TS + 1, y=.985)
-    fig.text(.42, .045, "d, f, g: the Classifier-route code as learned, corrected by hand (slots and signs / swaps put back), or "
-             "through a learned map of its 10 numbers (linear or MLP, identity at the start); 2 runs per line (d, "
+    fig.text(.42, .04, "d, f, g: the Classifier-route code as learned, corrected by hand (slots and signs / swaps put back), "
+             "or through a learned map of its 10 numbers (linear or MLP, identity at the start)\n2 runs per line (d, "
              "Generator route: 1); dashed / dotted lines = Joint / Naive Bayes" + (f"; d-h: {len(set(USED_LONG))} runs "
-             "extended 10x" if USED_LONG else ""), ha="center", fontsize=small + 1)
+             "extended 10x (d: 30,000 steps, e-h: 20M episodes)" if USED_LONG else ""),
+             ha="center", fontsize=small + 1)
     out = fig_path("fig13_summary.png")
     fig.savefig(out, dpi=170)
     print(out)

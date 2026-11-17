@@ -24,6 +24,15 @@ COROLLARY 2 (noise or real), which the panels illustrate: with mu_t, sigma_t^2 t
 11-11 evening: every panel below now lives in fr_theory_figure.py (fig_fr_theory_all, all theory panels in one figure, to be
 trimmed by John); `figure` here still writes the two standalone figures the v13 tex refers to.  New cache toy_fine: the union bound
 of panel t of that figure on a fine grid of N (5 min on 12 cores).
+11-12 (John: "add R=2 to panel k", then "can we try 2,3,4,5?"): new cache opt_more, fr_theory.build_optimum's points (growth rate vs.
+observables) at R = 2, 3, 4 realizations per variable, for fig_fr_theory_all j (`data --only=opt_more`; R = 2 took 9 min on 13 workers,
+R = 3 and 4 13 min on 19; a point depends only on its own seeds: the R = 2 points were kept when 3 and 4 were added, and one of them,
+rebuilt, came out identical).  E[Delta] at d_o = 1 / 5 / 30: R = 2 .0061 / .0017 / 0; R = 3 .023 / .018 / .0004; R = 4 .034 / .036 /
+.0067 (q .28 / .035 / 0; .42 / .14 / .003; .53 / .21 / .029); simulated slopes within 0.7 s.e. of it everywhere.
+
+11-13 night (John: "avoid having to write 'toy' example"): new cache small (`data --only=small`, 35 s), row 1 and the critical-step panel
+of fig_fr_theory_all from the Cognitive Gridworld itself with one observable and R = 3: build_small (selection rule, exact curves,
+threshold, simulation).  With seed 3131: trap-free set 59 (no trap at lambda = 1, 2, 3), one-trap set 1; q* = .003244 at step 435.
 
 PANELS  (lines = analytical, markers = simulation, as in fr_theory.py)
   fig_fr_threshold  (proposed third figure; 5.5 in wide = the manuscript's text width, drawn at print size for an upright figure)
@@ -87,9 +96,24 @@ CFG = dict(
     T_POOL=250, POOL_NZ=2004, POOL_NEP=500,                   # panel c: pool of full paths (the horizon of fig_fr_theory e)
     POOL_QS=(0.0, 0.1), POOL_NS=(10, 30, 100, 300, 1000, 3000, 10_000, 30_000), POOL_GROUPS=400,
     STEP_NZ=2000, STEP_NEP=300, STEP_NS=(10, 30, 100), STEP_NT=25,    # panel B
+    # ---- fig_fr_theory_all v (11-11 late, John: more curves, a broader range, evenly spaced, structured values): bands of the trapped fraction
+    QB_CENTERS=(0.2, 0.35, 0.5, 0.65, 0.8), QB_HALF=0.03, QB_NZ=200, QB_CHUNK=250, QB_MAX_DRAWS=150_000,   # sets per band, by drawing tables
+    QB_EP=2000, QB_T0=10_000, QB_T=30, QB_NS=(10, 20, 50, 100, 200, 500, 1000, 2000, 5000),               # simulation (as build_thirds)
+    QB_TUPLES=1000, QB_NTH=30, QB_NMAX=10_000,                                                            # theory: draws of R per N, log grid of N
+    # ---- fig_fr_theory_all j (11-12, John: "add R=2 to panel k", then "can we try 2,3,4,5?"): growth rate vs. observables at more numbers
+    OPT2_RS=(2, 3, 4), OPT2_NZ=F.CFG["OPT_NZ"], OPT2_NEP=F.CFG["OPT_NEP"],                                 # of realizations R, with the settings of fr_theory.build_optimum
+    OPT2_FROM=tuple((k, F.CFG[k]) for k in ("OPT_DOS", "OPT_T1", "OPT_T2", "OPT_TACC", "LAM_MAIN")),      # (keyed: a change there rebuilds this)
+    # ---- fig_fr_theory_all row 1 and its critical-step panel since 11-13 (John: "it looks best to avoid having to write 'toy' example"):
+    #      the Cognitive Gridworld itself with SW_R realizations per variable and ONE observable, where every expectation is an exact sum
+    SW_R=3, SW_SEED=3131, SW_LAMS=(1.0, 2.0, 3.0), SW_LAM=F.CFG["LAM_MAIN"], SW_NSTAT=2000,                # generator draws; temperatures; sets for the trap counts
+    SW_T=500, SW_TMIX=3000, SW_TMAX=100_000, SW_PER_DECADE=40,                                            # steps: anatomy, threshold (every step), log grid
+    SW_NEP=100_000, SW_SIM_STEPS=10, SW_SIM_PER_DECADE=3,                                                 # simulation: episodes per table; recorded steps (linear / log)
+    SW_RATIOS=(0.5, 1.0, 1.1, 2.0), SW_NS=tuple(float(v) for v in np.round(10 ** np.arange(2.0, 9.01, 0.25), 6)),   # critical step: q / q*; N of the lines
+    SW_SIM_NS=tuple(float(v) for v in np.round(10 ** np.arange(2.0, 9.01, 0.5), 6)), SW_PATHS=2000,       # ... N and averages per point of its simulation
 )
 QUICK = dict(T_TOY=600, TOY_PATHS=40, TOY_SIM_NS=(1e3, 1e4, 1e5, 1e6), GRID_NZ=120, GRID_NEP=200, POOL_NZ=120, POOL_NEP=200,
-             POOL_GROUPS=60, POOL_NS=(10, 100, 1000), STEP_NZ=120, STEP_NEP=100, GRID_LAMS=(2.0,))
+             POOL_GROUPS=60, POOL_NS=(10, 100, 1000), STEP_NZ=120, STEP_NEP=100, GRID_LAMS=(2.0,), OPT2_NZ=20, OPT2_NEP=30,
+             SW_NEP=5000, SW_PATHS=200, SW_NSTAT=200, SW_TMAX=10_000)
 
 
 # ============================================================================================================
@@ -368,6 +392,160 @@ def build_steps(cfg):
     return dict(TS=TS, Ns=np.array(cfg["STEP_NS"]), sim=np.array(sim), se=np.array(se), law_lo=lo, law_hi=hi, n_sets=len(tabs), n_ep=cfg["STEP_NEP"])
 
 
+def _qb_draw(task):
+    """build_qbands: one chunk of QB_CHUNK table draws at LAM_MAIN (own seed): the tables whose trapped fraction falls in a band."""
+    cfg, seed = task; lam = F.CFG["LAM_MAIN"]; rng = np.random.default_rng(seed); out = []
+    for _ in range(cfg["QB_CHUNK"]):
+        ell = F.checked_table(F.make_env(rng, lam), lam); f = float(F.one_step_table(ell)["trapped"].mean())
+        b = [i for i, c in enumerate(cfg["QB_CENTERS"]) if abs(f - c) < cfg["QB_HALF"]]
+        if b: out.append((b[0], f, ell))
+    return out
+
+
+def _qb_sim(task):
+    """build_qbands: QB_EP episodes in each interaction set (own seed), each at its own joint realization, from step QB_T0: the changes
+    of FR over the next QB_T steps (counts drawn binomially, exact observers; as fr_theory.build_thirds)."""
+    cfg, tabs, seed = task; erng = np.random.default_rng(seed); t0, Tm, n_ep = cfg["QB_T0"], cfg["QB_T"], cfg["QB_EP"]; h = []
+    for ell in tabs:
+        lg = F.table_logs(ell); d_o, R, Rc = ell.shape; rg, rc = erng.integers(0, R, n_ep), erng.integers(0, Rc, n_ep); pr = ell[:, rg, rc].T
+        n = erng.binomial(t0, pr).astype(float); fr = [F.fr_counts(n, t0, *lg)]
+        for st in range(Tm):
+            n = n + (erng.random(pr.shape) < pr); fr.append(F.fr_counts(n, t0 + st + 1, *lg))
+        h.append(np.diff(np.array(fr), axis=0).T.astype(np.float32))
+    return np.concatenate(h)
+
+
+def build_qbands(cfg):
+    """fig_fr_theory_all v (John 11-11 late: more curves, a broader range, evenly spaced, structured values): QB_NZ interaction sets in
+    each band |q - c| < QB_HALF of the trapped fraction, c in QB_CENTERS, found by drawing tables at LAM_MAIN in chunks of QB_CHUNK with
+    seeds 91,000 + chunk (taken in chunk order: the sets do not depend on WORKERS).  THEORY (tables alone): P(an average of N episodes
+    dips within QB_T steps) = 1 - E_R[(1 - p_R)^T] (fr_theory.monotone_theory, QB_TUPLES draws of R per N).  SIMULATION: QB_EP episodes
+    per set from step QB_T0 (as fr_theory.build_thirds), dealt at random into as many independent groups of N as they allow; the fraction
+    of groups whose average decreases at some step of the QB_T."""
+    lam, nb, W = F.CFG["LAM_MAIN"], len(cfg["QB_CENTERS"]), cfg["WORKERS"]; keep, qset = [[] for _ in range(nb)], [[] for _ in range(nb)]; nxt = 0
+    while any(len(k) < cfg["QB_NZ"] for k in keep):
+        if nxt * cfg["QB_CHUNK"] >= cfg["QB_MAX_DRAWS"]: raise SystemExit(f"build_qbands: after {nxt * cfg['QB_CHUNK']} tables the bands hold {[len(k) for k in keep]}")
+        res = F.run_parallel(_qb_draw, [(cfg, 91_000 + nxt + i) for i in range(4 * W)], W, f"q bands: tables from {nxt * cfg['QB_CHUNK']:,}")
+        nxt += 4 * W
+        for r in res:
+            for b, f, ell in r:
+                if len(keep[b]) < cfg["QB_NZ"]: keep[b].append(ell); qset[b].append(f)
+        print(f"   q bands: {[len(k) for k in keep]} sets after {nxt * cfg['QB_CHUNK']:,} tables", flush=True)
+    Nth = np.unique(np.r_[np.round(np.logspace(np.log10(5), np.log10(cfg["QB_NMAX"]), cfg["QB_NTH"])).astype(int), np.array(cfg["QB_NS"], int)])
+    grng = np.random.default_rng(97); bands = []
+    for b, tabs in enumerate(keep):
+        it = iter(tabs); pool = F.one_step_pool(lam, len(tabs), None, both_goals=False, env=lambda r_, l_: next(it)); q = float(pool["trapped"].mean())
+        m, se = F.monotone_theory(pool, Nth, (cfg["QB_T"],), cfg["QB_TUPLES"], 9300 + 10 * b, workers=W)
+        parts = [c for c in np.array_split(np.arange(len(tabs)), cfg["CHUNKS"]) if len(c)]
+        h = np.concatenate(F.run_parallel(_qb_sim, [(cfg, [tabs[j] for j in c], 95_000 + 100 * b + k) for k, c in enumerate(parts)], W, f"q band {b + 1}: simulation"))
+        sim, sse, ngs = [], [], []
+        for N in cfg["QB_NS"]:
+            ng = len(h) // N; avg = h[grng.permutation(len(h))[:ng * N]].reshape(ng, N, -1).mean(1); d = float(np.any(avg < 0, axis=1).mean())
+            sim.append(d); sse.append(np.sqrt(max(d * (1 - d), 1.0 / ng) / ng)); ngs.append(ng)
+        bands.append(dict(center=cfg["QB_CENTERS"][b], q=q, q_sets=np.array(qset[b]), Nth=Nth, theory=1 - m[:, 0], theory_se=se[:, 0], Ns=np.array(cfg["QB_NS"]),
+                          sim=np.array(sim), se=np.array(sse), groups=np.array(ngs), n_sets=len(tabs), n_ep=cfg["QB_EP"]))
+        print(f"   q band {b + 1}: q = {q:.3f}, done", flush=True)
+    return dict(bands=bands, tables_drawn=nxt * cfg["QB_CHUNK"])
+
+
+def _opt_summary(v, nt, n_ep):
+    """One point of fr_theory._opt_point, summarized as fr_theory.derive does (mean and s.e. over its interaction sets)."""
+    ms = lambda x: (float(np.mean(x)), float(np.std(x) / np.sqrt(len(x))))
+    return dict(ed=ms(v["ed"]), slope=ms(v["slope"]), q=ms(v["q"]), gap=[ms(v["accJ"][:, i] - v["accN"][:, i]) for i in range(nt)],
+                accJ=[ms(v["accJ"][:, i]) for i in range(nt)], no_trap=float(np.mean(v["q"] == 0)), n_sets=len(v["ed"]), n_ep=n_ep)
+
+
+def build_opt_more(cfg):
+    """fig_fr_theory_all j (John 11-12: "add R=2 to panel k", then "can we try 2,3,4,5?"): the points of fr_theory.build_optimum (per number
+    of observables d_o: E[Delta] and the trapped fraction q of the tables; the simulated slope of the mean FR between OPT_T1 and OPT_T2 and
+    both observers' accuracy at OPT_TACC, on the same interaction sets) at the numbers of realizations OPT2_RS, with its settings, its point
+    function and its seeds (70,000 + 100 R + d_o: a point does not depend on which other points are built, and none is shared with its R =
+    5, 10, 20), summarized as fr_theory.derive does.  A cache of its own: fr_theory's is keyed by its OPT_RS (10,000 sets x 39 points),
+    which this leaves untouched.  One point per worker process."""
+    fc = dict(F.CFG, OPT_NZ=cfg["OPT2_NZ"], OPT_NEP=cfg["OPT2_NEP"]); nt = len(fc["OPT_TACC"])
+    tasks = [(fc, R, d) for d in sorted(fc["OPT_DOS"], reverse=True) for R in sorted(cfg["OPT2_RS"], reverse=True)]     # the slow points first
+    res = F.run_parallel(F._opt_point, tasks, cfg["WORKERS"], "growth rate vs. observables, more R")
+    return {(R, d): _opt_summary(v, nt, fc["OPT_NEP"]) for (_, R, d), v in zip(tasks, res)}
+
+
+def _sw_efr_at(ell, ts):
+    """Exact E[FR_t] of a one-observable table at the steps ts only (fr_theory.exact_efr computes every step)."""
+    m = ell.mean(1); out = np.zeros(len(ts))
+    for i, t in enumerate(ts):
+        lB, lN, _, P, _ = F._beliefs(ell, m, int(t)); out[i] = (P.mean(axis=(1, 2)) * F._fr_by_count(lB, lN)).sum()
+    return out
+
+
+def _sw_sim(ell, ts, n_ep, rng):
+    """Monte Carlo of one one-observable table: n_ep episodes, each at a uniformly drawn joint realization; at every step of ts
+    (increasing) the mean and SEM of FR_t and of the Joint log loss -ln B_t(r_g).  The count of ones is drawn binomially between the
+    recorded steps (exact: both observers depend on the observations through the count alone)."""
+    R, Rc = ell.shape; m = ell.mean(1); rg, rc = rng.integers(0, R, n_ep), rng.integers(0, Rc, n_ep); p = ell[rg, rc]; k = np.zeros(n_ep, np.int64); prev = 0; out = []
+    for t in ts:
+        k += rng.binomial(int(t) - prev, p); prev = int(t); lB, lN, _, _, _ = F._beliefs(ell, m, int(t)); fr = F._fr_by_count(lB, lN)[k]; jl = -lB[k, rg]
+        out.append((fr.mean(), fr.std() / np.sqrt(n_ep), jl.mean(), jl.std() / np.sqrt(n_ep)))
+    return np.array(out)
+
+
+def _sw_atoms(ells, t):
+    """One episode's increment FR_{t+1} - FR_t in each table: its values and their probabilities over the outcomes (joint realization
+    summed out: count of ones at t, next observation), as toy_atoms."""
+    out = []
+    for ell in ells:
+        m = ell.mean(1); lB0, lN0, _, P, _ = F._beliefs(ell, m, t); f0 = F._fr_by_count(lB0, lN0); lB1, lN1, _, _, _ = F._beliefs(ell, m, t + 1); f1 = F._fr_by_count(lB1, lN1)
+        out.append((np.r_[f1[1:] - f0, f1[:-1] - f0], np.r_[(P * ell[None]).mean(axis=(1, 2)), (P * (1 - ell[None])).mean(axis=(1, 2))]))
+    return out
+
+
+def build_small(cfg):
+    """Row 1 and the critical-step panel of fig_fr_theory_all: the Cognitive Gridworld with SW_R realizations per variable and ONE
+    observable (the paper's generator, fr_theory.make_env), where a history is one count and every expectation is an exact sum.
+    SELECTION, by a stated rule: interaction sets are drawn with seed SW_SEED, each at every temperature of SW_LAMS (the draws do not
+    depend on lambda); the first with no trapped joint realization at any of them is the TRAP-FREE set, the first with exactly one at
+    SW_LAM the ONE-TRAP set.  (Also: the number of traps in SW_NSTAT other sets at SW_LAM, to say how common such sets are.)
+    EXACT: the anatomy of both sets at SW_LAM to SW_T steps; E[FR_t] of the trap-free set at each temperature on a log grid to SW_TMAX;
+    both sets at SW_LAM at every step to SW_TMIX, which gives the threshold q* of their mixture (Corollary 1; a fraction q / share of the
+    episodes in the one-trap set, share = its trapped share) and the critical step t*; the law of the average increment at t* (FFT up to
+    N_FFT_MAX episodes, saddlepoint of the same law above).
+    SIMULATION: SW_NEP episodes per table and temperature (_sw_sim); at t*, SW_PATHS averages per N, the N episodes of an average drawn
+    as the numbers of them that fall on each outcome (count of ones at t*, next observation, table): one multinomial draw."""
+    lam0, R, lams = cfg["SW_LAM"], cfg["SW_R"], tuple(cfg["SW_LAMS"]); assert lam0 in lams
+    rng = np.random.default_rng(cfg["SW_SEED"]); free = one = None; i = 0
+    while free is None or one is None:
+        if i >= 20_000: raise SystemExit(f"build_small: no trap-free / one-trap interaction set in {i} draws")
+        st = rng.bit_generator.state; row = {}
+        for lam in lams:
+            rng.bit_generator.state = st; row[lam] = F.checked_table(F.make_env(rng, lam, R=R, d_o=1), lam)[0]
+        k = {lam: F.table_stats(e)["k"] for lam, e in row.items()}
+        if free is None and max(k.values()) == 0: free = (i, row)
+        if one is None and k[lam0] == 1: one = (i, row[lam0])
+        i += 1
+    srng = np.random.default_rng(cfg["SW_SEED"] + 3); k_stat = np.array([F.table_stats(F.checked_table(F.make_env(srng, lam0, R=R, d_o=1), lam0)[0])["k"] for _ in range(cfg["SW_NSTAT"])])
+    ea, eb = free[1][lam0], one[1]; an = {}
+    for key, ell in (("a", ea), ("b", eb)):
+        a_, st_ = F.exact_anatomy(ell, cfg["SW_T"]); an[key] = dict(ell=ell, an=a_, st=st_)
+    share = an["b"]["st"]["k"] / eb.size; assert an["a"]["st"]["k"] == 0 and an["b"]["st"]["k"] == 1 and np.isclose(share, 1 / 9)       # mix_atoms: a fraction 9 q of the episodes
+    tl = np.unique(np.round(np.logspace(0, np.log10(cfg["SW_TMAX"]), int(round(np.log10(cfg["SW_TMAX"]) * cfg["SW_PER_DECADE"])) + 1)).astype(int))
+    temp = {lam: dict(ell=free[1][lam], st=F.table_stats(free[1][lam]), efr=_sw_efr_at(free[1][lam], tl)) for lam in lams}
+    E0, E1 = F.exact_efr(ea, cfg["SW_TMIX"]), F.exact_efr(eb, cfg["SW_TMIX"]); w_star, t_star = F.mixture_threshold(E0, E1); q_star = w_star * share
+    assert t_star < 0.5 * cfg["SW_TMIX"], "the critical step is too close to the end of the steps computed"
+    # ---- the average increment at the critical step: exact law, and simulated averages
+    atoms = _sw_atoms([ea, eb], t_star); Ns = np.array(cfg["SW_NS"]); simN = np.array(cfg["SW_SIM_NS"]); prng = np.random.default_rng(cfg["SW_SEED"] + 2)
+    p_star, sim, both = np.zeros((len(cfg["SW_RATIOS"]), len(Ns))), np.zeros((len(cfg["SW_RATIOS"]), len(simN))), []
+    for ir, r in enumerate(cfg["SW_RATIOS"]):
+        x, w = mix_atoms(atoms, r * q_star); keep = w > 0; x, w = x[keep], w[keep]; w = w / w.sum(); sp = saddle(x, w)
+        for iN, N in enumerate(Ns): p_star[ir, iN] = dip_fft(x, w, N) if N <= cfg["N_FFT_MAX"] else dip_saddle(sp, N)
+        both.append((dip_fft(x, w, cfg["N_FFT_MAX"]), dip_saddle(sp, cfg["N_FFT_MAX"])))
+        for iN, N in enumerate(simN): sim[ir, iN] = np.mean(prng.multinomial(int(round(N)), w, size=cfg["SW_PATHS"]) @ x < 0)
+    # ---- simulated curves
+    erng = np.random.default_rng(cfg["SW_SEED"] + 1); t_lin = np.arange(1, cfg["SW_SIM_STEPS"] + 1) * cfg["SW_T"] // cfg["SW_SIM_STEPS"]
+    t_log = np.unique(np.round(10 ** (np.arange(0, np.log10(cfg["SW_TMAX"]) * cfg["SW_SIM_PER_DECADE"] + 0.5) / cfg["SW_SIM_PER_DECADE"])).astype(int))
+    ts = np.unique(np.r_[t_lin, t_log]); sims = {("free", lam): _sw_sim(free[1][lam], ts, cfg["SW_NEP"], erng) for lam in lams}; sims[("one", lam0)] = _sw_sim(eb, ts, cfg["SW_NEP"], erng)
+    return dict(i_free=free[0], i_one=one[0], n_drawn=i, k_stat=k_stat, an=an, temp=temp, tl=tl, E0=E0, E1=E1, E1l=_sw_efr_at(eb, tl), w_star=w_star, q_star=q_star, t_star=t_star,
+                share=share, ratios=list(cfg["SW_RATIOS"]), Ns=Ns, p_star=p_star, both=both, sim_Ns=simN, sim=sim, sim_se=np.sqrt(np.maximum(sim * (1 - sim), 1.0 / cfg["SW_PATHS"]) / cfg["SW_PATHS"]),
+                ts=ts, t_lin=t_lin, t_log=t_log, sims=sims, n_ep=cfg["SW_NEP"], paths=cfg["SW_PATHS"], lam=lam0, lams=lams, R=R)
+
+
 def check_assumptions(lams=(1.0, 2.0, 3.0), nz=400, seed=404):
     """(A2) and (A3) in sampled interaction sets (the tex says they held in every one): per likelihood temperature, the smallest
     margins over nz sets.  (A2): observation laws of joint realizations with different goal realizations differ (max_i of the
@@ -410,14 +588,18 @@ def trap_origin(lams=(1.0, 2.0, 3.0), nz=300, seed=505):
 KEYS = dict(toy_theory=("T_TOY", "TOY_RATIOS", "TOY_STEP_RATIOS", "TOY_NS", "N_FFT_MAX"),
             toy_theory_extra=("T_TOY", "TOY_RATIOS", "TOY_NS", "TOY_SIM_NS", "N_FFT_MAX"), toy_fine=("T_TOY", "TOY_FINE", "TOY_FINE_PER_DECADE", "N_FFT_MAX"), toy_sim=("T_TOY", "TOY_RATIOS", "TOY_SIM_NS", "TOY_PATHS"),
             grid=("GRID_NZ", "GRID_NEP", "GRID_TMAX", "GRID_NT", "GRID_LAMS"),
-            pool=("LAM", "T_POOL", "POOL_NZ", "POOL_NEP", "POOL_QS", "POOL_NS", "POOL_GROUPS"), steps=("LAM", "STEP_NZ", "STEP_NEP", "STEP_NS", "STEP_NT"))
+            pool=("LAM", "T_POOL", "POOL_NZ", "POOL_NEP", "POOL_QS", "POOL_NS", "POOL_GROUPS"), steps=("LAM", "STEP_NZ", "STEP_NEP", "STEP_NS", "STEP_NT"),
+            qbands=("CHUNKS", "QB_CENTERS", "QB_HALF", "QB_NZ", "QB_CHUNK", "QB_EP", "QB_T0", "QB_T", "QB_NS", "QB_TUPLES", "QB_NTH", "QB_NMAX"),
+            opt_more=("OPT2_RS", "OPT2_NZ", "OPT2_NEP", "OPT2_FROM"),
+            small=("SW_R", "SW_SEED", "SW_LAMS", "SW_LAM", "SW_NSTAT", "SW_T", "SW_TMIX", "SW_TMAX", "SW_PER_DECADE", "SW_NEP", "SW_SIM_STEPS", "SW_SIM_PER_DECADE", "SW_RATIOS",
+                   "SW_NS", "SW_SIM_NS", "SW_PATHS", "N_FFT_MAX"))
 
 
 def load(cfg, tag, only=None):
     """Each cache is keyed by the configuration entries it depends on (KEYS) and rebuilt when one of them changes."""
     os.makedirs(OUT, exist_ok=True); D = {}
     for name, builder in (("toy_theory", build_toy_theory), ("toy_theory_extra", build_toy_theory_extra), ("toy_fine", build_toy_fine), ("toy_sim", build_toy_sim), ("grid", build_grid),
-                          ("pool", build_pool), ("steps", build_steps)):
+                          ("pool", build_pool), ("steps", build_steps), ("qbands", build_qbands), ("opt_more", build_opt_more), ("small", build_small)):
         if only and name not in only: continue
         path = os.path.join(OUT, f"{name}{tag}.pkl"); want = repr([(k, cfg[k]) for k in KEYS[name]])
         if os.path.exists(path):

@@ -42,6 +42,15 @@ Colour = route (blue Generator, red Classifier); dark = oracle feedback, light =
 thick line = mean over seeds, drawn only where every seed of the version has a test. Joint and Naive: the cached bounds of
 plot_ablation.py (bayes_bounds_ctx2_T30.npy).
 
+11-13 00:20 (John: "weren't we waiting for rcc_arms to collect more episodes?"): the Classifier-route arms continue from
+their 60k nets to 120k (train_cluster_runs.py RESUME: rccclf120k_lr4_s0-5, clf120k_lr4_s2 = the oracle seed that lost 2
+channels); a seed's thin line follows its continuation when one exists, thick lines / bands stay where every seed has a
+test. The Generator-route continuations were cut 11-12 05:45 (John; flat at .69-.73 since 30k).
+RESULT 11-13 00:20: original feedback, Classifier route s0-3 at 120k: Joint - net .053-.071 (acc .697-.715; the RCC's
+Generator route at 60k: .07); s4-5 (.38 / .57 at 60k) continue on the cluster (66683258). Oracle s2 flat at .53 to 120k.
+RESULT 11-13 12:25 (66683258 done): s4 .699, s5 .636 at 120k; mean of the 6 Classifier-route seeds .694 at 120k vs .697 for
+the Generator route's 6 at 60k. s5 still ignores channel 0 (census 66685419), the other 5 use every channel.
+
     python fig13_rcc_arm.py [--pull]
 """
 import os, sys, json, glob, re, argparse, subprocess
@@ -54,6 +63,7 @@ from main.utils import fig_path, apply_fig_style
 DATA = os.path.join(ROOT, "main", "DATA")
 LOGS = os.path.join(DATA, "experimental", "cluster_runs", "jsonl")
 SEEDS, EPISODES = 6, 60000
+EXT = {"rccclf60k_lr4_s": "rccclf120k_lr4_s", "clf60k_lr4_s": "clf120k_lr4_s"}   # continued to 120k (11-12, RESUME)
 # (label, colour, line style, ("cluster", run prefix) or ("pilot", Fig 13's condition))
 VERSIONS = (("oracle, Generator route", "#08519c", "-", ("cluster", "gen60k_lr4_s")),
             ("oracle, Generator route, Fig 13 (10k)", "#08519c", (0, (4, 2)), ("pilot", "default")),
@@ -69,8 +79,9 @@ VERSIONS_30K = (("oracle, Generator route", "#08519c", "-", ("cluster", "gen30k_
             ("original, Classifier route", "#f4845f", "-", ("cluster", "rccdiag_lr4clf_s")))
 
 def pull():
-    subprocess.run(f"scp -q -o BatchMode=yes 'elsc-cluster:cgw/runs/cluster_runs/{{gen60k,clf60k,rcc60k,rccclf60k}}*.jsonl' {LOGS}/",
-                   shell=True)
+    subprocess.run(f"scp -q -o BatchMode=yes 'elsc-cluster:cgw/runs/cluster_runs/{{gen60k,clf60k,rcc60k,rccclf60k,rccclf120k}}*.jsonl' "
+                   f"{LOGS}/", shell=True)
+    subprocess.run(f"cp {ROOT}/runs/cluster_runs/clf120k_lr4_s2.jsonl {LOGS}/", shell=True)   # local GPU, task 183
 
 
 def pilot(cond):
@@ -88,11 +99,12 @@ def cluster(prefix):
     """[(episodes, accuracy)] of the seeds of this arm that have a log"""
     out = []
     for k in range(SEEDS):
-        f = os.path.join(LOGS, f"{prefix}{k}.jsonl")
-        if os.path.exists(f):
-            recs = [json.loads(l) for l in open(f) if l.strip()]
+        for p in ((EXT[prefix],) if prefix in EXT else ()) + (prefix,):     # the continuation's log starts with the source's
+            f = os.path.join(LOGS, f"{p}{k}.jsonl")
+            recs = [json.loads(l) for l in open(f) if l.strip()] if os.path.exists(f) else []
             if recs:
                 out.append((np.array([r["ep"] for r in recs]), np.array([r["net"] for r in recs])))
+                break
     return out
 
 
@@ -112,6 +124,7 @@ def main():
     fig, ax = plt.subplots(1, 3, figsize=(16.5, 5.0), sharey=True, constrained_layout=True,
                            gridspec_kw=dict(width_ratios=(1, 1.35, 1.35)))
     handles = ([], [])
+    xmax_new = EPISODES
     for label, col, ls, (kind, src) in VERSIONS:
         p = 0 if kind == "pilot" else 1
         a = ax[p]
@@ -131,12 +144,17 @@ def main():
             done = sum(x[-1] >= EPISODES - 1 for x, _ in runs)
             state = (f"$n = {SEEDS}$" if done == SEEDS else
                      f"{done} of {SEEDS} done, {len(runs) - done} running (mean of {len(runs)})" if runs else "queued")
+            if src in EXT:
+                n2 = sum(x[-1] >= 2 * EPISODES - 1 for x, _ in runs)
+                state += f"; {n2} continued to 120,000" if n2 else ""
+            xmax_new = max([xmax_new] + [x[-1] for x, _ in runs])
         handles[p].append(plt.Line2D([], [], color=col, ls=ls, lw=2.4,
                                      label=f"{label.replace(', Fig 13 (10k)', '')}: {state}"))
     for p, (a, title, xmax) in enumerate(zip(ax, (r"a   Fig 13 (paper): oracle feedback, lr $10^{-3}$, 10,000 episodes",
-                                                  r"b   New: lr $10^{-4}$, 60,000 episodes, every arm",
+                                                  r"b   New: lr $10^{-4}$, 60,000 episodes, every arm" +
+                                                  (" (thin lines past 60,000: continued)" if xmax_new > EPISODES else ""),
                                                   r"c   Mean $\pm$ SEM over seeds (a and b; as in the paper)"),
-                                              (1.1e4, 6.5e4, 6.5e4))):
+                                              (1.1e4, 1.08 * xmax_new, 1.08 * xmax_new))):
         a.axhline(joint - naive, c="k", lw=1.6, ls="--", zorder=10)
         a.axhline(joint - .1, c="k", lw=1.0, ls=":", zorder=10)
         a.set(xscale="log", yscale="log", xlim=(200, xmax), xlabel="training episodes")

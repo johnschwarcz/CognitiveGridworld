@@ -26,6 +26,11 @@ drawn, John 11-10): novel-environment transfer from |S| 100-125 at d_E 30 (Joint
 (.66; .39 at 125), never at d_E 10 (.08-.11, and training accuracy falls .57 -> .11 with |S|). Naive answers / goal only
 follow the same pattern at their plateaus (.48-.52 / .37-.39). Larger d_E needs more variables before it generalizes.
 
+11-12 23:00, d_E 20 added (John 11-12 12:25): RCC |S| 25-100 (local GPU, tasks 213-216) memorize (training .66-.72) and do
+not transfer (novel .10-.12), like d_E 30 below |S| 100; |S| 125-1000 at d_E 20 queued (cluster 66678029_6-7). Generator
+rows at d_E 20 are irregular with one seed: Joint's answers transfer at |S| 250 / 500 (.69 / .71) but not 1000 (training
+.24, novel .10); Naive's at 500 / 1000 only; goal only never (.09-.12).
+
     python oracle_grid_plot.py [--pull]
 """
 import os, sys, json, glob, argparse, subprocess
@@ -39,7 +44,7 @@ EXP = os.path.join(ROOT, "main", "DATA", "experimental")
 LOGS = os.path.join(EXP, "cluster_runs", "jsonl")
 ACC = os.path.join(EXP, "cluster_runs", "acc_through_training.npz")
 BAYES_LOGS = os.path.join(EXP, "bayes_gen", "jsonl")
-DIMS = (10, 30, 90)
+DIMS = (10, 20, 30, 90)      # 20 added 11-12 (John)
 AGENTS = (("Joint's answers", "joint"), ("Naive's answers", "naive"), ("True answer, goal only", "truth1"))
 DROP_S = (150, 200)            # John 11-10: no "both true" row, no |S| 150 / 200 (their runs stay on disk, not drawn)
 
@@ -49,6 +54,7 @@ def pull():
     subprocess.run(f"scp -q -o BatchMode=yes 'elsc-cluster:cgw/runs/bayes_gen/*.jsonl' {BAYES_LOGS}/", shell=True)
     subprocess.run(f"scp -q -o BatchMode=yes 'elsc-cluster:cgw/runs/cluster_runs/oracle_S*.jsonl' {LOGS}/", shell=True)
     subprocess.run(f"scp -q -o BatchMode=yes elsc-cluster:cgw/runs/cluster_runs/acc_through_training.npz {ACC}", shell=True)
+    subprocess.run(f"cp {ROOT}/runs/cluster_runs/oracle_S*.jsonl {LOGS}/ 2>/dev/null", shell=True)   # local GPU runs (d_E 20)
 
 
 def bayes_cells(label):
@@ -73,9 +79,12 @@ def rcc_cells():
         name = os.path.basename(f)[:-6]
         S, d = (int(name.split(k)[1].split("_")[0]) for k in ("_S", "_d"))
         recs = [json.loads(l) for l in open(f)]
-        if name + "__train" not in acc or recs[-1]["ep"] < 9999:
+        if recs[-1]["ep"] < 9999:
             continue
-        out[d, S] = (acc[name + "__train"][len(recs) - 1, -1], recs[-1]["net"])
+        if "train_net" in recs[-1]:            # runs from 11-12 log it (the same quantity: last training batch before the test)
+            out[d, S] = (recs[-1]["train_net"], recs[-1]["net"])
+        elif name + "__train" in acc:
+            out[d, S] = (acc[name + "__train"][len(recs) - 1, -1], recs[-1]["net"])
     return out
 
 
