@@ -721,6 +721,20 @@ assert len({t[0] for t in TASKS}) == len(TASKS)
 TASKS += [(f"rccC3b1k_lr4_s{_k}", dict(ORACLE, mode="RL", gen_zflow=True, ctx_num=3, classifier_LR=1e-4, generator_LR=1e-4,
                                       batch_num=1000, episodes=5_000_000, checkpoint_every=1000), _k) for _k in range(2)]
 assert len(TASKS) == 574 and TASKS[572][0] == "rccC3b1k_lr4_s0" and len({t[0] for t in TASKS}) == len(TASKS)
+# 11-18 (John: "Let's stop 1 C = 3 seed and let the other continue to 5B training episodes"): seed 1 stopped with its STOP
+# file at 3.97 B episodes (net saved); seed 0 ends at its 44 h budget (~4.45 B) and 574 rccC3b1k5B_lr4_s0 resumes it
+# (RESUME: its log first, its net, a fresh Adam) to the configured 5,000,000 iterations = 5 B episodes (~5.5 h on an A100),
+# submitted with a dependency on seed 0's job.
+TASKS.append(("rccC3b1k5B_lr4_s0", dict(TASKS[572][1]), 0))
+RESUME["rccC3b1k5B_lr4_s0"] = "rccC3b1k_lr4_s0"
+assert len(TASKS) == 575 and TASKS[574][0] == "rccC3b1k5B_lr4_s0" and TASKS[574][1]["episodes"] == 5_000_000
+# 11-19 (John: "can we keep training it for another day?"): 575 rccC3b1k5Bmore_lr4_s0 resumes 574's net (5 B episodes;
+# RESUME as above) for a 24 h budget (~2.4 B more episodes at ~100 M per hour; 10,000,000 iterations are never reached).
+# Task seed 1 only moves the post-resume stream to seed 1,001 (574 used 1,000, which could redraw 574's episodes); the
+# environments (K, Q from the saved net; test variables = the first test_states) and the net are seed 0's.
+TASKS.append(("rccC3b1k5Bmore_lr4_s0", dict(TASKS[572][1], episodes=10_000_000), 1))
+RESUME["rccC3b1k5Bmore_lr4_s0"] = "rccC3b1k5B_lr4_s0"
+assert len(TASKS) == 576 and TASKS[575][0] == "rccC3b1k5Bmore_lr4_s0" and len({t[0] for t in TASKS}) == len(TASKS)
 STOP_RULE_RUNS = {f"{a}_s{k}" for a in ("zflow", "default") for k in range(3)}     # seeds 3-5 run all 30k episodes
 # 11-13 17:40 (John: "for the generator route it seems like some seeds still never left chance. Let's keep running generator
 # seeds if they dont leave chance. The longest it takes for a generator seed to leave chance also gives the minimum we have

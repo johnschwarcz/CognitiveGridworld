@@ -1,6 +1,6 @@
 # main/DATA manifest
 
-37,231 files, 427.0 GB. Tiers: archive (checkpoints, run logs, the probe set: `python main/data_tools.py fetch`), cache (regenerate: see the modules below and their docstrings), light (in git under main/DATA_light: `python main/data_tools.py light-restore`). Per-file list: DATA_MANIFEST.tsv.
+40,050 files, 494.5 GB. Tiers: archive (checkpoints, run logs, the probe set: `python main/data_tools.py fetch`), cache (regenerate: see the modules below and their docstrings), light (in git under main/DATA_light: `python main/data_tools.py light-restore`). Per-file list: DATA_MANIFEST.tsv.
 
 | folder | size | files | archive | light | mentioned by |
 |---|---|---|---|---|---|
@@ -8,11 +8,11 @@
 | cache | 17.41 GB | 12 | 0.00 GB | 2.3 MB | compare_matched_params.py, compare_sanity_reps.py, fig13_paper_form.py, fig13_plugin_lead.py, fig13_rcc_arm.py, fig13_shuffled_routes.py ... |
 | cluster_runs | 7.29 GB | 71 | 7.29 GB | 0.0 MB | bayes_gen_fr_div.py, bayes_gen_plot.py, cluster_runs_plot.py, fig12_default_rcc.py, fig13_embeddings.py, fig13_memorization.py ... |
 | controller | 0.02 GB | 3 | 0.00 GB | 0.0 MB | plot_controllers.py |
-| experimental | 375.98 GB | 36,962 | 277.30 GB | 162.7 MB | bayes_gen_arch_plot.py, bayes_gen_controls_plot.py, bayes_gen_fr_div.py, bayes_gen_plot.py, cluster_runs_plot.py, credit_time_control.py ... |
+| experimental | 443.52 GB | 39,781 | 342.37 GB | 182.8 MB | bayes_gen_arch_plot.py, bayes_gen_controls_plot.py, bayes_gen_fr_div.py, bayes_gen_plot.py, cluster_runs_plot.py, credit_time_control.py ... |
 | experimental/bayes_gen_fr | 4.08 GB | 162 | 3.89 GB | 0.0 MB | bayes_gen_fr_div.py |
 | experimental/bayes_gen_fr/nets | 3.89 GB | 54 | 3.89 GB | 0.0 MB | bayes_gen_fr_div.py, fig13_embeddings.py, fig_channel_swap.py, fig_routes_status.py |
-| experimental/cluster_runs | 0.61 GB | 283 | 0.41 GB | 0.1 MB | bayes_gen_fr_div.py, bayes_gen_plot.py, cluster_runs_plot.py, fig12_default_rcc.py, fig13_embeddings.py, fig13_memorization.py ... |
-| experimental/cluster_runs/jsonl | 0.20 GB | 276 | 0.00 GB | 0.0 MB | bayes_gen_controls_plot.py, bayes_gen_plot.py, cluster_runs_plot.py, fig12_default_rcc.py, fig13_memorization.py, fig13_paper_form.py ... |
+| experimental/cluster_runs | 0.63 GB | 286 | 0.41 GB | 0.1 MB | bayes_gen_fr_div.py, bayes_gen_plot.py, cluster_runs_plot.py, fig12_default_rcc.py, fig13_embeddings.py, fig13_memorization.py ... |
+| experimental/cluster_runs/jsonl | 0.22 GB | 279 | 0.00 GB | 0.0 MB | bayes_gen_controls_plot.py, bayes_gen_plot.py, cluster_runs_plot.py, fig12_default_rcc.py, fig13_memorization.py, fig13_paper_form.py ... |
 | experimental/esn_convex | 0.02 GB | 60 | 0.00 GB | 0.0 MB | esn_convex_plot.py |
 | experimental/esn_learnability | 0.35 GB | 1,493 | 0.31 GB | 13.5 MB | fig_minimal_set.py, learnability_checks.py, plot_episode_start_curves.py, plot_ff_deep.py, plot_joint_esn_training.py |
 | experimental/esn_learnability/full_esn_entropy | 0.31 GB | 250 | 0.31 GB | 0.0 MB | plot_ff_deep.py, plot_joint_esn_training.py |
@@ -39,6 +39,7 @@
 | experimental/fr_definition | 0.62 GB | 31 | 0.46 GB | 0.3 MB | fig2b_fr_panel.py, fig_manifold_fr.py, fig_supp_diagnostics.py, fr_correct_fresh.py, fr_definition_check.py, supplementary_plotter2.py |
 | experimental/fr_definition/clamp_nets | 0.46 GB | 6 | 0.46 GB | 0.0 MB |  |
 | experimental/fr_definition/fig1c_forward | 0.14 GB | 7 | 0.00 GB | 0.0 MB |  |
+| experimental/fr_proxy | 2.27 GB | 43 | 0.00 GB | 20.1 MB | fig_fr_proxy.py, fig_fr_proxy_training.py |
 | experimental/fr_theory | 2.58 GB | 262 | 0.00 GB | 0.5 MB | fr_definition_check.py, fr_theory.py, fr_theory_additions.py, fr_theory_additions_plot.py, fr_theory_dipsim.py, fr_theory_figure.py ... |
 | experimental/fr_theory/additions | 0.01 GB | 40 | 0.00 GB | 0.2 MB | fr_theory_additions.py, fr_theory_dipsim.py, fr_theory_horizon.py |
 | experimental/fr_theory/baseline | 0.49 GB | 13 | 0.00 GB | 0.0 MB | explain_interaction.py, fig1.py, fig13_shuffled_routes.py, fig1_checks.py, fig1_movie.py, fig1c_mechanisms.py ... |
@@ -51,12 +52,16 @@
 | experimental/interaction_bounds | 0.20 GB | 787 | 0.17 GB | 0.0 MB | plot_episode_start_curves.py, plot_ff_deep.py, plot_joint_esn_training.py |
 | experimental/interaction_bounds/analyses | 0.20 GB | 777 | 0.17 GB | 0.0 MB | plot_episode_start_curves.py, plot_ff_deep.py, plot_joint_esn_training.py |
 | experimental/rcc_pairs | 0.16 GB | 4 | 0.00 GB | 0.0 MB | rcc_pairs.py |
-| experimental/training_dynamics | 304.23 GB | 26,572 | 239.39 GB | 117.2 MB | credit_time_control.py, fig_entanglement_driver.py, fig_learn_fr.py, fig_learn_grids_pr.py, fig_learn_interaction.py, fig_learn_lever.py ... |
-| experimental/training_dynamics/analysis | 42.86 GB | 1,379 | 0.33 GB | 4.7 MB | credit_time_control.py, fig_entanglement_driver.py, fig_learn_fr.py, fig_learn_grids_pr.py, fig_learn_lever.py, fig_learn_mechanism.py ... |
+| experimental/training_dynamics | 369.48 GB | 29,345 | 304.46 GB | 117.3 MB | credit_time_control.py, fig_entanglement_driver.py, fig_fr_proxy_training.py, fig_learn_fr.py, fig_learn_grids_pr.py, fig_learn_interaction.py ... |
+| experimental/training_dynamics/analysis | 42.86 GB | 1,379 | 0.33 GB | 4.7 MB | credit_time_control.py, fig_entanglement_driver.py, fig_fr_proxy_training.py, fig_learn_fr.py, fig_learn_grids_pr.py, fig_learn_lever.py ... |
+| experimental/training_dynamics/batch100k_lr1e-1 | 2.16 GB | 156 | 2.16 GB | 0.0 MB |  |
+| experimental/training_dynamics/batch80k | 2.16 GB | 156 | 2.16 GB | 0.0 MB | fig_fr_proxy_training.py |
+| experimental/training_dynamics/dense500 | 21.47 GB | 1,028 | 21.46 GB | 0.0 MB | fig_fr_proxy_training.py |
 | experimental/training_dynamics/echo_N10000_b8k_s20261029 | 5.17 GB | 59 | 5.17 GB | 0.0 MB |  |
 | experimental/training_dynamics/echo_N200_s20261029 | 0.11 GB | 59 | 0.11 GB | 0.0 MB |  |
 | experimental/training_dynamics/echo_N500_s20261029 | 1.60 GB | 358 | 1.60 GB | 0.0 MB |  |
 | experimental/training_dynamics/echo_s20261029 | 4.53 GB | 358 | 4.53 GB | 0.0 MB | td_questions_data.py |
+| experimental/training_dynamics/echo_s20261029_ep105 | 0.77 GB | 70 | 0.77 GB | 0.0 MB |  |
 | experimental/training_dynamics/joint_echo_N10000_b8k_s20261029 | 5.19 GB | 59 | 5.19 GB | 0.0 MB |  |
 | experimental/training_dynamics/joint_echo_N10000_jl_s20261029 | 5.19 GB | 59 | 5.19 GB | 0.0 MB |  |
 | experimental/training_dynamics/joint_echo_N10000_s20261029 | 5.19 GB | 59 | 5.19 GB | 0.0 MB |  |
@@ -84,6 +89,7 @@
 | experimental/training_dynamics/joint_trained_N50_s20261029 | 0.81 GB | 454 | 0.81 GB | 0.0 MB |  |
 | experimental/training_dynamics/joint_trained_jl_s20261029 | 6.60 GB | 454 | 6.60 GB | 0.0 MB |  |
 | experimental/training_dynamics/joint_trained_s20261029 | 6.60 GB | 454 | 6.60 GB | 0.0 MB | td_questions_data.py |
+| experimental/training_dynamics/k100_b8k | 1.37 GB | 60 | 1.37 GB | 0.0 MB | fig_fr_proxy_training.py |
 | experimental/training_dynamics/learnmask_ctrl_s0_s20261029 | 1.74 GB | 51 | 1.74 GB | 0.2 MB |  |
 | experimental/training_dynamics/learnmask_ctrl_s20261029 | 0.39 GB | 14 | 0.39 GB | 0.1 MB |  |
 | experimental/training_dynamics/learnmask_det_hi_f05_s20261029 | 0.39 GB | 15 | 0.39 GB | 0.1 MB |  |
@@ -127,6 +133,19 @@
 | experimental/training_dynamics/learnmask_mask_rand_s20261029 | 0.39 GB | 15 | 0.39 GB | 0.1 MB |  |
 | experimental/training_dynamics/learnmask_trunk_s20261029 | 0.83 GB | 26 | 0.83 GB | 0.0 MB |  |
 | experimental/training_dynamics/mlp55_s20261029 | 9.07 GB | 358 | 9.07 GB | 0.0 MB | td_questions_data.py |
+| experimental/training_dynamics/replicate1 | 3.59 GB | 116 | 3.57 GB | 0.0 MB |  |
+| experimental/training_dynamics/replicate2 | 3.59 GB | 116 | 3.57 GB | 0.0 MB |  |
+| experimental/training_dynamics/replicate3 | 3.59 GB | 116 | 3.57 GB | 0.0 MB |  |
+| experimental/training_dynamics/replicate4 | 3.59 GB | 116 | 3.57 GB | 0.0 MB |  |
+| experimental/training_dynamics/replicate5 | 3.59 GB | 116 | 3.57 GB | 0.0 MB |  |
+| experimental/training_dynamics/replicate6 | 3.59 GB | 116 | 3.57 GB | 0.0 MB |  |
+| experimental/training_dynamics/replicate7 | 3.59 GB | 116 | 3.57 GB | 0.0 MB |  |
+| experimental/training_dynamics/replicate8 | 3.59 GB | 116 | 3.57 GB | 0.0 MB |  |
+| experimental/training_dynamics/single100k_k100 | 0.78 GB | 38 | 0.78 GB | 0.0 MB | fig_fr_proxy_training.py |
+| experimental/training_dynamics/single20k_k2000 | 2.01 GB | 76 | 2.01 GB | 0.0 MB | fig_fr_proxy_training.py |
+| experimental/training_dynamics/single20k_k2000_shuffle | 2.01 GB | 76 | 2.01 GB | 0.0 MB | fig_fr_proxy_training.py |
+| experimental/training_dynamics/single20k_k2000_tshuffle | 0.94 GB | 39 | 0.94 GB | 0.0 MB |  |
+| experimental/training_dynamics/single20k_perstep | 2.01 GB | 76 | 2.01 GB | 0.0 MB | fig_fr_proxy_training.py |
 | experimental/training_dynamics/summary_data | 1.04 GB | 21 | 0.00 GB | 0.3 MB | fig_learn_fr.py, fig_td_summary.py, td_grids_fwd.py, td_summary_data.py, td_tt_latent.py, td_tt_splitting.py ... |
 | experimental/training_dynamics/through_training | 20.92 GB | 9,345 | 0.00 GB | 70.6 MB | fig_learn_fr.py, fig_learn_holdout.py, fig_learn_interaction.py, fig_learn_lever.py, fig_learn_mechanism.py, fig_learn_profile.py ... |
 | experimental/training_dynamics/trained_N100_s20261029 | 0.60 GB | 358 | 0.60 GB | 0.0 MB | td_questions_data.py |
@@ -144,6 +163,7 @@
 | experimental/training_dynamics/trained_lastT_s20261029 | 5.26 GB | 358 | 5.26 GB | 0.0 MB | td_questions_data.py |
 | experimental/training_dynamics/trained_p1_s20261029 | 5.26 GB | 358 | 5.26 GB | 0.0 MB | td_questions_data.py |
 | experimental/training_dynamics/trained_s20261029 | 5.21 GB | 358 | 5.21 GB | 0.0 MB | fig_learning_dynamics_forward.py, td_questions_data.py |
+| experimental/training_dynamics/trained_s20261029_ep105 | 0.83 GB | 70 | 0.83 GB | 0.0 MB |  |
 | lazyrich | 7.15 GB | 17 | 7.11 GB | 0.0 MB | plot_lazyrich.py |
 | oracle_clf_standard | 0.01 GB | 8 | 0.00 GB | 0.0 MB |  |
 | oracle_pilot | 1.17 GB | 12 | 1.17 GB | 0.0 MB | fig13_paper_form.py, fig13_rcc_arm.py, plot_ablation.py, plot_oracle_losses.py |
