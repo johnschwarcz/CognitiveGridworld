@@ -33,9 +33,9 @@
 # **Prerequisites:** 01–04 (forward process, DDPM, scores and Tweedie's formula, DDIM), 05 (U-Net) and 06
 # (class-conditional model, classifier-free guidance).
 #
-# **Runtime:** CPU ≈ 4–10 min (sampling only, no training; measured on a 4-core CPU, depending on its load); CUDA GPU
-# ≈ 1–2 min. If no conditional MNIST checkpoint is found, `dmtools` first trains one (a few minutes on a GPU, much
-# longer on a CPU).
+# **Runtime:** CPU ≈ 2–5 min (sampling only, no training; about 2 min measured on a 4-core CPU, more when it is
+# shared with other jobs); CUDA GPU ≈ 1 min. If no conditional MNIST checkpoint is found, `dmtools` first trains one
+# (a few minutes on a GPU, much longer on a CPU).
 
 # %%
 import copy
@@ -94,7 +94,7 @@ COL = {"exact": "black", "replacement": "tab:red", "RePaint": "tab:blue", "DPS":
 # $$\nabla_{x_t}\log p_t(x_t\mid y)=\underbrace{\nabla_{x_t}\log p_t(x_t)}_{\text{the network}}+\nabla_{x_t}\log p_t(y\mid x_t),
 # \qquad p_t(y\mid x_t)=\int p(y\mid x_0)\,p(x_0\mid x_t)\,dx_0 .$$
 # The second term is the hard part. It averages the likelihood over the *denoising posterior* $p(x_0\mid x_t)$ (the
-# exact posterior of the forward process, written $q(x_0\mid x_t)$ in notebooks 01, 03 and 06), which
+# exact posterior of the forward process, written $q(x_0\mid x_t)$ in notebooks 01 and 06), which
 # we never have in closed form. The methods below differ in how they deal with it:
 #
 # | task | measurement $y$ | method | how it handles $p_t(y\mid x_t)$ |
@@ -199,7 +199,8 @@ def heat_rgb(v, vmax):
 # correct *mean* $\mathbb E[x_{t'}\mid x_t]$, because that mean is linear in $x_0$ and $\hat x_0=\mathbb E[x_0\mid x_t]$.
 # But its variance $s^2$ is the variance of $q(x_{t'}\mid x_t,x_0)$ for a *known* $x_0$. The true reverse kernel
 # $p(x_{t'}\mid x_t)=\int q(x_{t'}\mid x_t,x_0)\,p(x_0\mid x_t)\,dx_0$ also carries the uncertainty about $x_0$, an
-# extra $c^2\,\mathrm{Cov}[x_0\mid x_t]$, where $c$ is the step's coefficient on $\hat x_0$. The missing term
+# extra $c^2\,\mathrm{Cov}[x_0\mid x_t]$, where $c$ is the step's net coefficient on $\hat x_0$ once
+# $\hat\epsilon=(x_t-\sqrt{\bar\alpha_t}\,\hat x_0)/\sqrt{1-\bar\alpha_t}$ is substituted. The missing term
 # vanishes as the steps get finer, but with a few dozen strided steps the samples are too concentrated *even with a
 # perfect denoiser* (Analytic-DPM, Bao et al. 2022, derives the optimal variance). We measure this in section 5.
 #
@@ -404,8 +405,8 @@ print("replacement   (n=8)            :", repaint_path(8, 2, 1))
 
 # %% [markdown]
 # Reading the RePaint path: it descends to grid index 4, climbs back to 6, descends to 4 again, and so on. Every
-# multiple of `jump` below the top (here 4, 2 and 0) is reached $r=3$ times (with $r-1=2$ climbs back) before the
-# walk continues downwards.
+# multiple of `jump` at least `jump` steps below the top (here 4, 2 and 0) is reached $r=3$ times by a denoising step
+# (with $r-1=2$ climbs back in between) before the walk continues downwards.
 #
 # ### 2.3 The exact lab: inpainting a 2-D Gaussian mixture
 #
@@ -639,12 +640,14 @@ plt.show()
 # the observed ones (kinks and crossings at the border of the mask, an extra loop), and on the sparse mask it mostly
 # draws scribbles that ignore the scattered known pixels. Giving it as many steps as RePaint spends NFE does not cure
 # this, just as in the 2-D lab: the problem is the method, not the step count. RePaint's completions look like
-# coherent digits more often. The classifier agrees only weakly: pooled over the masks RePaint is ahead, but by
-# about one standard error, and with `N_EVAL` digits per mask a per-mask difference of one or two digits is noise
-# (the ordering can even flip for a mask). The classifier checks identity, not seams, so it is a blunt instrument
-# here. The 2-D lab, where the exact answer is known, is the cleaner evidence. RePaint is not seamless either. Some
-# of its completions still have strokes that stop or kink at the mask border, as the 2-D lab predicts for $r=5$. Note also that "coherent" does not mean "the original digit": the upper half of a 2 or
-# a 9 is genuinely compatible with other digits, and a correct posterior sampler *should* sometimes complete it
+# coherent digits more often, and the classifier agrees: pooled over the masks RePaint is ahead by roughly two
+# standard errors, and in this run it leads on every mask. Still, with `N_EVAL` digits per mask a per-mask difference
+# of one or two digits is noise: the two replacement columns, which should score about the same, swap places between
+# masks. The classifier checks identity, not seams, so it is a blunt instrument here. The 2-D lab, where the exact
+# answer is known, is the cleaner evidence. RePaint is not seamless either. Some of its completions still have
+# strokes that stop or kink at the mask border, as the 2-D lab predicts for $r=5$. Note also that "coherent" does not
+# mean "the original digit": the upper half of a 2 or a 9 is genuinely compatible with other digits (in this run
+# RePaint completes the bottom-half 2 as a 3), and a correct posterior sampler *should* sometimes complete it
 # differently. The sparse mask is the hardest case at this step budget. Section 4.3 attacks a similar problem with
 # DPS.
 #
@@ -740,9 +743,9 @@ plt.tight_layout()
 plt.show()
 
 # %% [markdown]
-# At the lowest strength the output keeps the ruler-straight strokes of the drawing (only their brightness starts to
-# change): faithful, but not yet MNIST-like. A little more noise turns them into white, slightly curved pen strokes
-# that keep the sketch's layout and identity. From the middle
+# At the lowest strength the output keeps the ruler-straight strokes of the drawing (mainly their brightness and
+# width change, from grey to white): faithful, but not yet MNIST-like. A little more noise bends them into slightly
+# curved pen strokes that keep the sketch's layout and identity. From the middle
 # strengths on, the seeds start to disagree and the identity can change. At high strength the output no longer
 # depends on the guide at all. The same seed then produces nearly the same digit for *both* sketches (compare the last
 # columns of the "7" and "4" rows with equal seeds), because the guide is drowned out.
@@ -825,18 +828,18 @@ ax2.set_yscale("log")
 h1, l1 = ax1.get_legend_handles_labels()
 h2, l2 = ax2.get_legend_handles_labels()
 ax1.legend(h1 + h2, l1 + l2, loc="center right")
-ax1.set_title("SDEdit: artefacts vanish at low strength, the content at high strength")
+ax1.set_title("SDEdit: artefacts vanish at low strength, the content by mid strength")
 plt.tight_layout()
 plt.show()
 
 # %% [markdown]
 # The atypicality falls to the level of real data already at small strengths: pixelation and specks are
 # fine-scale artefacts, the first things the noise erases. Recognisability of the *original* digit holds up at first
-# (it can even improve, since the edit removes damage that confused the classifier) and then falls towards chance as
-# the strength approaches 1 and the content is forgotten. Pixel distance to the guide grows steadily. The useful
-# operating range is where the corruption is gone but the content is not: low strengths for this kind of
-# fine-grained damage. How much strength a guide needs depends on how far it is from real data (the sketches above
-# needed more).
+# (it can even improve, since the edit removes damage that confused the classifier) and then falls to chance level
+# (about 0.1) as the content is forgotten, already by about $s=0.6$ here. Pixel distance to the guide grows steadily.
+# The useful operating range is where the corruption is gone but the content is not: low strengths, about 0.2–0.3
+# here, for this kind of fine-grained damage. How much strength a guide needs depends on how far it is from real
+# data (the sketches above needed a similar amount, about $s=0.2$, to look like MNIST strokes).
 #
 # ### 3.2 Class-conditional SDEdit: turning a 3 into an 8
 #
@@ -1414,15 +1417,16 @@ plt.show()
 
 # %% [markdown]
 # With enough steps the round trip reproduces the digit closely. With few steps the first-order approximation shows up
-# as visible reconstruction errors. The latents have roughly the right summary statistics (mean ≈ 0, standard
-# deviation ≈ 1, norm ≈ $\sqrt d$), but they are visibly **not** white noise: the digit's outline still shows, and the
-# variance is not uniform. The printed statistics confirm it. Compared with fresh noise, the latent varies less in the
-# always-black border and more on the strokes, and its magnitude correlates with where the ink is. A plausible reason
-# is that the border is black in every MNIST digit, so the denoiser is nearly certain about it at every noise level,
-# and the deterministic ODE pulls such pixels towards the mean of the noise instead of spreading them like typical
-# noise. DDIM inversion finds *a* latent that decodes to the image, not a *typical* sample of $\mathcal N(0,I)$.
-# Edits that assume typical Gaussian latents still work reasonably well on such codes (below), but they are less
-# predictable.
+# as small but visible reconstruction errors (compare the printed PSNRs). The latents have a mean of about 0, but they
+# are **not** typical white noise. Their scale is too small: at 50 steps the standard deviation is about 0.7 and the
+# norm about 20 instead of 1 and $\sqrt d=28$, and both are smaller still with fewer steps. Their structure is visibly
+# wrong too: the digit's outline still shows, and the variance is not uniform. The printed statistics confirm it.
+# Compared with fresh noise, the latent varies less in the always-black border and more on the strokes, and its
+# magnitude correlates with where the ink is. A plausible reason is that the border is black in every MNIST digit, so
+# the denoiser is nearly certain about it at every noise level, and the deterministic ODE pulls such pixels towards
+# the mean of the noise instead of spreading them like typical noise. DDIM inversion finds *a* latent that decodes to
+# the image, not a *typical* sample of $\mathcal N(0,I)$. Edits that assume typical Gaussian latents still work
+# reasonably well on such codes (below), but they are less predictable.
 #
 # ### 6.2 Interpolation: why *slerp*, not *lerp*
 #
@@ -1473,10 +1477,12 @@ plt.tight_layout()
 plt.show()
 
 # %% [markdown]
-# The norms confirm the geometry: lerp dips well below $\sqrt d$ in the middle of the path, slerp stays on the shell.
-# Decoded, the lerp midpoints tend to come out thinner and fainter, because the model reads a low-energy latent as an
-# image with less ink. Slerp keeps normal stroke weight all the way. The path still has to cross between the two digit
-# classes somewhere, so expect a few hybrid or third-class frames with either method.
+# The norms confirm the geometry: the inverted end points are nearly orthogonal, so lerp dips to roughly
+# $1/\sqrt2\approx0.7$ of their norm in the middle of the path, while slerp keeps the norm all the way. (The end points
+# themselves sit at about 20–22, below $\sqrt d=28$, because inverted latents are smaller than white noise, section
+# 6.1.) Decoded, the lerp midpoints tend to come out thinner and fainter, because the model reads a low-energy latent
+# as an image with less ink. Slerp keeps normal stroke weight all the way. The path still has to cross between the
+# two digit classes somewhere, so expect a few hybrid or third-class frames with either method.
 #
 # ### 6.3 Class swap: keep the style, change the label
 #
@@ -1504,8 +1510,9 @@ plt.show()
 # %% [markdown]
 # Each row shares the *style* of its original, such as the slant, the stroke width and the position in the frame,
 # across all ten classes. The column with the original label reproduces the input. Some target classes fight the
-# latent more than others (a wide, round style does not suit a "1"), and a guidance scale above 1 at decoding time
-# would make the label win more often, at some cost in faithfulness.
+# latent more than others, so a few decodes come out as a different digit (in this run, for example, the thin 4
+# decoded with label 8 looks more like a 3), which is why the printed accuracy is below 1. A guidance scale above 1
+# at decoding time would make the label win more often, at some cost in faithfulness.
 #
 # ## Exercises
 #
@@ -1530,9 +1537,13 @@ plt.show()
 # the smallest SDEdit strength that gives a realistic digit of the intended class. Repeat with `value=1.0,
 # half_width=1.5` (bright, thick strokes). Predict first: will that strength go up or down?
 # <details><summary>Hint / solution</summary>
-# Bright, thick strokes are much closer to MNIST statistics, so less noise is needed to hide the remaining
-# differences: the minimal strength goes down, and the output stays more faithful. The default grey strokes need more
-# noise, because the model must "repaint" the stroke intensity and width, which are moderately coarse features.
+# Probably not down. Stroke brightness and width turn out to be fine-scale features: the default grey strokes are
+# already repainted white at $s\approx0.1$ (figure of section 3). What gives a sketch away is its geometry, straight
+# segments and sharp corners, and that is coarse. Bright, thick strokes are closer to MNIST at the pixel level (their
+# guide alone already scores an atypicality of about 1 or lower, section 3.1), so the output stays more faithful. For
+# the same reason the model changes them *less*: in our check they stayed nearly ruler-straight at strengths (about
+# 0.2–0.3) that already bend the grey strokes, so a hand-drawn look needs as much strength or more. Judge "realistic"
+# by the atypicality score instead of by eye and you get the opposite answer, because that score cannot see geometry.
 # </details>
 #
 # **Exercise 3 (DPS knobs).** For super-resolution (4.2), raise `SIGMA_Y` to 0.2 (both when making `y_sr` and when
@@ -1541,7 +1552,7 @@ plt.show()
 # until the residual is about the noise level, and look again. Finally, run the 2-D lab's `weighting="bayes"` rule on
 # MNIST super-resolution with `zeta=1.0, sigma_y=0.05` and 100 steps.
 # <details><summary>Hint / solution</summary>
-# At fixed $\zeta$ the diversity grows only a little, and the residual/noise ratio drops below 1. The normalised rule
+# At fixed $\zeta$ the diversity grows only a little, and the residual/noise ratio stays below 1. The normalised rule
 # does not know $\sigma_y$ (section 4), so it keeps pulling the sample towards $y$ and fits the extra noise instead of
 # widening. Lowering $\zeta$ (roughly halving it) brings the ratio back to about 1. Now the std map brightens clearly
 # and identities can start to vary: $\zeta$ is a likelihood temperature that must follow $\sigma_y$. With the literal
@@ -1602,9 +1613,9 @@ plt.show()
 # - **Denoising** with known Gaussian noise is exact: rescale and start at $t^\star$. The posterior mean (Tweedie)
 #   minimises MSE but is blurry; posterior samples are sharp but have about twice the MSE (perception–distortion).
 #   Coarse ancestral samplers under-disperse even with a perfect model, so their samples fall short of that factor.
-# - **DDIM inversion** gives real images latent codes with roughly Gaussian summary statistics (but visibly atypical
-#   structure) that support reconstruction, slerp interpolation and class swaps. More steps mean better inversion,
-#   and guidance makes it worse.
+# - **DDIM inversion** gives real images latent codes that decode back to them, although they are not typical
+#   Gaussian noise (too small a norm, visible structure). These codes support reconstruction, slerp interpolation and
+#   class swaps. More steps mean better inversion, and guidance makes it worse.
 #
 # ## Further reading
 #

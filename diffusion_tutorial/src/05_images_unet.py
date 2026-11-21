@@ -31,9 +31,10 @@
 # **Prerequisites:** 01 (forward process, schedules), 02 (DDPM loss and ancestral sampling),
 # 03 (scores, Tweedie's formula), 04 (DDIM).
 #
-# **Runtime:** CPU ≈ 15–20 min on an otherwise idle 4-core machine, more than half of it the in-notebook training run
-# (bfloat16 autocast; much slower on a busy machine). CUDA GPU ≈ 5 min with the GPU default of 4 000 training
-# steps, plus ≈ 10 min once if `dmtools` has to train the reference checkpoint (section 4).
+# **Runtime:** CPU ≈ 10 min on a 4-core machine (about 9 min measured), more than half of it the in-notebook training
+# run (bfloat16 autocast; slower on a busy machine). CUDA GPU ≈ 5 min with the GPU default of 4 000 training
+# steps, plus ≈ 10 min once, only if the shipped reference checkpoint is missing and `dmtools` has to train it
+# (section 4).
 
 # %%
 import contextlib
@@ -248,7 +249,7 @@ with torch.no_grad():
         print(f"{name:9s}: change in sample 0's output when the rest of the batch changes = {d:.2e}")
 
 # %% [markdown]
-# All three checks pass. The fresh block is exactly its skip path. Our block and `dm.ResBlock` compute the same
+# All four checks pass. The fresh block is exactly its skip path. Our block and `dm.ResBlock` compute the same
 # function. FiLM makes the same input produce different outputs at different $t$ (only mildly at random
 # initialisation, since the embedding weights are small; training decides how strongly to modulate). And GroupNorm, unlike
 # BatchNorm, treats every sample independently. We will rely on that last property in section 6, where we
@@ -310,7 +311,8 @@ for hw in (28, 14, 7):
 
 # %% [markdown]
 # Our explicit softmax attention agrees with PyTorch's fused kernel. A 3×3 conv sees 9 positions. One attention
-# layer draws a substantial part of its output from the whole 7×7 map. (Strictly, GroupNorm alone already couples
+# layer is influenced by all 49 positions of the 7×7 map, and about a fifth of that influence comes from outside
+# the 3×3 neighbourhood. (Strictly, GroupNorm alone already couples
 # all positions a little, through the shared mean and variance, which is why we measure influence *mass*.) The cost
 # is why this small model uses attention only at the lowest resolution: the attention matrix at 28×28 is 256 times
 # larger than at 7×7. (784 tokens would still be affordable on a GPU; the 256-fold cost just buys little at this
@@ -478,7 +480,7 @@ plt.show()
 
 # %% [markdown]
 # With data in $[-1,1]$, structure fades gradually: strokes are clear up to $t\approx100$, the digit is still
-# visible at $t\approx300$ and faint at $t\approx500$, and by $t\approx700$ the eye sees only noise. (Some low-frequency information
+# visible at $t\approx300$ and at best faintly visible at $t\approx500$, and by $t\approx700$ the eye sees only noise. (Some low-frequency information
 # survives longer than the eye suggests, see section 6.) The second figure shows the scaling gotcha. Data in $[0,255]$
 # is still plainly visible at the last timestep, so the model would never be trained on the pure noise the sampler
 # starts from. Data in $[0,1]$ has a small variance, so SNR = 1 is reached much earlier, and fewer of the
@@ -644,9 +646,9 @@ plt.show()
 # The loss starts at 1 (the zero-initialised output, as predicted). It barely moves while the warm-up learning rate
 # is tiny, then plunges, and then declines slowly. That long slow tail is where sample quality is made. The
 # per-step loss stays noisy forever. The noise is not a sign of a bad learning rate: each minibatch has a different
-# mix of $t$, and the loss depends strongly on $t$ (we will measure this below). The gradient norm is large during the
-# initial plunge, so clipping is active then. Afterwards it sits below the threshold, and clipping only catches
-# occasional spikes.
+# mix of $t$, and the loss depends strongly on $t$ (we will measure this below). The gradient norm is far above the
+# threshold for the first one to two hundred steps, through the warm-up and the plunge, so clipping is active then.
+# Afterwards it sits below the threshold, and clipping only catches occasional spikes.
 #
 # **Samples from the model we just trained.** We use DDIM with 50 steps (notebook 04) and the same starting noise
 # for the raw and the EMA weights. On the CPU budget of 1500 steps, expect rough results: digit-like strokes and
@@ -689,12 +691,12 @@ plt.show()
 #
 # **From here on we use a longer-trained reference model**: the same architecture, loss, noise schedule, optimiser
 # and EMA (`dm.MNIST_RECIPE`, batch 64; `dm.train_diffusion` warms up over 100 steps instead of our 200), trained for
-# 12 000 steps. It ships with the tutorial as `checkpoints/mnist_unet_uncond.pt` (made by `pretrain_checkpoints.py`).
-# `dm.load_or_train_mnist_model` loads it, or trains and caches it if the file is missing (minutes on a GPU, about an
-# hour on a CPU). Only on a CPU without that file do we fall back, if present, to `06_mnist_cond.pt`, a
-# shorter-trained *conditional* model of the same recipe made while notebook 06 was written. Called with `y=None`,
-# a conditional model trained with label dropout is an unconditional model of the same digits (notebook 06 explains
-# why). The cell prints which model it loaded and how much longer than ours it was trained.
+# 12 000 steps. It ships with the tutorial as `checkpoints/mnist_unet_uncond.pt` (made by `pretrain_checkpoints.py`),
+# and `dm.load_or_train_mnist_model` loads it. The cell prints which model it loaded and how much longer than ours it
+# was trained. (The fallback matters only if that file is missing. `dmtools` then trains and caches it: minutes on a
+# GPU, about an hour on a CPU. On a CPU the cell first looks for `06_mnist_cond.pt`, a shorter-trained conditional
+# model of the same recipe, if you have one, and calls it with `y=None`: with label dropout, that makes it an
+# unconditional model of the same digits, as notebook 06 explains.)
 
 # %%
 REF_CKPT = dm.CKPT_DIR / "mnist_unet_uncond.pt"   # the reference (made by pretrain_checkpoints.py, or by dm below)
@@ -764,13 +766,15 @@ for name, (eps_mse, _) in curves.items():
 # * **Right:** in image space the error grows with $t$. The Bayes-optimal denoiser's error would saturate at the
 #   dashed line, the **prior variance**: once $x_t$ carries no information, the posterior mean is the prior mean,
 #   "the average digit". A trained $\epsilon$-network can do *worse* than that at the largest $t$, and the printout
-#   compares the two at $t=999$. The reason is the weighting. An $x_0$-error there costs the $\epsilon$-loss only
+#   compares the two at $t=999$: in the stored run both models are above the prior variance, the reference about
+#   8-fold and the in-notebook model far more. The reason is the weighting. An $x_0$-error there costs the $\epsilon$-loss only
 #   $\mathrm{SNR}(999)\approx4\cdot10^{-5}$ times as much, so the network is barely trained to get $\hat x_0$ right
 #   at those noise levels. Sampling hardly suffers, because $\hat x_0$ enters the early updates with a tiny weight.
 #   But it is one reason for **x0-clipping** (next section) and for alternative parameterisations such as
 #   $v$-prediction (Salimans & Ho 2022).
 # * Compare the two models: the gap between the curves shows at which noise levels the reference's longer
-#   training paid off. Look especially at the smallest $t$, where fine detail is restored, and at the largest.
+#   training paid off. Look especially at the smallest $t$, where fine detail is restored, and at the largest. In
+#   between (roughly $20<t<500$) the two curves nearly coincide.
 #
 # ## 5 · Sampling images: DDPM vs DDIM, the denoising chain, x0-clipping
 #
@@ -805,9 +809,10 @@ plt.show()
 # Both grids look like handwriting, and DDIM costs 1/20 of the network calls. Both samplers were timed on the same
 # batch size, so the measured speed-up should be close to 20; the remaining difference comes from per-step overheads
 # (and from other programs competing for the machine). Expect a share of malformed digits from a 1.2M-parameter
-# model with this little training. Look closely at the backgrounds. If DDIM's samples keep some residual speckle that
-# DDPM's do not, that is a known difference. The deterministic ODE sampler carries every error of the network along
-# its path, while DDPM injects fresh noise at every step, which lets later steps correct earlier mistakes (Karras et
+# model with this little training. Look closely at the strokes. In the stored run the DDPM digits are smoother, while
+# DDIM's have slightly grainier edges with a few stray pixels, and the classifier of section 7b rates fewer of them
+# as clearly recognisable. That is a known difference. The deterministic ODE sampler carries every error of the
+# network along its path, while DDPM injects fresh noise at every step, which lets later steps correct earlier mistakes (Karras et
 # al. 2022 analyse this trade-off). Section 7 compares the two samplers quantitatively.
 #
 # **Numerical precision.** We sampled under bfloat16 autocast. The schedule coefficients and the sampler arithmetic
@@ -878,9 +883,10 @@ plt.show()
 
 # %% [markdown]
 # Read the $\hat x_0$ rows from left to right. At the very largest $t$ the "guess" is not meaningful: as we saw in
-# section 4, the $\epsilon$-network's $\hat x_0$ is poor there, and clipping turns it into a saturated blob. Then a
-# blurry digit-like shape appears, which may still change identity for a while. By the middle of the chain the
-# **global shape is decided**, while $x_t$ itself still looks like noise to the eye. The last few hundred steps
+# section 4, the $\epsilon$-network's $\hat x_0$ is poor there, and clipping turns it into a saturated, speckled
+# blob. Then a blurry digit-like shape appears, which may still change identity for a while (in the stored run,
+# sample #2 starts out as a 9). A little after the middle of the chain ($t\approx400$ in these examples) the **global shape is decided**,
+# while $x_t$ itself still looks mostly like noise to the eye. The last few hundred steps
 # only sharpen strokes. We can measure when the identity of the digit is fixed by classifying $\hat x_0$ at each
 # step and checking agreement with the class of the final sample:
 
@@ -909,9 +915,9 @@ t_half = next((t for t, a in zip(traj_t, agree) if a >= 0.5), None)
 print(f"class of x0_hat agrees with the final class for >= 50% of samples from t = {t_half} on")
 
 # %% [markdown]
-# The curve stays near chance for the first part of the chain, then rises steeply and approaches 1 well before
-# the end. The class is settled around the middle of the chain (see the printed $t$), and the remaining steps change
-# details, not identity. One caveat: the classifier was trained on sharp digits, so on very blurry $\hat x_0$ its
+# The curve stays near chance for the first fifth of the chain (down to $t\approx800$), then rises steeply. The class
+# of $\hat x_0$ matches the final class for more than half of the samples from around the middle of the chain (the
+# printed $t$), and for about 95% of them from $t\approx350$ on. The remaining steps change details, not identity. One caveat: the classifier was trained on sharp digits, so on very blurry $\hat x_0$ its
 # answer is only a rough proxy for "what the model has committed to". Section 6 explains *why* generation is
 # coarse-to-fine.
 #
@@ -987,12 +993,17 @@ for (net_name, clip), xs in few.items():
           f"(farther from the training set than 99% of test digits)")
 
 # %% [markdown]
-# Early in the chain the unclipped $\hat x_0$ has values far outside $[-1,1]$, often by an order of magnitude. Only
-# as $t\to0$ does it settle near the data range. With only 10 sampling steps, every step jumps across a large range
-# of noise levels and leans heavily on $\hat x_0$, so these errors can leak into the samples. Some unclipped samples
-# may blow up into noise or speckle instead of a digit. Compare the columns and the printed off-manifold fractions
-# for the reference model and for the under-trained one. Clipping is a cheap fix that is on by default in most DDPM
-# code.
+# Early in the chain the unclipped $\hat x_0$ has values far outside $[-1,1]$: at the first step the typical
+# per-image maximum is several times the range limit (about 8 here), and about half of all pixels are out of range.
+# It settles near the data range by $t\approx600$, well before the end of the chain. With only 10 sampling steps,
+# every step jumps across a large range of noise levels and leans heavily on $\hat x_0$, so these errors can leak
+# into the samples. How much they do depends on the model. For the reference model, clipping makes no visible
+# difference here (the two grids are practically identical, and so are the printed off-manifold fractions): its
+# out-of-range $\hat x_0$ occurs only in the first steps, where $\hat x_0$ enters the update with a small weight. The
+# under-trained in-notebook model, whose $\hat x_0$ at large $t$ is far worse (section 4), is another matter. Without
+# clipping, many of its samples blow up into noise instead of a digit (about half are off-manifold in the stored
+# run). Clipping removes many of these blow-ups (the off-manifold fraction drops to under a third), although its
+# samples keep speckled backgrounds. Clipping is a cheap fix that is on by default in most DDPM code.
 #
 # **Dynamic thresholding** (Imagen, Saharia et al. 2022) is a refinement. Per sample, let $s$ be the 99.5th
 # percentile of $|\hat x_0|$. If $s>1$, clip to $[-s,s]$ and divide by $s$. Static clipping saturates many pixels
@@ -1150,8 +1161,8 @@ for name, (td, _, _) in t_dec.items():
 # %% [markdown]
 # (a) The clean spectrum (dashed) falls by orders of magnitude from low to high frequency. Each noisy spectrum
 # follows it until it hits its noise floor (dotted), then goes flat. As $t$ grows the floor rises and the crossing
-# moves to lower frequencies. The dash-dotted line shows that the mean image accounts for much of the power at the
-# lowest frequencies (printed above). (b) In the stationary-Gaussian picture the region where a frequency is still
+# moves to lower frequencies. The dash-dotted line shows that the mean image accounts for most of the power at the
+# lowest frequency (about 80% at $f=1$, printed above), and for much less from $f=2$ on. (b) In the stationary-Gaussian picture the region where a frequency is still
 # undetermined (bright) sweeps from high to low frequencies as $t$ grows; the cyan line is $\mathrm{SNR}(f,t)=1$.
 # The dashed white line is the same boundary for the full-covariance Gaussian. (c) The model's reverse chain shows
 # the same ordering: the boundary between "still open" (bright) and "settled" (dark) runs from low frequencies at
@@ -1168,8 +1179,9 @@ for name, (td, _, _) in t_dec.items():
 # against the model's *own* final samples, so a model that is less diverse than the data (overconfident) would also
 # look decisive. Clipping can only move $\hat x_0$ closer to the final sample, which is why the dotted, unclipped curve
 # is shown too. And the estimate is noisy: the chain was recorded every 50 steps, on `N_DDPM` samples. With these
-# caveats, read the printout: if the model's chain decides the middle and high frequencies well before the best linear
-# filter, and the unclipped curve lies on top of the clipped one, the network really is exploiting structure that no
+# caveats, read the printout. In the stored run the chain decides every frequency before the best linear filter: by
+# about 35 steps at $f=1$–2, and by roughly 130–170 steps from $f=6$ on (at $f=14$, $t\approx200$ against $t\approx55$).
+# And the unclipped curve lies on top of the clipped one. So the network really is exploiting structure that no
 # Gaussian model of the digits has.
 #
 # This is the spectral explanation of the coarse-to-fine chain in section 5. It also explains several
@@ -1265,13 +1277,13 @@ print(f"{'random Gaussian matrix':29s}       : off-diagonal asymmetry {offdiag_a
 # reason discussed in section 4, so we stop at $t=650$.)
 #
 # The symmetry check compares the off-diagonal part of the Jacobian with its transpose. An untrained network of
-# the same architecture is about as asymmetric as a random matrix. The trained one is clearly more symmetric (compare
-# the printed values). The network was never told that its output is a posterior mean, i.e. that $\hat\epsilon$ is
+# the same architecture is about as asymmetric as a random matrix. The trained one is clearly more symmetric (about
+# 0.55 against 1.41 in the printout). The network was never told that its output is a posterior mean, i.e. that $\hat\epsilon$ is
 # proportional to the gradient of a log-density (notebook 03), and nothing in the architecture forces a symmetric
 # Jacobian. Training on the denoising objective pushes it towards that structure, and the remaining asymmetry
 # measures how far the network still is from an exact posterior mean. The negative eigenvalue mass should be
-# compared with 0, the value for an exact posterior covariance; a clearly non-zero value means the trained network's
-# Jacobian is not yet a valid covariance matrix. (The untrained network passes this test trivially, because its
+# compared with 0, the value for an exact posterior covariance. For the trained network it is clearly non-zero
+# (about 13%), so its Jacobian is not yet a valid covariance matrix. (The untrained network passes this test trivially, because its
 # Jacobian is dominated by the $I/a$ term.) Kadkhodaie et al. (2024)
 # build their analysis of generalisation on the eigen-decomposition of exactly these Jacobians.
 #
@@ -1323,8 +1335,8 @@ print(f"off-manifold (beyond the dotted line): generated {(nn_d_gen[:, 0] > far)
 # no generated sample piles up near distance 0. With 60 000 training images and a small model this is the expected
 # regime: the model *generalises*. Kadkhodaie et al. (2024) show the transition: with few training images the same
 # architecture memorises (an exercise below). The generated histogram also tends to sit to the *right* of the test
-# histogram. That is the opposite of memorisation: imperfect samples (residual speckle, malformed strokes) are far
-# from every real digit, and the samples beyond the dotted line are the model's failures. Two caveats. Pixel-space L2
+# histogram (compare the printed medians). That is the opposite of memorisation: imperfect samples (grainy stroke
+# edges, stray pixels, malformed strokes) are far from every real digit, and the samples beyond the dotted line are the model's failures. Two caveats. Pixel-space L2
 # misses near-copies that are shifted by a pixel. And "no copies" is not the same as "good samples".
 #
 # ### 7b · Mode coverage: which digits does the model generate?
@@ -1354,12 +1366,15 @@ plt.tight_layout()
 plt.show()
 
 # %% [markdown]
-# A missing mode would show up as a class share near 0 (the printout gives each set's smallest share). The
-# proportions are never perfect, so judge the deviations against sampling noise: a bar near 10% has a standard error
-# of about $\sqrt{0.1\cdot0.9/n}$ (printed for each set). Larger deviations mean either a real imbalance in the
-# model, or classifier confusion on malformed samples, which tend to land in a few "catch-all" classes. The printed confidences separate fidelity
-# from coverage. Compare each model's fraction of confidently classified samples with the test-image value: the gap
-# measures ambiguous or malformed digits.
+# A missing mode would show up as a class share near 0 (the printout gives each set's smallest share); none of the
+# sets has one. The proportions are never perfect, so judge the deviations against sampling noise: a bar near 10%
+# has a standard error of about $\sqrt{0.1\cdot0.9/n}$ (printed for each set). Larger deviations mean either a real
+# imbalance in the model, or classifier confusion on malformed samples, which tend to land in a few "catch-all"
+# classes. The in-notebook model's tall bar at digit 2, about twice the training frequency, is a candidate. The
+# printed confidences separate fidelity from coverage. Compare each model's fraction of confidently classified
+# samples with the test-image value: the gap measures ambiguous or malformed digits. In the stored run the order is
+# test images > reference DDPM-1000 > reference DDIM-50 > in-notebook model, which matches the impression from the
+# sample grids.
 #
 # ### 7c · Fréchet distance in feature space (the idea behind FID)
 #
@@ -1413,8 +1428,22 @@ def features(x, bs=1000):
 n_ref = 2000 if FAST else 10_000
 mu_ref, S_ref = gaussian_stats(features(x_train[:n_ref]))   # reference statistics from training images
 f_test = features(x_test)
+# Gotcha: MNIST's test set is not stored in random order (its two halves were written by different groups of
+# people), so x_test[:n] is not a random sample of test digits. Shuffle once, so that "the first n" below are.
+fd_file_order = frechet_distance(*gaussian_stats(f_test[:N_EVAL]), mu_ref, S_ref)
+f_test = f_test[torch.randperm(len(f_test), generator=torch.Generator().manual_seed(0))]
+print(f"FD of {N_EVAL} test images vs the training reference: the first {N_EVAL} in file order {fd_file_order:.1f}, "
+      f"{N_EVAL} random ones {frechet_distance(*gaussian_stats(f_test[:N_EVAL]), mu_ref, S_ref):.1f}")
 
 # %% [markdown]
+# **A gotcha first** (the printout above). MNIST's test set is not stored in random order: its first and second
+# halves were written by different groups of people, while the training set mixes both. The first `N_EVAL` test
+# images in file order are therefore not a random sample of digits, and their FD to the training statistics is much
+# larger than that of a random subset of the same size. So the cell shuffled the test features once, and every
+# "test images" FD below uses random subsets. Whatever plays the role of real data in an FD comparison must be a
+# random sample from the same distribution as the reference. (Pixel-space nearest-neighbour distances and class
+# shares, used in sections 5, 7a and 7b with the first `N_EVAL` test images, are hardly affected.)
+#
 # **Pitfall 1: FD is biased upwards at small sample size.** Even two samples from the *same* distribution have
 # FD > 0, because the covariance estimated from $n$ points is noisy. A $d\times d$ covariance has $d(d+1)/2$ free
 # entries (about 8 000 for our $d=128$ features), so $n$ must be several times $d$ before the estimate settles; at
@@ -1485,15 +1514,17 @@ print(f"check of the error bars at n = {N_EVAL}: bootstrap sd of the floor {rows
 # independent sets of real images. Expect the bootstrap to be the larger of the two: resampling with replacement
 # duplicates points, which acts like a smaller $n$. So treat these error bars as generous. Three comparisons are
 # worth reading off:
-# * **reference vs in-notebook** (first group): what longer training buys;
+# * **reference vs in-notebook** (first group): what longer training buys. In the stored run the reference model
+#   sits a few error bars above the floor, and the in-notebook model several times farther away;
 # * **EMA vs raw weights** of the in-notebook model (first group): what weight averaging buys, even in a short run
-#   where the two sample grids looked alike by eye;
+#   where the two sample grids looked alike by eye. Here the EMA weights are clearly better;
 # * **DDPM-1000 vs DDIM-50** of the reference model (second group): whether 20× fewer network calls cost measurable
-#   quality. This connects to the background speckle discussed in section 5. Here $n$ = `N_DDPM` is only about the
-#   feature dimension, so the bias is large and only a clear gap means something. On a GPU, raise `N_DDPM`. Do not
-#   be surprised if DDIM's speckle barely moves the FD: features trained to recognise digits are built to ignore
-#   low-level texture. That is the flip side of using semantic features (see the pitfalls below), and a reason to
-#   look at the samples as well.
+#   quality. This connects to the grainier DDIM strokes seen in section 5. Here $n$ = `N_DDPM` is only about the
+#   feature dimension, so the bias is large and only a clear gap means something. In the stored run there is none:
+#   the two bars agree within their error bars, and both lie within error bars of the floor, although the classifier
+#   of 7b rated noticeably fewer DDIM samples as confident. On a GPU, raise `N_DDPM`. Features trained to recognise
+#   digits are also built to ignore low-level texture, so FD is a blunt tool for this kind of difference. That is
+#   the flip side of using semantic features (see the pitfalls below), and a reason to look at the samples as well.
 #
 # **Further pitfalls of FID** to keep in mind:
 # * **It is blind to memorisation.** Returning the training set verbatim gives a near-floor FD. Pair it with a
@@ -1578,8 +1609,8 @@ print(f"check of the error bars at n = {N_EVAL}: bootstrap sd of the floor {rows
 # <details><summary>Hint / solution</summary>
 #
 # `plt.loglog(FREQS, P0); plt.loglog(FREQS, power_spectrum(ddim_x)); plt.loglog(FREQS, power_spectrum(mine_ema))`.
-# High frequencies are generated last, at small $t$, and the in-notebook model's deficit is largest at small $t$
-# (section 4). So expect its spectrum to deviate most at high frequencies: excess power from residual noise, or a
+# High frequencies are generated last, at small $t$, and apart from the very largest $t$ (whose errors hardly reach
+# the samples) the in-notebook model falls furthest behind the reference at the smallest $t$ (section 4). So expect its spectrum to deviate most at high frequencies: excess power from residual noise, or a
 # deficit from blurry strokes. Low frequencies (overall layout and ink amount) are usually already close.
 # </details>
 #

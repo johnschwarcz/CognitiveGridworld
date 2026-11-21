@@ -120,8 +120,8 @@ EMA 0.999), trained for 12 000 steps at batch 64 with bf16 autocast on a CPU. To
 `python pretrain_checkpoints.py` (a few minutes per model on a GPU; on a CPU about an hour per model with `--amp`).
 
 If a file is missing, the classifier is simply retrained (two epochs), and notebooks 05 and 07 train the U-Net they
-need on first use and cache it. Notebook 06 does that only on a CUDA GPU; otherwise it falls back to a
-shorter-trained model and says so. Notebook 09 uses the unconditional U-Net only in its pixel-vs-latent comparison;
+need on first use and cache it. Notebook 06 does that only on a CUDA GPU; otherwise it uses the briefly trained
+model from earlier in the notebook (the MNIST results are then poor) and says so. Notebook 09 uses the unconditional U-Net only in its pixel-vs-latent comparison;
 without it, it times an untrained copy and skips the side-by-side samples.
 
 Notebook 05 also saves the model it trains itself (`05_my_unet.pt`, to demonstrate checkpointing and resuming).

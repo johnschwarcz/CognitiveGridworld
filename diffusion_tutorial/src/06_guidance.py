@@ -32,8 +32,8 @@
 # **Prerequisites:** 01 (forward process), 02 (DDPM loss and ancestral sampling), 03 (scores and Tweedie's
 # formula), 04 (DDIM), 05 (the U-Net, EMA, `train_diffusion`, mixed precision).
 #
-# **Runtime:** CPU ≈ 8–15 min (mostly MNIST sampling, plus a short in-notebook U-Net training run).
-# CUDA GPU ≈ 5 min, including a longer in-notebook training run; add roughly 10 min if the reference MNIST
+# **Runtime:** CPU ≈ 4–6 min (the 2-D experiments, a short in-notebook U-Net training run and MNIST sampling).
+# CUDA GPU ≈ 5 min, including a longer in-notebook training run; add roughly 10 min if the shipped reference MNIST
 # checkpoint is missing and has to be trained first.
 
 # %%
@@ -869,7 +869,7 @@ plt.show()
 # %% [markdown]
 # **Left:** $p_w$ splits the mass equally over the three components, as $p(x\mid y{=}0)$ does. The guided samplers
 # do not. The top component at $(-1,2)$, the one reaching furthest towards the other classes, loses much of its
-# share (DDIM: almost all of it). The early push is "to the left", and it decides which component a sample joins.
+# share (DDIM: most of it). The early push is "to the left", and it decides which component a sample joins.
 # **Right:** the guided field departs from the true tilted score mostly at **intermediate noise levels**. The
 # departure vanishes as $t\to0$ (at $\sigma=0$ the guided field is exactly $\nabla\log p_w$), vanishes again at very
 # high noise (both fields $\to -x$), and grows rapidly with $w$.
@@ -895,8 +895,8 @@ plt.show()
 # probability-flow drift $f-\tfrac12 g^2 s_c$ leaves
 # $$-\tfrac12 g^2\big[2(1-w)\,s_u+(2w-1)\,s_c\big]\,dt+g\,d\bar W ,$$
 # which (time runs backwards, $dt<0$) is a Langevin step of size $g^2|dt|$ on the $(2w-1)$-powered density; the
-# coefficients $2(1-w)$ and $2w-1$ sum to 1. Their analysis covers the DDPM version only. DDIM has no such corrector,
-# consistent with it ending up even further from $p_w$ here.
+# coefficients $2(1-w)$ and $2w-1$ sum to 1. This predictor–corrector equivalence covers the DDPM version only.
+# DDIM has no such corrector, consistent with it ending up even further from $p_w$ here.
 #
 # ## 5 · Class-conditional MNIST: the training recipe
 #
@@ -912,8 +912,8 @@ plt.show()
 # * Train exactly as long as an unconditional model. The extra cost of CFG is paid at *sampling* time.
 # * Below, a CPU gets 200 steps: enough to watch the recipe run (the loss falls from 1 to a few percent), far too
 #   few to sample from. Notebook 05 showed how sample quality develops with training. On a CUDA GPU the default
-#   is 4000 steps (~2–3 min). The checkpoint used next was trained with the same recipe for much longer; the
-#   loading cell prints for how many steps.
+#   is 4000 steps (~2–3 min). The reference checkpoint used next, which ships with the repository, was trained
+#   with the same recipe for 12 000 steps (the loading cell prints this).
 
 # %%
 torch.set_num_threads(N_THREADS)   # back to all threads for the U-Net
@@ -989,14 +989,16 @@ assert torch.allclose(mine, ref, atol=1e-3)
 # %% [markdown]
 # ## 6 · Guidance on MNIST: the scale $w$
 #
-# From here on we use a longer-trained model of the same recipe: the reference checkpoint `mnist_unet_cond.pt`
-# when it is available, otherwise a shorter run saved with this notebook (the cell prints which one, and for how
-# many steps it was trained). The MNIST classifier from `dmtools` serves as an *evaluator*; it plays no role in
+# From here on we use the reference checkpoint `mnist_unet_cond.pt`, which ships with the repository: the same
+# recipe with 10% label dropout, trained for 12 000 steps at batch 64 (the cell prints what it loaded). The
+# fallback matters only if that file is missing: a CUDA GPU then trains it first (about 10 min); a CPU uses a
+# shorter-trained `06_mnist_cond.pt` if you have one, otherwise the 200-step model above, with which the MNIST
+# results below will be poor. The MNIST classifier from `dmtools` serves as an *evaluator*; it plays no role in
 # sampling.
 
 # %%
 REF_CKPT = dm.CKPT_DIR / "mnist_unet_cond.pt"   # reference model, made by pretrain_checkpoints.py (or by dm, below)
-OWN_CKPT = dm.CKPT_DIR / "06_mnist_cond.pt"     # same recipe, fewer steps, made while writing this notebook
+OWN_CKPT = dm.CKPT_DIR / "06_mnist_cond.pt"     # optional fallback (not shipped): same recipe, fewer steps
 if REF_CKPT.exists() or device.type == "cuda":
     # Loads the reference checkpoint. On a CUDA GPU without it, dmtools trains and caches it first (~10 min),
     # and notebook 07 then reuses the cached model.
@@ -1115,7 +1117,7 @@ get = lambda k: np.array([sweep[w][k] for w in W_SWEEP])
 fig, axes = plt.subplots(1, 3, figsize=(13, 3.8), gridspec_kw=dict(width_ratios=[1.7, 1, 1]))
 ax = axes[0]
 ax.plot(ws, get("acc"), "o-", color="tab:blue", label=f"accuracy (fidelity; real digits: {real_m['acc']:.2f})")
-ax.plot(ws, get("conf"), "s-", color="tab:cyan", label="mean confidence $p(y\\mid x)$ (fidelity)")
+ax.plot(ws, get("conf"), "s--", color="tab:cyan", mfc="none", label="mean confidence $p(y\\mid x)$ (fidelity)")
 ax.plot(ws, get("div"), "D-", color="tab:red", label="within-class diversity, rel. to real (diversity)")
 ax.axhline(1.0, color="tab:red", ls=":", lw=1, label="diversity of real digits (= 1)")
 ax.set(xlabel="guidance scale w", ylabel="value", title="Fidelity rises, diversity falls",
@@ -1131,9 +1133,12 @@ plt.tight_layout()
 plt.show()
 
 # %% [markdown]
-# The classic CFG trade-off. Fidelity climbs steeply from $w=0$ to a few, then plateaus. Diversity falls
-# steadily as $w$ grows. Past the plateau, increasing $w$ buys almost no fidelity and keeps costing diversity, while
-# the strokes get bolder (more ink) and more raw pixel values are pushed far beyond the data range.
+# The classic CFG trade-off. Fidelity climbs steeply from $w=0$ to $w=1$ and is saturated by $w\approx1.5$–2
+# (accuracy and confidence then sit at 1; the two curves lie almost on top of each other at every $w$, so the
+# confidence curve is drawn dashed with hollow markers). Diversity falls steadily as $w$ grows. Past the plateau,
+# increasing $w$ buys no fidelity and keeps costing diversity, while the
+# strokes get steadily bolder (more ink). Raw pixel values far beyond the data range ($>1.5$) appear only at the
+# largest scales (here from about $w=8$, clearly at $w=12$); at moderate $w$ the overshoot is milder.
 #
 # If the ink curve starts above 1 even without guidance, the model draws slightly bolder digits than the data or
 # leaves faint background speckle, both signs of limited training. What matters here is how ink grows with $w$.
@@ -1191,11 +1196,16 @@ plt.show()
 
 # %% [markdown]
 # Read the table against the plain $w=6$ row:
-# * **Interval**: guiding only part of the trajectory is a weaker guidance overall, so it lands between $w=1$ and
-#   $w=6$ on fidelity *and* diversity, with less ink, and it costs fewer NFEs. The real question is whether it beats
-#   plain CFG *at equal fidelity*, i.e. lies above the trade-off curve of 6.1. Exercise 5 asks you to check.
-# * **Rescale** targets over-exposure directly. It mainly cuts the out-of-range pixel values (last column) and leaves
-#   fidelity and diversity roughly where plain $w=6$ puts them.
+# * **Interval**: guiding only part of the trajectory is a weaker guidance overall. Because fidelity saturates
+#   long before $w=6$ (6.1), it keeps the full fidelity of plain $w=6$, lands between $w=1$ and $w=6$ on diversity
+#   and ink, and costs fewer NFEs. The real question is whether it beats plain CFG *at equal fidelity*, i.e. lies above
+#   the trade-off curve of 6.1. Here its diversity and ink are close to those of plain CFG at $w\approx2$–3 in the
+#   sweep, which is just as accurate, so at this sample size it sits near the curve rather than clearly above it.
+#   Exercise 5 asks you to check more carefully.
+# * **Rescale** targets over-exposure. With this model plain $w=6$ pushes almost no pixels beyond 1.5 (last
+#   column), so there is little of that left to cut. Rescale instead recovers a little diversity and slightly
+#   reduces ink, at unchanged fidelity. To see its effect on out-of-range values, try it at $w=12$, where plain CFG
+#   does push pixels beyond 1.5 (sweep table).
 #
 # On MNIST the visual differences are modest. In large text-to-image models these tricks are standard, because
 # over-saturation and lost diversity are much more visible there.
@@ -1293,7 +1303,8 @@ plt.show()
 
 # %% [markdown]
 # Same starting noise in both rows. Most samples barely change, a few are visibly altered, and the evaluator's
-# $p(3\mid x)$ drops by a large factor. The price shows in $p(8\mid x)$, which can drop a little. Through
+# $p(3\mid x)$, already small with plain CFG, drops by a large factor. The price would show in $p(8\mid x)$; at this
+# moderate scale it barely moves. Through
 # $\varnothing$, plain CFG pushes away from *all* other digits. The negative version pushes away from 3 only, and,
 # as in 2-D, nothing bounds it by $q_t(x\mid 8)$. Try `W_NEG = 4` or `8` and look at the *images* rather than the
 # printed numbers: the evaluator still calls most samples 8s, but the strokes bend into curly, open shapes that are
@@ -1408,9 +1419,9 @@ plt.show()
 #   **CFG** gets the same effect from one network trained with label dropout:
 #   $\tilde\epsilon=\epsilon_u+w(\epsilon_c-\epsilon_u)$ at 2 NFE per step. With exact scores, the two are
 #   identical.
-# * Increasing $w$ trades **diversity for fidelity**. Beyond a few units it adds little fidelity and causes
-#   over-saturation. Choose $w$ by measurement. Guidance intervals, CFG-rescale and $\hat x_0$ thresholding
-#   soften the side effects.
+# * Increasing $w$ trades **diversity for fidelity**. Once fidelity saturates (on our MNIST model already at
+#   $w\approx2$), more guidance only costs diversity and adds over-saturation. Choose $w$ by measurement.
+#   Guidance intervals, CFG-rescale and $\hat x_0$ thresholding soften the side effects.
 # * Guided sampling, even with exact scores, mostly **re-weights** modes, starving those near other classes. That
 #   is an effect of the guided *dynamics*, not of the tilted target $p(x)p(y\mid x)^w$, which barely re-weights
 #   well-separated modes. Learned CFG also **amplifies model error** by $w$. An over-smoothed $\epsilon_u$ in

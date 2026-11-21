@@ -37,10 +37,10 @@
 # **Prerequisites:** 01 (forward process, SNR), 02 (DDPM), 03 (Tweedie), 04 (DDIM), 05 (U-Net, EMA, training recipe),
 # 06 (classifier-free guidance, negative prompts), 07 (SDEdit, inpainting). Section 8 refers to 08 (flow matching).
 #
-# **Runtime:** Part A: about 10–15 min on a 4-core CPU, most of it two short training runs (the autoencoder and the
-# latent diffusion model), and longer if other jobs share the CPU; about 2–3 min on a GPU. A full run saves both
-# trained models to `checkpoints/09_latent_mnist.pt`, and later runs reload them, so a restart costs only a few
-# minutes. Part B (optional) needs a CUDA GPU with ≥ 6 GB of memory (or an Apple-silicon Mac) and a one-off download
+# **Runtime:** Part A: about 6 min on a 4-core CPU, most of it two short training runs (about 1 min for the autoencoder
+# and 3 min for the latent diffusion model), and longer if other jobs share the CPU; about 2–3 min on a GPU. A full run
+# saves both trained models to `checkpoints/09_latent_mnist.pt`, and later runs reload them, so a restart costs only a
+# minute or two. Part B (optional) needs a CUDA GPU with ≥ 6 GB of memory (or an Apple-silicon Mac) and a one-off download
 # of several GB of weights per model; after that, a few minutes.
 
 # %%
@@ -284,7 +284,7 @@ def train_autoencoder(enc, dec, x, steps, beta=BETA, batch_size=128, lr=2e-3, lo
 
 
 # A full run caches both trained models (this autoencoder and the latent diffusion model of §3) in one file, keyed on
-# the settings above, so a kernel restart does not cost another ~10 CPU minutes. Change Z_CH, BETA or a step count and
+# the settings above, so a kernel restart does not cost another ~5 CPU minutes. Change Z_CH, BETA or a step count and
 # the key no longer matches, so both models are retrained. FAST smoke tests never read or write the cache.
 CACHE_PATH = None if FAST else dm.CKPT_DIR / "09_latent_mnist.pt"
 CACHE_KEY = dict(z_ch=Z_CH, beta=BETA, ae_steps=AE_STEPS, ldm_steps=LDM_STEPS)
@@ -358,7 +358,7 @@ plt.show()
 # %% [markdown]
 # The reconstructions are close to the originals and the classifier still recognises them. That is the property that
 # matters: the autoencoder keeps the *semantics*. Measured by MSE, it is about as good as PCA with the same number of
-# dimensions; MNIST is easy, and PCA is the best *linear* code for MSE. The autoencoder's advantages lie elsewhere:
+# dimensions, or slightly better; MNIST is easy, and PCA is the best *linear* code for MSE. The autoencoder's advantages lie elsewhere:
 # its latent is a spatial grid, so the denoiser can still be a convolutional U-Net, and on natural images it can be
 # trained with perceptual and adversarial losses to keep what matters to the eye rather than what has the most
 # variance. The latents are not images: each digit becomes four coarse 7×7
@@ -437,7 +437,8 @@ for ab, s, _, _, lab in curves:
 # %% [markdown]
 # **Left:** after scaling, the latent values have unit variance, as the forward process assumes (they need not be
 # Gaussian; the diffusion model will learn their actual shape). The sharp spikes are latent cells over blank
-# background, which all receive the same value. The printout shows two things a single global number
+# background, mostly along the border of the 7×7 grid: such a cell receives almost the same value in every image, set
+# by its channel and its position. The printout shows two things a single global number
 # ignores: the latent mean is not exactly zero, and the channels have different spreads. A global scale is the
 # simplest fix that is good enough; diffusers' `AutoencoderKL` config also has `shift_factor` and per-channel
 # `latents_mean` / `latents_std` fields for models that standardise more carefully.
@@ -636,8 +637,8 @@ plt.show()
 # $\hat\varepsilon$ by $1/\sqrt{\bar\alpha_{999}}\approx157$. Second, guidance with $w=3$ extrapolates. Third, the decoder
 # is nonlinear and was trained only on clean latents. Even a perfect posterior mean in latent space would not decode
 # to the posterior mean in pixel space, since $D(\mathbb E[z_0\mid z_t])\neq\mathbb E[D(z_0)\mid z_t]$. The exact
-# pixel-space posterior mean at high noise is a blurry average digit (notebook 03); a decoded latent estimate carries no
-# such guarantee.
+# pixel-space posterior mean at high noise is a blurry average digit (notebook 03 §6; for MNIST, notebook 05 §4); a
+# decoded latent estimate carries no such guarantee.
 #
 # ## 5 · What did the latent space buy us? Speed
 #
@@ -740,10 +741,12 @@ print(f"decoder: {1000 * t_decode:.1f} ms per batch of {B} (paid once per sample
 # instead of 32), which makes each of its convolutions about 4× more expensive per position. And the pixel U-Net
 # already does part of its work at 14×14 and 7×7. Compare the measured forward-pass speed-up with the FLOP ratio:
 # FLOPs are what the arithmetic demands, wall-clock time is what the hardware delivers. A speed-up larger than the FLOP
-# ratio means that the pixel model gets fewer FLOPs per second out of the hardware (on a CPU, narrow 32-channel
-# convolutions over large activations, and the memory-bound normalisation and activation layers between them, are
-# typically less efficient). A smaller one means that the latent model does (on a GPU, a batch of 4×7×7 latents is too
-# small to keep the device busy, and fixed per-kernel overheads cap the speed-up). The training step adds costs that do
+# ratio means that the pixel model gets fewer FLOPs per second out of the hardware (narrow 32-channel convolutions over
+# large activations, and the memory-bound normalisation and activation layers between them, are less efficient). A
+# smaller one means that the latent model does: its 7×7 activations leave little work per layer, so fixed per-call
+# overheads weigh more (and on a GPU, a batch of 4×7×7 latents is too small to keep the device busy). On a CPU the two
+# effects are often of similar size, so the measured speed-up typically lands within a few tens of percent of the FLOP
+# ratio, on either side of it (in the run shown, somewhat below it); on a GPU the second one usually dominates. The training step adds costs that do
 # not shrink with the input at all, since the optimiser update and the mixed-precision casts cost the same per
 # parameter, and these can pull its speed-up below that of the forward pass. Timings on a shared machine are noisy, even
 # as medians over several repeats, so read these ratios to within tens of percent.
@@ -772,8 +775,16 @@ else:
           "`python pretrain_checkpoints.py --only uncond`")
 
 # %% [markdown]
-# (When notebook 05's reference checkpoint is available, the cell above shows unconditional samples of the two
-# models side by side. They were trained with different budgets, so compare them only loosely.)
+# The cell above shows unconditional samples of the two models side by side (it needs notebook 05's reference
+# checkpoint `checkpoints/mnist_unet_uncond.pt`, which ships with the repository). Do not read it as "pixel beats
+# latent": the budgets are very different. Most of the pixel model's samples are clean, recognisable digits, while many
+# of the latent model's unconditional samples are malformed strokes that form no clear digit. The pixel U-Net has about
+# 1.6× the parameters and was trained purely unconditionally for 12 000 steps at batch 64 (~770 000 images). Our latent
+# model saw 3000 × 128 ≈ 380 000 latents, and only the 10% of them whose label was dropped (~38 000, twenty times fewer)
+# trained the null-label branch that $w=0$ uses on its own. This fits the lower classifier confidence at $w=0$ in §4
+# (printed there), and it is why the samples of §4 ($w=3$) look so much cleaner: the conditional branch, trained on the
+# other 90%, does most of the work there, and guidance hides a weak unconditional model, at the price of diversity. A fair comparison would train both models
+# unconditionally with the same budget and compare them with a sample-quality metric (notebook 05 §7).
 #
 # ## 6 · Image-to-image in latent space: SDEdit and the `strength` knob
 #
@@ -854,7 +865,8 @@ for s, a, b, o, d in zip(STRENGTHS, frac_tgt, frac_src, frac_other, dist_src):
 # `strength` trades faithfulness for editability. At low strength the output keeps the input's identity (blue
 # curve high) and stays close to it in pixels, although never closer than the autoencoder allows (dotted line). At high
 # strength the new label wins (orange curve), and the output keeps less and less of the input, until at `strength=1`
-# it is unrelated to it. The switch happens over a narrow range of strengths, where the noise level reaches the scale
+# it is unrelated to it. The switch happens over a narrow range of strengths (in the printout, roughly 0.2 to 0.4),
+# where the noise level reaches the scale
 # of the features that distinguish the two digits; there the coarse shape of the input (position, slant, thickness)
 # survives while the identity changes. In that range some edits are neither digit (purple curve): the sampler, pulled
 # between the input's shape and the new label, settles on a third digit that is compatible with both, as some rows of
@@ -1506,7 +1518,7 @@ else:
 # $\mathrm{SNR}<1$ for unit-variance latents, but only about two fifths for $s=5.5$, while the share of barely-noised
 # timesteps ($\mathrm{SNR}>e^2$) more than triples. So the training effort shifts towards low noise levels. Under our
 # linear schedule the endpoint stays close to pure noise ($\log\mathrm{SNR}_{\text{eff}}\approx-6.7$ at $t=999$; marginal
-# standard deviation $\sqrt{5.5^2\bar\alpha_T+1-\bar\alpha_T}$, barely above 1). Whether the shift hurts a model this
+# standard deviation $\sqrt{5.5^2\bar\alpha_{999}+1-\bar\alpha_{999}}$, barely above 1). Whether the shift hurts a model this
 # small at this budget is an empirical question, so measure it rather than assume. With SD's "scaled_linear" schedule
 # the endpoint mismatch would be large as well (a correlation of about 0.35 with the data at $t=T-1$, §2.3).
 # </details>
@@ -1564,8 +1576,8 @@ else:
 # (a) Yes: the loop only uses the generic scheduler API, so any scheduler works (stochastic ones such as
 # `EulerAncestralDiscreteScheduler` also need the same `generator` passed to `step`). (b) Guidance rescaling (Lin et al.
 # 2024) rescales the guided noise prediction towards the standard deviation of the conditional one, reducing the
-# over-saturation of large $w$. (c) With `guidance_scale=1.0` your loop computes only the conditional prediction
-# (wastefully, twice); the image should look like the pipeline's `guidance_scale=0.0` output, provided your scheduler
+# over-saturation of large $w$. (c) With `guidance_scale=1.0` your loop uses only the conditional prediction (the
+# unconditional half of each batched call is computed and thrown away); the image should look like the pipeline's `guidance_scale=0.0` output, provided your scheduler
 # starts at $t=999$: check `turbo.scheduler.timesteps` after `set_timesteps(1)`.
 # </details>
 
