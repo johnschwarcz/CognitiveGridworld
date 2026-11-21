@@ -667,7 +667,8 @@ def model_predictions(model, x, t, schedule: NoiseSchedule, y=None, guidance_sca
 
     Handles classifier-free guidance: if `y` is given and guidance_scale != 1,
     the model is evaluated with and without the label and the two noise
-    predictions are extrapolated.
+    predictions are extrapolated. Network outputs are cast to x's dtype first, so
+    under bfloat16 autocast the guidance extrapolation happens in float32.
     """
     if not torch.is_tensor(t) or t.ndim == 0:
         t = torch.full((x.shape[0],), int(t), device=x.device, dtype=torch.long)
@@ -686,11 +687,11 @@ def model_predictions(model, x, t, schedule: NoiseSchedule, y=None, guidance_sca
     if y is not None and guidance_scale != 1.0:
         null = torch.full_like(y, model.n_classes)
         out = model(torch.cat([x, x]), torch.cat([t, t]), torch.cat([y, null]))
-        out_c, out_u = out.chunk(2)
+        out_c, out_u = out.to(x.dtype).chunk(2)
         eps_c, eps_u = to_eps(out_c, x), to_eps(out_u, x)
         eps = eps_u + guidance_scale * (eps_c - eps_u)
     else:
-        eps = to_eps(model(x, t, y), x)
+        eps = to_eps(model(x, t, y).to(x.dtype), x)
     x0 = (x - s1a * eps) / sa
     if clip_x0 is not None:
         x0 = x0.clamp(-clip_x0, clip_x0)
@@ -738,7 +739,12 @@ def ddim_sample(model, schedule: NoiseSchedule, shape, *, n_steps: int = 50, eta
                 y=None, guidance_scale: float = 1.0, pred: str = "eps",
                 clip_x0: Optional[float] = None, x_T=None, return_traj: bool = False,
                 generator=None, device=None):
-    """DDIM (Song et al. 2021). eta=0: deterministic; eta=1: DDPM-like stochasticity."""
+    """DDIM (Song et al. 2021). eta=0: deterministic; eta=1: DDPM-like stochasticity.
+
+    With fewer steps than T, eta=1 is not exactly DDPM: its per-step variance is
+    the posterior variance of the *strided* chain, and even with a perfect model
+    the samples come out slightly under-dispersed (see notebook 07 and Bao et al.
+    2022, Analytic-DPM)."""
     device = device or schedule.device
     x = x_T.to(device) if x_T is not None else torch.randn(shape, device=device, generator=generator)
     ts = _ddim_timesteps(schedule.T, n_steps)
