@@ -30,7 +30,7 @@
 # - two ways to straighten the flow for 1–2-step sampling: **reflow** (rectified flow) and **mini-batch optimal-transport** couplings;
 # - the practical knobs used in large models: timestep distributions, step counts, guidance on velocities.
 #
-# **Prerequisites:** 01 (forward process), 02 (DDPM), 03 (score matching, Tweedie), 04 (DDIM / probability-flow ODE); 06 (guidance) for the last section.
+# **Prerequisites:** 01 (forward process), 02 (DDPM), 03 (score matching, Tweedie), 04 (DDIM / probability-flow ODE), 05 (training loop, EMA); 06 (guidance) for the last section.
 #
 # **Runtime:** about 5–10 min on a laptop CPU (five small MLPs of 0.5–1.5 min each, plus sampling); about 2–4 min on a GPU (tiny MLPs, so a GPU helps less than usual).
 
@@ -200,13 +200,14 @@ def flow_marginal(gmm, t):
 def exact_velocity(gmm, x, t, t_min=1e-4):
     """Exact marginal velocity v(x,t) = E[eps - x0 | x_t = x] and posterior mean E[x0 | x_t = x].
 
-    x: (n, d) on any device; t: float or (n,) tensor. The maths runs in float64 on the CPU
-    (Apple MPS has no float64); results come back as float32 on x's device.
+    x: (n, d) on any device; t: float or (n,) tensor on any device. The maths runs in float64 on
+    the CPU; results come back as float32 on x's device.
     """
     dev = x.device
+    # Gotcha: move to the CPU *before* casting to float64 -- Apple MPS has no float64 at all
     x = x.detach().cpu().double()
     n, d = x.shape
-    t = torch.as_tensor(t, dtype=torch.float64).cpu().expand(n).clamp(t_min, 1.0)  # (n,)
+    t = torch.as_tensor(t).detach().cpu().double().expand(n).clamp(t_min, 1.0)  # (n,)
     a = (1 - t)[:, None, None]                                             # broadcasts over (n, K, d)
     S = a[..., None] ** 2 * gmm.covs + t[:, None, None, None] ** 2 * torch.eye(d, dtype=torch.float64)
     L = torch.linalg.cholesky(S)                                           # (n, K, d, d)
@@ -364,7 +365,8 @@ def independent_pairs(x_data):
 def train_flow(model, sample_pairs, steps=STEPS, bs=BATCH, lr=LR, warmup=100, ema_decay=0.999,
                p_uncond=0.0, t_sampler=None, log_every=0):
     """Conditional flow matching. Returns (EMA model, per-step losses)."""
-    opt = torch.optim.AdamW(model.parameters(), lr=lr)
+    # weight_decay=0 explicitly: AdamW's default is 0.01, dm.train_diffusion uses 0 (keep the comparison fair)
+    opt = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=0.0)
     sched = torch.optim.lr_scheduler.LambdaLR(opt, lambda s: min(1.0, (s + 1) / warmup))
     ema, losses = dm.EMA(model, ema_decay), []
     model.train()
@@ -423,7 +425,8 @@ print(f"final loss (last 500 steps): {fm_losses[-500:].mean():.3f}   floor C/d: 
 # * **Euler** (1 network evaluation, NFE, per step): $x_{i+1} = x_i + h_i\,v_\theta(x_i,t_i)$.
 # * **Heun** (2 NFE per step): predict $\tilde x = x_i + h_i v_\theta(x_i,t_i)$, then correct with the
 #   average slope, $x_{i+1} = x_i + \tfrac{h_i}{2}\big(v_\theta(x_i,t_i) + v_\theta(\tilde x,t_{i+1})\big)$.
-#   Second-order accurate, so it wins when the trajectory is smooth and you can afford few steps.
+#   Second-order accurate: once the steps are small enough for the asymptotic error estimate to apply, it beats
+#   Euler at equal NFE; with very few steps, spending half the budget on corrections is wasted.
 #
 # Cost is measured in NFE, so we compare samplers at equal NFE.
 
@@ -465,7 +468,10 @@ def mmd(x):
 # **A fair diffusion baseline.** Same network, same data, same optimiser and number of steps, but
 # trained with the DDPM $\varepsilon$-prediction loss on the linear VP schedule (notebook 02) via
 # `dm.train_diffusion`. Its deterministic sampler is DDIM (notebook 04) with `n_steps` = NFE.
-# (`amp=False` keeps both runs in float32 on any device.)
+# (`amp=False` keeps both runs in float32 on any device.) One handicap to keep in mind: `dm.ddim_sample`'s
+# grid, uniform in the integer step $k$, always spends its last evaluation at $k=0$, where the sample is
+# already almost clean, so DDIM has effectively one useful step fewer than its NFE. Section 5 removes this
+# by putting both networks on the same grid.
 
 # %%
 schedule = dm.NoiseSchedule(1000, "linear", device=device)
@@ -477,18 +483,30 @@ ddpm_model = ddpm_out["ema"].model
 print(f"DDPM MLP trained in {time.time() - t0:.0f}s")
 
 # %%
+def sw(x):
+    """Sliced Wasserstein-1 to held-out data: unbounded, so it still ranks very poor samples."""
+    return dm.sliced_wasserstein(x.detach().cpu(), test)
+
+
 x1_eval = torch.randn(N_EVAL, 2, generator=torch.Generator().manual_seed(4)).to(device)
-quality = {k: [] for k in ["fm_euler", "fm_heun", "exact_euler", "ddim"]}
+samplers = {
+    "fm_euler": lambda nfe: ode_sample(model_vfn(fm_model), x1_eval, nfe),
+    "fm_heun": lambda nfe: ode_sample(model_vfn(fm_model), x1_eval, nfe // 2, "heun") if nfe >= 2 else None,
+    "exact_euler": lambda nfe: ode_sample(exact_vfn(gmm), x1_eval, nfe),
+    # dm.ddim_sample's grid always ends with an evaluation at step k=0, so it needs >= 2 NFE to move at all
+    "ddim": lambda nfe: dm.ddim_sample(ddpm_model, schedule, x1_eval.shape, n_steps=nfe, x_T=x1_eval) if nfe >= 2 else None,
+}
+quality, quality_sw = {k: [] for k in samplers}, {k: [] for k in samplers}
 for nfe in NFES:
-    quality["fm_euler"].append(mmd(ode_sample(model_vfn(fm_model), x1_eval, nfe)))
-    quality["fm_heun"].append(mmd(ode_sample(model_vfn(fm_model), x1_eval, nfe // 2, "heun")) if nfe >= 2 else np.nan)
-    quality["exact_euler"].append(mmd(ode_sample(exact_vfn(gmm), x1_eval, nfe)))
-    # dm.ddim_sample's grid always ends with an evaluation at t=0, so it needs >= 2 NFE to move at all
-    quality["ddim"].append(mmd(dm.ddim_sample(ddpm_model, schedule, x1_eval.shape, n_steps=nfe, x_T=x1_eval))
-                           if nfe >= 2 else np.nan)
-print(f"{'NFE':>4} | " + " | ".join(f"{k:>11}" for k in quality))
-for i, nfe in enumerate(NFES):
-    print(f"{nfe:4d} | " + " | ".join(f"{quality[k][i]:11.4f}" for k in quality))
+    for k, sampler in samplers.items():
+        xs = sampler(nfe)
+        quality[k].append(mmd(xs) if xs is not None else np.nan)
+        quality_sw[k].append(sw(xs) if xs is not None else np.nan)
+for title, table in [("MMD^2", quality), ("sliced Wasserstein-1", quality_sw)]:
+    print(f"{title} (lower = better)\n{'NFE':>4} | " + " | ".join(f"{k:>11}" for k in table))
+    for i, nfe in enumerate(NFES):
+        print(f"{nfe:4d} | " + " | ".join(f"{table[k][i]:11.4f}" for k in table))
+    print()
 
 # %%
 fig, ax = plt.subplots(figsize=(5.5, 3.6))
@@ -521,35 +539,43 @@ plt.show()
 # What to read off these two figures:
 #
 # * The **exact-velocity** curve isolates pure *discretisation* error (no model error): it falls
-#   steadily with NFE towards the noise floor. The learned flow tracks it at small NFE (there,
-#   the time-stepping error dominates) and levels off at large NFE (where the model error dominates).
+#   steadily with NFE towards the noise floor and, even at 64 Euler steps, has not quite reached it.
+#   The learned flow tracks it closely; the small gap at large NFE is the model error, while both curves
+#   still carry some discretisation error. Model and discretisation errors *interact* rather than simply
+#   add, so do not be surprised if the learned flow occasionally beats the exact one at coarse NFE: a
+#   slightly smoother field can incur less Euler error than the exact, sharper one.
 # * With one Euler step every sampler collapses towards the data mean — the first step uses
 #   $v(x,1)=x-\mathbb E[x_0]$, so $x_0 = x_1 - v = \mathbb E[x_0]$. Curved paths need several steps.
 # * Heun is better per *step*, but compare at equal NFE: it typically wins only once the step is small enough for the second-order correction to help.
-# * With 1–2 NFE every sampler here is poor. From a handful of steps on (enough for recognisable
-#   samples), the flow model beats the DDPM model sampled with DDIM at equal NFE, and both converge to
-#   similar quality at large NFE. Section 5 shows that this is **not** because flow matching is a
-#   fundamentally different model: the gap comes from the time grid and the output parametrisation.
+# * With 1–2 NFE every sampler here is poor, and MMD cannot rank such samples: an RBF-kernel MMD is
+#   bounded, so it *saturates* for grossly wrong samples (e.g. DDIM's 2-NFE samples, many far outside the
+#   plotted window), and differences above roughly 0.1 mean little. The unbounded sliced Wasserstein distance
+#   in the second table keeps ranking them.
+#   From a handful of steps on, the flow model beats the DDPM model sampled with DDIM at equal NFE, and
+#   both converge to similar quality at large NFE. Section 5 shows that this is **not** because flow
+#   matching is a fundamentally different model; the gap comes from the time grid (including DDIM's
+#   wasted $k=0$ evaluation) and from the combination of output parametrisation and loss weighting.
 #
 # Finally, compare the learned and exact velocity fields directly.
 
 # %%
 def velocity_error_vs_t(vfn, ts, n=N_EVAL, seed=5):
-    """Relative error E||v_model - v_exact||^2 / E||v_exact||^2 on samples x_t ~ p_t, for each t."""
+    """Absolute error E||v_model - v_exact||^2 on samples x_t ~ p_t, and the scale E||v_exact||^2, per t."""
     g = torch.Generator().manual_seed(seed)
-    errs = []
+    errs, scale = [], []
     for t in map(float, ts):
         x0, eps = gmm.sample(n, generator=g), torch.randn(n, 2, generator=g)
         xt = ((1 - t) * x0 + t * eps).to(device)
         v_true, _ = exact_velocity(gmm, xt, t)
         with torch.no_grad():
             v_hat = vfn(xt, t)
-        errs.append((sq(v_hat, v_true).mean() / (v_true ** 2).sum(1).mean()).item())
-    return np.array(errs)
+        errs.append(sq(v_hat, v_true).mean().item())
+        scale.append((v_true ** 2).sum(1).mean().item())
+    return np.array(errs), np.array(scale)
 
 
 ts_err = np.linspace(0.02, 0.98, 9 if FAST else 25)
-err_fm = velocity_error_vs_t(model_vfn(fm_model), ts_err)
+err_fm, v_scale = velocity_error_vs_t(model_vfn(fm_model), ts_err)
 
 fig, axes = plt.subplots(1, 4, figsize=(13, 3.4))
 for ax, t in zip(axes[:3], [0.9, 0.5, 0.1]):
@@ -558,27 +584,37 @@ for ax, t in zip(axes[:3], [0.9, 0.5, 0.1]):
     plot_field(ax, exact_vfn(gmm), t, n=11, color=COL["exact"], width=0.004, label="exact")
     ax.set_title(f"t = {t}"); ax.set_xticks([]); ax.set_yticks([])
 axes[0].legend(loc="lower left")
-axes[3].semilogy(ts_err, err_fm, "o-", color=COL["fm"], ms=3)
-axes[3].set_xlabel("t"); axes[3].set_ylabel("relative MSE of $v_\\theta$")
-axes[3].set_title("learned vs exact velocity")
+axes[3].semilogy(ts_err, err_fm, "o-", color=COL["fm"], ms=3, label="$\\mathbb{E}\\|v_\\theta - v\\|^2$ (error)")
+axes[3].semilogy(ts_err, v_scale, "--", color=COL["exact"], lw=1, label="$\\mathbb{E}\\|v\\|^2$ (scale of $v$)")
+axes[3].set_xlabel("t  (0 = data, 1 = noise)"); axes[3].set_ylabel("mean squared norm on $x_t\\sim p_t$")
+axes[3].set_title("learned vs exact velocity"); axes[3].legend(loc="lower left")
 plt.tight_layout()
 plt.show()
+i_mid = np.argmin(np.abs(ts_err - 0.5))
+print(f"E||v||^2 at t = {ts_err[i_mid]:.2f}: {v_scale[i_mid]:.3f}   (vs {v_scale.max():.2f} at its maximum)")
 
 # %% [markdown]
 # Learned (thick blue) and exact (thin black) arrows almost coincide wherever $p_t$ has mass; visible
 # deviations appear only in low-density regions (e.g. the corners at small $t$) that training rarely
-# visits. The relative error (right) is small at every $t$. It is largest at intermediate times, where
-# the posterior over mixture components is still undecided and the field changes quickly across
-# space, and smallest at large $t$, where the field is nearly linear in $x$.
+# visits. The error (right, solid) is small compared with the size of the field at every $t$. It is
+# largest close to the data (small $t$, roughly 0.1–0.3), where the field is sharp and multi-modal around the thin
+# components, and smallest at fairly large $t$, where $p_t$ is nearly Gaussian and the field nearly linear in $x$.
+#
+# The dashed curve has a curious dip near $t=0.5$, where the whole field almost vanishes. Our data are
+# roughly standardised (mean $\approx0$, covariance $\approx I$, printed at the top). At $t=\tfrac12$, $x_t=\tfrac12(x_0+\varepsilon)$
+# is symmetric in $x_0$ and $\varepsilon$, so if $x_0$ had the same first two moments as $\varepsilon$, the best *linear*
+# guesses of $x_0$ and $\varepsilon$ from $x_t$ would coincide and their difference $v$ would be zero; only the
+# non-Gaussian structure of the data makes $v$ non-zero there. (This is also why a *relative* error,
+# divided by $\mathbb E\|v\|^2$, would misleadingly peak at $t\approx0.5$.)
 
 # %% [markdown]
 # ## 4 · Trajectories: why the learned flow is curved
 #
 # Each training pair moves along a straight line, yet the ODE trajectories bend. The reason is
-# that **lines of different pairs cross**: at a crossing point the ODE must choose a single
-# velocity, and it takes the average (the posterior mean). Early on ($t\approx1$) the posterior over
-# $x_0$ is broad, so everybody heads for the data mean; later the posterior commits and the
-# particle turns towards "its" component.
+# that **many pairs pass through the same point $x$ at the same time $t$, with different velocities**:
+# the ODE must choose a single velocity there, and it takes their average (the posterior mean). Early on
+# ($t\approx1$) the posterior over $x_0$ is broad, so everybody heads for the data mean; later the
+# posterior commits and the particle turns towards "its" component.
 #
 # Two ways to quantify straightness, for a path $x_t$ from $x_1$ to $x_0$:
 #
@@ -634,9 +670,13 @@ for name, p in [("exact ODE", exact_paths), ("learned FM ODE", fm_paths)]:
     print(f"{name:>22} | {r:12.3f} | {S:10.3f}")
 
 # %% [markdown]
-# Left: the straight training lines cross all over the place. The ODE trajectories (middle) cannot
-# cross, so they bend: they first move inwards, towards the data mean, then fan out to the components.
-# The learned flow reproduces the exact one closely. The right panel shows the model's running
+# Left: a sample of straight training lines. They intersect all over the picture, although two lines almost
+# never reach their intersection at the same time. What forces the averaging is that, in the full population
+# of pairs, a whole continuum of lines (one for every $x_0$) passes through each $(x,t)$. The ODE trajectories
+# (middle) are solutions of a single smooth velocity field, so two of them can never be at the same place
+# at the same time (in this 2-D picture they may still cross at different times). They bend: first
+# inwards, towards the data mean, then out to the components. The learned flow reproduces the exact one
+# closely. The right panel shows the model's running
 # guess $\hat x_0$ (blue dots at $t=1$): it starts *at the data mean for every particle* and then
 # commits — an evidence-accumulation picture familiar from Bayesian observer models. The
 # straightness numbers ($S>0$, length ratio $>1$) quantify why a single Euler step cannot work here.
@@ -675,6 +715,15 @@ for name, p in [("exact ODE", exact_paths), ("learned FM ODE", fm_paths)]:
 # In flow coordinates that is $z_s = (1-s)\hat x_0 + s\hat\varepsilon$; and an Euler step from $z_t=(1-t)\hat x_0+t\hat\varepsilon$
 # gives $z_t + (s-t)(\hat\varepsilon-\hat x_0) = (1-s)\hat x_0 + s\hat\varepsilon$ — **the same point**. The probability-flow
 # ODE of a diffusion model is a flow, and DDIM is its Euler discretisation in these coordinates.
+#
+# Notebook 04 (§3.2) showed that DDIM is *also* Euler in the variance-exploding coordinates
+# $(\tilde x,\tilde\sigma)=(x/\alpha,\ \sigma/\alpha)$. How can one scheme be Euler in two coordinate systems, when Euler is
+# not coordinate-invariant in general? Because the two systems are related by a map that preserves straight
+# lines: $z=\tilde x/(1+\tilde\sigma)$, $t=\tilde\sigma/(1+\tilde\sigma)$. DDIM is the exact solution when $(\hat x_0,\hat\varepsilon)$ are frozen
+# over the step, and in any coordinates where the frozen path is affine in the time variable
+# ($\tilde x=\hat x_0+\tilde\sigma\hat\varepsilon$, or $z=(1-t)\hat x_0+t\hat\varepsilon$) that path is a straight line traversed at constant
+# speed, which Euler reproduces exactly. In the original VP coordinates the frozen path
+# $\alpha\hat x_0+\sigma\hat\varepsilon$ is curved, and Euler there is *not* DDIM.
 #
 # Let's verify all of this numerically, first with the exact mixture.
 
@@ -732,7 +781,7 @@ class EpsAsFlow:
 
     def __init__(self, eps_model, schedule):
         self.model = eps_model
-        ab = schedule.alpha_bars.double().cpu().numpy()
+        ab = schedule.alpha_bars.cpu().double().numpy()   # CPU first: MPS has no float64
         lam = np.log(ab) - np.log1p(-ab)                 # log-SNR, decreasing in k
         self.lam_table, self.k_table = lam[::-1].copy(), np.arange(schedule.T, dtype=np.float64)[::-1].copy()
         t_of = lambda a: math.sqrt(1 - a) / (math.sqrt(a) + math.sqrt(1 - a))
@@ -749,7 +798,7 @@ class EpsAsFlow:
 def ddim_grid_in_flow_time(n_steps):
     """dm.ddim_sample's integer steps k (uniform in k, notebook 04) and the matching flow times t."""
     ks = np.unique(np.linspace(0, schedule.T - 1, n_steps).round().astype(int))[::-1]
-    ab = schedule.alpha_bars.double().cpu().numpy()[ks]
+    ab = schedule.alpha_bars.cpu().double().numpy()[ks]   # CPU first: MPS has no float64
     return ks, np.sqrt(1 - ab) / (np.sqrt(ab) + np.sqrt(1 - ab))
 
 
@@ -790,15 +839,20 @@ plt.show()
 # which sampler you may use. (The stochastic sampler costs 20× more evaluations, but its injected
 # noise can also correct some accumulated error — the usual stochastic-vs-deterministic trade-off.)
 #
-# **So where did the few-step gap of Section 3 come from?** Two suspects: (i) the *time grid* —
+# **So where did the few-step gap of Section 3 come from?** Three suspects: (i) the *time grid* —
 # DDIM's grid is uniform in the integer step $k$, which for the linear schedule packs most steps at
-# high noise — and (ii) the *output parametrisation*. To isolate them, sample the converted DDPM model
-# with exactly the flow model's Euler sampler on a uniform-in-$t$ grid, and compare the velocity
-# errors of both networks as a function of $t$.
+# high noise and wastes the last one at $k=0$; (ii) the *output parametrisation* ($\varepsilon$ vs $v$); and
+# (iii) the *training objective*: how the loss weights errors at each noise level, and how often each
+# noise level is sampled. (ii) and (iii) are entangled, because for a $v$-head
+# $\|v_\theta-u\|^2=\|\hat\varepsilon_\theta-\varepsilon\|^2/(1-t)^2$, as shown above: "predict $v$" and "weight the
+# $\varepsilon$-error by $1/(1-t)^2$" describe the same objective; only the network's output layer differs.
+# The experiment below isolates the **grid only**: it samples the converted DDPM model with exactly the
+# flow model's Euler sampler on a uniform-in-$t$ grid, and compares the velocity errors of both networks
+# as a function of $t$. (Exercise 6 pulls (ii) and (iii) apart.)
 
 # %%
 eps_as_flow = EpsAsFlow(ddpm_model, schedule)
-err_ddpm = velocity_error_vs_t(eps_as_flow, ts_err)
+err_ddpm, _ = velocity_error_vs_t(eps_as_flow, ts_err)
 quality["ddpm_euler"] = [mmd(ode_sample(eps_as_flow, x1_eval, nfe)) for nfe in NFES]
 
 print("8-step DDIM grid expressed in flow time t:", np.round(ddim_grid_in_flow_time(8)[1], 3), "-> 0")
@@ -807,7 +861,8 @@ print("8-step uniform flow grid:                 ", np.round(np.linspace(1, 0, 9
 fig, axes = plt.subplots(1, 2, figsize=(11, 3.6))
 axes[0].semilogy(ts_err, err_fm, "o-", color=COL["fm"], ms=3, label="flow-matching model")
 axes[0].semilogy(ts_err, err_ddpm, "D-", color=COL["ddpm"], ms=3, label="DDPM model, converted to $v$")
-axes[0].set_xlabel("t  (0 = data, 1 = noise)"); axes[0].set_ylabel("relative MSE of the velocity")
+axes[0].semilogy(ts_err, v_scale, "--", color=COL["exact"], lw=1, label="$\\mathbb{E}\\|v\\|^2$ (scale of $v$)")
+axes[0].set_xlabel("t  (0 = data, 1 = noise)"); axes[0].set_ylabel("$\\mathbb{E}\\|v_\\theta - v\\|^2$")
 axes[0].set_title("Where does each network make errors?"); axes[0].legend()
 for k, lab, c, m in [("fm_euler", "FM model, Euler, uniform t-grid", COL["fm"], "o-"),
                      ("ddpm_euler", "DDPM model, Euler, uniform t-grid", COL["ddpm"], "s--"),
@@ -823,23 +878,34 @@ plt.show()
 # %% [markdown]
 # Left: converted to velocities, the $\varepsilon$-model's errors are amplified by $1/(1-t)$ near pure
 # noise ($v=(\hat\varepsilon - x_t)/(1-t)$): a small error in $\hat\varepsilon$ becomes a large error in the
-# direction of motion, exactly where a few-step sampler takes its first and largest step. The flow
-# model predicts $v$ directly and has no such blow-up.
+# direction of motion, exactly where a few-step sampler takes its first and largest step. This is also
+# where the DDPM objective cares least about $\varepsilon$-errors compared with flow matching (weighting plot
+# below), so the head and the weighting conspire. The flow model, trained on $v$, has no such blow-up.
 #
-# Right: grid and parametrisation interact. DDIM's grid (printed above) is uniform in the integer step
+# Right: grid and network interact. DDIM's grid (printed above) is uniform in the integer step
 # $k$, which for the linear schedule means many small steps near $t=1$ — exactly where the $\varepsilon$-model's
-# velocity is unreliable — followed by one or two huge steps across the low-noise region. With very few
-# steps that wastes evaluations, and the uniform grid serves the DDPM network better; with more steps the
-# small high-noise steps of DDIM's grid pay off for it. The flow network on its uniform grid is the
-# best (or tied) at most budgets. (At 1–2 NFE every method is poor, so ignore the ranking there.)
-# The lesson generalises: **put small steps where the network's velocity is least reliable**, and
-# prefer a parametrisation that is reliable where your sampler takes big steps.
+# velocity is unreliable — followed by one or two huge steps across the low-noise region and a wasted
+# evaluation at $k=0$. With very few steps that wastes evaluations, and the uniform grid serves the DDPM
+# network better; with more steps the small high-noise steps of DDIM's grid pay off for it. Even on the
+# same uniform grid, though, the DDPM network stays behind the flow network over most budgets: that
+# residual gap belongs to suspects (ii)+(iii), the head and the training objective, which this experiment
+# cannot separate. (At 1–2 NFE every method is poor, so ignore the ranking there.)
+# The lesson generalises (compare notebook 04 §6 on where to put the steps): **put small steps where the
+# network's velocity is least reliable**, and prefer a parametrisation and weighting that make the network
+# reliable where your sampler takes big steps.
 #
 # **Loss weighting across noise levels.** Writing every objective as a weighted
 # $\varepsilon$-MSE per unit of log-SNR $\lambda$ makes them comparable (Kingma & Gao 2023). For flow matching with
 # $t\sim U(0,1)$: $\lambda = 2\log\frac{1-t}{t}$, $|dt/d\lambda| = t(1-t)/2$, and weight $1/(1-t)^2$, so the
 # effective weight is $\frac{t}{2(1-t)} = \tfrac12 e^{-\lambda/2}$. For DDPM's simple loss it is just the density of
-# $\lambda$ under uniform integer steps. SD3 samples $t$ from a **logit-normal**, $t=\mathrm{sigmoid}(n)$, $n\sim\mathcal N(0,1)$.
+# $\lambda$ under uniform integer steps. SD3 samples $t$ from a **logit-normal**, $t=\mathrm{sigmoid}(n)$, $n\sim\mathcal N(0,1)$;
+# since $\mathrm{logit}\,t=-\lambda/2$, its density per unit $\lambda$ is $\tfrac12\mathcal N(\lambda/2;0,1)$, times the same $1/(1-t)^2$.
+#
+# One thing weighting does **not** change is the answer. For any time density $p(t)$ and weight $w(t)>0$,
+# the argument of Section 1 applies at each $t$ separately, so the population minimiser is still the
+# posterior mean $v(x,t)$ wherever $p(t)w(t)>0$. The weighting only matters for a finite network trained for
+# finite time: it decides at which noise levels the inevitable errors end up smallest, and how noisy the
+# gradients are.
 
 # %%
 lam = np.linspace(-10, 10, 400)
@@ -861,13 +927,17 @@ ax.set_ylabel("effective $\\varepsilon$-MSE weight (normalised)")
 ax.set_title("How much each objective cares about each noise level"); ax.legend(fontsize=7, loc="lower left")
 plt.tight_layout()
 plt.show()
+i_pk = np.argmax(w_lognorm)
+print(f"logit-normal: density of t peaks at t = 0.5 (lambda = 0); effective eps-weight peaks at "
+      f"lambda = {lam[i_pk]:.2f}, i.e. t = {t_of_lam[i_pk]:.2f}")
 
 # %% [markdown]
 # Uniform-$t$ flow matching puts exponentially more weight on noisy inputs (low $\lambda$) than DDPM's
-# simple loss. SD3's logit-normal sampling instead concentrates the weight on intermediate noise levels
-# (its density in $t$ peaks at $t=0.5$, i.e. $\lambda=0$; the $1/(1-t)^2$ factor shifts the effective
-# weight somewhat towards the noisy side) and suppresses both extremes; Esser et al. found this
-# best for image quality.
+# simple loss. SD3's logit-normal sampling has a density in $t$ that peaks at $t=0.5$ ($\lambda=0$), but the
+# $1/(1-t)^2$ $\varepsilon$-weight moves its *effective* weight peak well into the noisy side (setting the
+# derivative of $\log[e^{-\lambda^2/8}(1+e^{-\lambda/2})^2]$ to zero gives $\lambda^\ast=-4t^\ast$, i.e. $\lambda^\ast\approx-3.4$,
+# $t^\ast\approx0.84$, as printed). Relative to uniform-$t$ flow matching it strongly suppresses both
+# extremes; Esser et al. found this best for image quality.
 # Taken together: flow matching = a Gaussian diffusion with a particular time parametrisation, output
 # parametrisation ($v$), and loss weighting — which is exactly why it slots into existing diffusion
 # tooling (samplers, guidance, distillation) so easily.
@@ -875,14 +945,16 @@ plt.show()
 # %% [markdown]
 # ## 6 · Rectified flow: straightening by "reflow"
 #
-# The curvature comes from the *coupling* between noise and data: pairing them independently makes
-# training lines cross. Liu, Gong & Liu (2023) observe that the trained ODE itself defines a much better
+# The curvature comes from the *coupling* between noise and data: pairing them independently sends
+# many lines through every $(x,t)$. Liu, Gong & Liu (2023) observe that the trained ODE itself defines a much better
 # coupling: draw $\varepsilon$, integrate to get $\hat x_0=\mathrm{ODE}_{1\to0}(\varepsilon)$, and **retrain on the pairs
-# $(\hat x_0,\varepsilon)$**. The new coupling is deterministic and has the same marginals; they prove that
-# this "rectification" does not increase any convex transport cost and that repeated reflows make paths
-# increasingly straight. Practicalities: generating pairs costs one accurate ODE solve per pair; any
-# error of the first model is baked into the pairs (so the sample-quality floor can only get worse);
-# and one usually fine-tunes from the first model rather than starting from scratch.
+# $(\hat x_0,\varepsilon)$**. The new coupling is deterministic, and it has the same marginals when the ODE is
+# exact (with a learned model, $\hat x_0$ follows the *model's* distribution instead). They prove that this
+# "rectification" does not increase any convex transport cost, and that the straightness summed over
+# repeated reflows is bounded, so iterating reflow drives $S$ towards zero (at rate $O(1/K)$ for the best of
+# $K$ iterates; not necessarily monotonically). Practicalities: generating pairs costs one accurate ODE solve
+# per pair; any error of the first model is baked into the pairs (so the sample-quality floor can only get
+# worse); and one usually fine-tunes from the first model rather than starting from scratch.
 
 # %%
 N_PAIRS = 2_000 if FAST else 20_000
@@ -931,7 +1003,8 @@ plt.show()
 # After one reflow the trajectories are nearly straight lines, so a single Euler step lands almost
 # where the full ODE would: one network evaluation now produces a sensible sample, instead of
 # collapsing onto the data mean. The reflow training loss also drops far below the first model's
-# floor $C$: with a deterministic, nearly non-crossing coupling there is little posterior
+# floor $C$: the new coupling is deterministic, and its straight lines join the two ends of ODE paths that
+# never meet at the same time, so they rarely pass through the same $(x,t)$ and there is little posterior
 # variance left in $\varepsilon - x_0$ given $x_t$.
 
 # %% [markdown]
@@ -945,9 +1018,12 @@ plt.show()
 #
 # * **Marginals are preserved**: the batch's noise vectors are only permuted, so a randomly chosen pair still has
 #   $x_0\sim p_{\rm data}$ and $\varepsilon\sim\mathcal N(0,I)$ — the theory of Section 1 holds for *any* coupling with these marginals.
-# * **Why straighter**: for the exact quadratic-cost OT plan, straight lines between coupled points never cross
-#   (cyclical monotonicity), so the marginal velocity equals the per-pair velocity and the ODE paths are straight.
-#   A mini-batch only approximates the OT plan, and less well in high dimension, where a batch covers the space sparsely.
+# * **Why straighter**: for the exact quadratic-cost OT plan $x_0=T(\varepsilon)$, two interpolants never meet at the
+#   *same time*: cyclical monotonicity makes $\varepsilon\mapsto(1-t)T(\varepsilon)+t\varepsilon$ injective for each fixed $t$ (the segments
+#   may still intersect in space at different times). So only one pair passes through each $(x,t)$, the posterior
+#   over pairs is a point mass, the marginal velocity equals the per-pair velocity, and the ODE paths are the straight
+#   segments themselves. A mini-batch only approximates the OT plan, and less well in high dimension, where a batch
+#   covers the space sparsely.
 
 # %%
 def ot_pairs(x_data):
@@ -1025,19 +1101,21 @@ for name, (_, _, p) in models.items():
 # ## 8 · Flow matching in practice
 #
 # **Where it is used.** Stable Diffusion 3 (Esser et al. 2024) and Flux are rectified-flow transformers in the
-# latent space of an autoencoder (notebook 09); flow matching is also used in video (e.g. Meta's Movie Gen),
-# speech (Voicebox) and robot policies (e.g. $\pi_0$; see notebook 10). The recipe is this notebook's, with a
-# bigger network.
+# latent space of an autoencoder (notebook 09); flow matching is also used in video (e.g. Meta's Movie Gen,
+# Polyak et al. 2024), speech (Voicebox, Le et al. 2023) and robot policies (e.g. $\pi_0$, Black et al. 2024; see
+# notebook 10). The recipe is this notebook's, with a bigger network.
 #
 # **The knobs that matter.**
 # * *Timestep distribution.* Uniform $t$ is a choice, not a law. SD3 found logit-normal sampling of $t$ (centred
-#   at $t=0.5$) best, i.e. more training signal at intermediate noise (see the weighting plot in Section 5). For
+#   at $t=0.5$) best, i.e. less training signal at the two extremes (see the weighting plot in Section 5;
+#   the minimiser is the same, only the allocation of the network's errors changes). For
 #   higher resolutions they also *shift* $t$ towards noise, $t\mapsto \frac{s\,t}{1+(s-1)t}$ with $s>1$, because
 #   more pixels make the same $t$ effectively less noisy.
 # * *Sampler and steps.* Plain Euler with roughly 20–50 uniform or shifted steps is the default for large
-#   flow models; Heun / higher-order solvers help when NFE is very limited. Distilled or reflowed
-#   models (e.g. Flux "schnell", InstaFlow) sample in 1–4 steps.
-# * *Parametrisation.* Predicting $v$ is well conditioned at both ends of the path (Section 5), one reason the
+#   flow models; Heun / higher-order solvers help at moderate budgets (from about 8 NFE on in Section 3), but not
+#   with only a handful of steps. For 1–4 steps you need a straightened or distilled model (e.g. InstaFlow,
+#   a reflowed and distilled Stable Diffusion, or Flux "schnell").
+# * *Parametrisation.* Predicting $v$ is well conditioned at both ends of the path (Section 5, Exercise 6), one reason the
 #   community moved away from pure $\varepsilon$-prediction for few-step sampling.
 # * *Guidance.* Classifier-free guidance (notebook 06) carries over verbatim:
 #   $v_w = v_\theta(x,t,\varnothing) + w\,\big(v_\theta(x,t,y) - v_\theta(x,t,\varnothing)\big)$. Because $v = (\hat\varepsilon - x)/(1-t)$
@@ -1108,27 +1186,50 @@ def exact_guided_vfn(w):
     return vfn
 
 
+def guidance_stats(xs, means, std):
+    """Spread perpendicular to the line through the two class means, and fraction within 1 std of a mean."""
+    xs, means = xs.detach().cpu().double(), means.double()
+    d = (means[1] - means[0]) / (means[1] - means[0]).norm()
+    perp = (xs - means[0]) @ torch.stack([-d[1], d[0]])          # signed distance from the line
+    near = (torch.cdist(xs, means).min(1).values < std).double().mean()
+    return perp.std().item(), near.item()
+
+
 ws = [0.0, 1.0, 4.0]
 class_cols = np.array(["tab:red", "tab:blue", "tab:green"])
 x_bg, y_bg = x_lab[:N_PLOT].cpu(), y_lab[:N_PLOT].cpu().numpy()
-fig, axes = plt.subplots(2, len(ws), figsize=(2.7 * len(ws), 5.6))
+comp_std = math.sqrt(oracle_c.covs[0, 0, 0].item())               # isotropic components
+fig, axes = plt.subplots(2, len(ws), figsize=(2.9 * len(ws), 6.0))
+rows = []                                                         # summary statistics, printed below the figure
 for j, w in enumerate(ws):
     for i, (name, vfn) in enumerate([("learned", guided_vfn(cond_model, target, w)),
                                      ("exact velocities", exact_guided_vfn(w))]):
         xs = ode_sample(vfn, x1_eval[:N_PLOT], 32)
         ax = axes[i, j]
-        dm.scatter2d(x_bg, ax=ax, c=class_cols[y_bg], s=2, alpha=0.15, lim=3.5)
-        dm.scatter2d(xs, ax=ax, c="k", s=2, alpha=0.5, lim=3.5, title=f"{name}, w = {w:g}")
+        for c in range(3):
+            dm.scatter2d(x_bg[torch.as_tensor(y_bg == c)], ax=ax, c=class_cols[c], s=3, alpha=0.3, lim=3.5, label=f"class {c} data")
+        dm.scatter2d(xs, ax=ax, c="k", s=2, alpha=0.5, lim=3.5, title=f"{name}, w = {w:g}", label="samples")
+        ax.scatter(oracle_c.means[:, 0], oracle_c.means[:, 1], marker="x", s=40, c="tab:blue", linewidths=1.5,
+                   zorder=4, label="class-1 means")
+        rows.append((name, w, *guidance_stats(xs, oracle_c.means.float(), comp_std)))
+axes[0, 0].legend(loc="lower left", fontsize=6, markerscale=2)
 plt.suptitle(f"Classifier-free guidance on velocities, class {target} (background: data coloured by class)", y=1.0)
 plt.tight_layout()
 plt.show()
+print(f"{'':>17} | {'w':>3} | std across the class-1 axis | fraction within 1 std of a class-1 mean")
+for name, w, perp_std, near in sorted(rows, key=lambda r: r[0]):
+    print(f"{name:>17} | {w:3g} | {perp_std:27.3f} | {near:.2f}")
+print(f"(component std = {comp_std:.2f}; the 'axis' is the line through the two class-1 means)")
 
 # %% [markdown]
 # Top row: the trained conditional flow; bottom row: the same guidance rule applied to the exact
 # conditional and unconditional velocities — the two rows agree closely. $w=0$ gives the unconditional
 # mixture and $w=1$ the class-1 distribution. For $w>1$ samples are pushed away from everything the other
-# classes could explain: diversity collapses and, at large $w$, the samples pile up on a thin ridge
-# between the two class-1 components rather than on the components themselves. Guidance is a heuristic:
+# classes could explain. At large $w$ the diversity collapses in the direction that separates class 1 from
+# classes 0 and 2: the samples lie on a thin curve running along the axis through the two class-1
+# components (the table shows the spread across that axis shrinking far below the component width, while
+# *more* samples end up near a class-1 mean than at $w=1$). Guidance sharpens $p(y=1\mid x)$, i.e. it seeks
+# points that are unambiguously class 1, rather than sampling $p(x\mid y=1)$ more faithfully. Guidance is a heuristic:
 # the guided field is not the velocity of the noised version of any fixed target distribution, which is
 # why strong guidance distorts samples (notebook 06, Section 4, analyses this for scores; since guiding
 # $v$ is literally the same operation, the same analysis applies).
@@ -1141,6 +1242,7 @@ plt.show()
 # `velocity_error_vs_t` and the MMD-vs-NFE curve. *Predict first:* at which $t$ should the error go down,
 # and where up?
 # <details><summary>Hint / solution</summary>
+# The minimiser is unchanged (Section 5), so only the allocation of the network's errors moves.
 # The logit-normal puts few samples near $t=0$ and $t=1$, so errors drop in the middle and rise at the ends —
 # mostly near $t\to0$, where the field is sharpest. For this 2-D mixture with thin components, fine detail
 # near the data matters, so uniform sampling may well be as good or better; in high-resolution images the
@@ -1148,12 +1250,17 @@ plt.show()
 # </details>
 #
 # **Exercise 2 (non-uniform sampling grids).** Pass an explicit grid to `ode_sample(..., ts=...)` using the SD3
-# shift $t\mapsto st/(1+(s-1)t)$ applied to a uniform grid, for $s\in\{1/3, 1, 3\}$, and compare MMD at 4 and 8
-# Euler steps for `fm_model`.
+# shift $t\mapsto st/(1+(s-1)t)$ applied to a uniform grid, for $s\in\{1/3, 1/2, 1, 2, 3\}$, and compare MMD at 4 and 8
+# Euler steps for `fm_model` *and* for `exact_vfn(gmm)` (which isolates discretisation error). *Predict first:*
+# which $s$ wins?
 # <details><summary>Hint / solution</summary>
 # `u = np.linspace(1, 0, n + 1); ts = s * u / (1 + (s - 1) * u)`. $s>1$ spends more steps at high noise,
-# $s<1$ more near the data. Section 3's error plot (error grows as $t\to0$) and the curvature of the paths near
-# the components suggest that, for this dataset, steps near the data are worth more.
+# $s<1$ more near the data. On this 2-D mixture the uniform grid ($s=1$) is at or near the best, and strong shifts
+# in *either* direction hurt, for the learned and the exact field alike (a mild shift towards the data,
+# $s\approx0.7$, may help slightly at 8–16 steps). With $s=1/3$ the first step is huge, and a large step from $t=1$
+# collapses particles towards the data mean ($v(x,1)=x-\mathbb E[x_0]$); with $s=3$ the last step is huge, and it
+# lands on a blurry posterior mean $\hat x_0$. SD3's shift $s>1$ is motivated by high-resolution images, where
+# more pixels make the same $t$ effectively less noisy, not by 2-D toys.
 # </details>
 #
 # **Exercise 3 (reflow again).** Generate new pairs with `rf_model` and train a 3-rectified flow. Does
@@ -1166,7 +1273,8 @@ plt.show()
 #
 # **Exercise 4 (OT batch size and dimension).** Retrain OT-CFM with `bs=16` and `bs=1024` and compare
 # straightness. Then embed the data in $d=16$ dimensions (append 14 coordinates of small Gaussian noise;
-# you will need `make_mlp` with `data_dim=16`) and repeat. How does the benefit of OT pairing change?
+# add a `data_dim` argument to `make_mlp`, and draw new 16-D noise for `x1_path` / `x1_eval`) and repeat.
+# How does the benefit of OT pairing change?
 # <details><summary>Hint / solution</summary>
 # Larger batches approximate the OT plan better, giving straighter paths. In higher dimension a batch of fixed size
 # covers the space much more sparsely, the mini-batch plan is far from the population OT plan, and the gain
@@ -1174,12 +1282,33 @@ plt.show()
 # </details>
 #
 # **Exercise 5 (flow matching on MNIST, GPU recommended).** Train `dm.UNet(**dm.MNIST_RECIPE)` with `train_flow`
-# on `dm.load_mnist()[0]` (images in $[-1,1]$). Two changes are needed: broadcast $t$ over channels and pixels
-# (`t[:, None, None, None]`), and keep `time_input`. Sample with 20–50 Euler steps and `dm.show_images`.
+# on `dm.load_mnist()[0]` (images in $[-1,1]$). One change is needed: broadcast $t$ over channels and pixels
+# (`t[:, None, None, None]`); `time_input` stays as it is. Sample with 20–50 Euler steps and `dm.show_images`.
 # <details><summary>Hint / solution</summary>
-# In `train_flow` replace `t[:, None]` with `t.view(-1, *[1] * (x0.dim() - 1))`. A few thousand steps at batch 128
+# In `train_flow` replace both `t[:, None]` with `t.view(-1, *[1] * (x0.dim() - 1))`. A few thousand steps at batch 128
 # give recognisable digits on a GPU. You can then wrap the model with a 4-D version of `FlowAsEps` and use
 # `dm.ddim_sample` to compare samplers, exactly as in Section 5.
+# </details>
+#
+# **Exercise 6 (head vs weighting).** Section 5 could not separate the output head from the loss weighting.
+# Do it here, on the flow path with $t\sim U(0,1)$ clamped to $t\le t_{\max}=0.98$ (the conversion below divides by
+# $1-t$). Train `make_mlp()` as an **$\varepsilon$-head** with (a) the plain $\varepsilon$-MSE, `F.mse_loss(out, eps)`, and
+# (b) the flow-matching loss written for an $\varepsilon$-head, `F.mse_loss((out - xt) / (1 - t[:, None]), eps - x0)`.
+# Turn each into a velocity field with $v=(\hat\varepsilon-x)/(1-t)$ (clamping $t$ in the same way), then compare
+# `velocity_error_vs_t` and MMD vs Euler NFE with `fm_model`. *Predict first:* which of (a) and (b) shows the
+# blow-up near $t=1$?
+# <details><summary>Hint / solution</summary>
+# Copy `train_flow`, add `t = t.clamp(max=0.98)` and change only the loss line. Velocity wrapper:
+# `lambda x, t: (m(x, torch.full((len(x),), time_input(min(t, 0.98)), device=x.device)) - x) / (1 - min(t, 0.98))`.
+# (a) reproduces the DDPM pattern, even though it uses the flow path and time distribution: it is accurate near
+# the data, but its velocity error explodes as $t\to1$ and its fewest-step samples are the worst of the three. So
+# the near-noise blow-up comes from the *weighting* (that region gets almost no attention). (b) is the same
+# objective as `fm_model`, only with a different output layer: the near-noise blow-up is gone, but it is less
+# accurate near the data than the other two, most likely because a few near-noise samples with weights up to
+# $1/(1-t_{\max})^2=2500$ dominate every gradient. Try $t_{\max}=0.9$ and $0.995$: it gets better as $t_{\max}$ drops
+# and much worse as it approaches 1. Expect the differences at 8–16 NFE to be modest (check a second seed).
+# Neither variant matches the $v$-head everywhere, which is why "$v$-prediction" and "flow-matching weighting"
+# come as a package in practice: the $v$-head is the parametrisation in which that weighting is well conditioned.
 # </details>
 
 # %% [markdown]
@@ -1193,7 +1322,10 @@ plt.show()
 #   diffusion's predictions. A VP diffusion state is a flow state after rescaling by $\alpha+\sigma$, and DDIM is Euler in flow coordinates.
 # * The differences between "flow" and "diffusion" models are the time parametrisation, the output parametrisation and the
 #   loss weighting over noise levels — real, practical differences, but not different models.
-# * Marginal flows are curved because training lines cross; straighter couplings (reflow, mini-batch OT) make 1–2-step sampling work.
+# * Marginal flows are curved because many pairs pass through the same $(x,t)$ with different velocities and the field
+#   averages them; straighter couplings (reflow, mini-batch OT) make 1–2-step sampling work.
+# * The timestep distribution and loss weighting never change the minimiser (the posterior mean); they decide where a
+#   finite network's errors end up, and with which parametrisation the objective is well conditioned.
 # * Euler with 20–50 steps, a logit-normal/shifted timestep distribution and CFG on velocities is the large-scale recipe.
 
 # %% [markdown]
@@ -1203,13 +1335,18 @@ plt.show()
 # * Liu, Gong, Liu (2023). *Flow Straight and Fast: Learning to Generate and Transfer Data with Rectified Flow.* arXiv:2209.03003.
 # * Albergo, Vanden-Eijnden (2023). *Building Normalizing Flows with Stochastic Interpolants.* arXiv:2209.15571.
 # * Tong et al. (2023). *Improving and Generalizing Flow-Based Generative Models with Minibatch Optimal Transport.* arXiv:2302.00482.
+# * Pooladian et al. (2023). *Multisample Flow Matching: Straightening Flows with Minibatch Couplings.* ICML 2023. arXiv:2304.14772.
 # * Esser et al. (2024). *Scaling Rectified Flow Transformers for High-Resolution Image Synthesis* (Stable Diffusion 3). arXiv:2403.03206.
 # * Song et al. (2021). *Score-Based Generative Modeling through Stochastic Differential Equations* (probability-flow ODE). arXiv:2011.13456.
 # * Song, Meng, Ermon (2021). *Denoising Diffusion Implicit Models.* arXiv:2010.02502.
 # * Salimans, Ho (2022). *Progressive Distillation for Fast Sampling of Diffusion Models* (v-prediction). arXiv:2202.00512.
 # * Karras, Aittala, Aila, Laine (2022). *Elucidating the Design Space of Diffusion-Based Generative Models.* arXiv:2206.00364.
-# * Kingma, Gao (2023). *Understanding Diffusion Objectives as the ELBO with Simple Data Augmentation.* NeurIPS 2023.
+# * Kingma, Gao (2023). *Understanding Diffusion Objectives as the ELBO with Simple Data Augmentation.* NeurIPS 2023. arXiv:2303.00848.
 # * Ho, Salimans (2022). *Classifier-Free Diffusion Guidance.* arXiv:2207.12598.
 # * Song, Dhariwal, Chen, Sutskever (2023). *Consistency Models.* arXiv:2303.01469.
 # * Sauer, Lorenz, Blattmann, Rombach (2023). *Adversarial Diffusion Distillation* (SDXL-Turbo). arXiv:2311.17042.
 # * Vincent (2011). *A Connection Between Score Matching and Denoising Autoencoders.* Neural Computation.
+# * Applications mentioned in Section 8: Liu et al. (2024), *InstaFlow: One Step is Enough for High-Quality Diffusion-Based
+#   Text-to-Image Generation*, arXiv:2309.06380; Le et al. (2023), *Voicebox: Text-Guided Multilingual Universal Speech
+#   Generation at Scale*, arXiv:2306.15687; Polyak et al. (2024), *Movie Gen: A Cast of Media Foundation Models*,
+#   arXiv:2410.13720; Black et al. (2024), *$\pi_0$: A Vision-Language-Action Flow Model for General Robot Control*, arXiv:2410.24164.

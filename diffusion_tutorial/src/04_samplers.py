@@ -23,11 +23,11 @@
 # **You will learn:**
 # - the VP-SDE as the continuous-time limit of the DDPM chain, Anderson's reverse-time SDE, and the probability-flow ODE (via Fokker–Planck), all in $\epsilon$-form
 # - five samplers written out by hand (DDPM ancestral, Euler–Maruyama, Euler and Heun on the ODE, DDIM), how their quality scales with NFE, and how to measure a solver's order of convergence
-# - DDIM from its non-Markovian forward process; why DDIM *is* Euler's method in the variables $(x/\sqrt{\bar\alpha},\ \sigma)$, and why that makes it robust (each step is a convex combination that cannot overshoot)
-# - that the reverse SDE is the ODE plus Langevin MCMC, which is why its noise **corrects** errors, and that the ODE is a bijection between noise and data (DDIM inversion)
-# - where to put the steps: uniform-in-$t$ vs Karras/EDM spacing, and how to diagnose *where* a solver makes its errors
+# - DDIM from its non-Markovian forward process, and why its error comes from replacing a posterior *sample* of $x_0$ by the posterior *mean*; why DDIM *is* Euler's method in the variables $(x/\sqrt{\bar\alpha},\ \sigma)$, and why that makes it robust (each step is a convex combination that cannot overshoot)
+# - that the reverse SDE is the ODE plus Langevin MCMC, which is why its noise **corrects** some errors (and which errors it cannot correct), and that the ODE is a bijection between noise and data (DDIM inversion)
+# - where to put the steps: uniform-in-$t$ vs Karras/EDM spacing, how to diagnose *where* a solver makes its errors, and when a second-order solver pays off
 # - (advanced) exact log-likelihoods from the ODE with the instantaneous change-of-variables formula
-# - why model error sets a floor for deterministic samplers (and how stochasticity partially corrects it), and a practical cheat-sheet for choosing a sampler
+# - why model error sets a floor for deterministic samplers (and how stochasticity partially corrects it), why one metric can hide it, and a practical cheat-sheet for choosing a sampler
 #
 # **Prerequisites:** 01 (forward process, $\bar\alpha_t$, VP vs VE), 02 (DDPM, ancestral sampling, MMD and sliced Wasserstein),
 # 03 (scores, Tweedie's formula $\hat\epsilon = -\sqrt{1-\bar\alpha_t}\,\nabla\log q_t$).
@@ -80,7 +80,9 @@ LIM = 3.0                # plotting window [-LIM, LIM]^2
 # %% [markdown]
 # Sample quality is measured as in notebook 02: MMD$^2$ and sliced Wasserstein-1 distance to a fixed set of exact samples.
 # Two independent sets of *exact* samples are not at distance zero, because of finite-sample noise. That **floor**
-# (estimated from eight fresh sets) is the best any sampler can score.
+# (estimated from eight fresh sets) is the best any sampler can score. Because we know the true density, we also count
+# **stranded** samples, which land where the true log-density is below $-10$ (in the gaps between modes or far in the
+# tails). Exact samples essentially never land there. This becomes important in §8.
 
 # %%
 x_true = gmm.sample(N_EVAL, generator=torch.Generator().manual_seed(11)).double()   # reference set for every metric
@@ -88,20 +90,30 @@ x_true = gmm.sample(N_EVAL, generator=torch.Generator().manual_seed(11)).double(
 
 def quality(x):
     """(MMD^2, sliced W1) between the samples x and the exact reference set x_true. Lower is better."""
-    x = x.detach().double().cpu()
+    x = x.detach().cpu().double()
     return dm.mmd_rbf(x, x_true, max_n=MMD_N), dm.sliced_wasserstein(x, x_true)
 
 
+def stranded_fraction(x, threshold=-10.0):
+    """Fraction of samples in regions the data essentially never visits: true log-density below `threshold`."""
+    return (gmm.log_prob(x.detach().cpu().double()) < threshold).double().mean().item()
+
+
 floor = np.array([quality(gmm.sample(N_EVAL, generator=torch.Generator().manual_seed(100 + i))) for i in range(8)])
+FLOOR_HI = floor.mean(0) + 2 * floor.std(0)       # upper edge of the floor band (MMD^2, sliced W1)
 print(f"floor (fresh exact samples): MMD^2 {floor[:, 0].mean():.4f} ± {floor[:, 0].std():.4f}, "
       f"sliced W1 {floor[:, 1].mean():.4f} ± {floor[:, 1].std():.4f}")
+n_big = 5_000 if FAST else 50_000
+print(f"stranded fraction of {n_big} exact samples: "
+      f"{stranded_fraction(gmm.sample(n_big, generator=torch.Generator().manual_seed(12))):.1e}")
 
 # %% [markdown]
 # ## 1 · From the DDPM chain to stochastic and ordinary differential equations
 #
 # ### 1.1 The forward chain is a discretised SDE
 #
-# One forward DDPM step is $x_k=\sqrt{1-\beta_k}\,x_{k-1}+\sqrt{\beta_k}\,z$ with $z\sim\mathcal N(0,I)$. Now read the
+# In the DDPM paper's notation (1-based: step $k\in\{1,\dots,T\}$ produces latent $x_k$), one forward step is
+# $x_k=\sqrt{1-\beta_k}\,x_{k-1}+\sqrt{\beta_k}\,z$ with $z\sim\mathcal N(0,I)$. Now read the
 # integer step $k$ as continuous time $t=k/T\in[0,1]$ with step $\Delta t=1/T$, and define a rate
 # $\beta(t)$ by $\beta_k=\beta(t)\,\Delta t$, that is $\beta(t)\approx T\beta_k$. Since $\sqrt{1-\beta(t)\Delta t}=1-\tfrac12\beta(t)\Delta t+O(\Delta t^2)$:
 #
@@ -122,9 +134,10 @@ print(f"floor (fresh exact samples): MMD^2 {floor[:, 0].mean():.4f} ± {floor[:,
 # $10^{-4}$ to $0.02$, $T=1000$) corresponds to $\beta(t)=0.1+19.9\,t$, for which
 # $\bar\alpha(t)=\exp(-0.1t-9.95t^2)$.
 #
-# > **Gotcha: which $t$ is index `k`?** In `dmtools` the integer index `k` $\in\{0,\dots,T-1\}$ holds latent $x_{k+1}$
-# > (notebook 02), so the network's index `k` sits at continuous time $t=(k+1)/T$. The smallest noise level the network ever saw
-# > is at $t_{\min}=1/T$. The last step of every sampler therefore jumps from $t_{\min}$ to the clean data at $t=0$.
+# > **Gotcha: which $t$ is index `k`?** `dmtools` stores everything in 0-based arrays: `betas[k]` and `alpha_bars[k]`,
+# > `k` $\in\{0,\dots,T-1\}$, belong to the paper's step $k+1$, i.e. to latent $x_{k+1}$ (notebook 02). So the network's
+# > index `k` sits at continuous time $t=(k+1)/T$. The smallest noise level the network ever saw is at $t_{\min}=1/T$. The
+# > last step of every sampler therefore jumps from $t_{\min}$ to the clean data at $t=0$.
 
 # %%
 T = 1000                      # steps of the discrete chain (dm.NoiseSchedule default)
@@ -150,7 +163,9 @@ print(f"max_k |abar_k - abar((k+1)/T)| = {np.abs(AB_DISC - ab_cont).max():.1e}  
 assert np.abs(AB_DISC - ab_cont).max() < 2e-3
 
 # %% [markdown]
-# The two agree to within the $O(\beta_k^2)$ terms dropped in $\log(1-\beta_k)\approx-\beta_k$. We now simulate the SDE
+# The two agree to $O(1/T)$. Two approximations contribute errors of similar size, which partly cancel: the
+# $O(\beta_k^2)$ terms dropped in $\log(1-\beta_k)\approx-\beta_k$, and replacing the integral $\int\beta\,dt$ by a sum.
+# We now simulate the SDE
 # itself with Euler–Maruyama from data samples, and check that its marginals match the exact noised mixtures $q_t$ (which
 # `dm.GaussianMixture.noised` gives in closed form).
 
@@ -255,11 +270,12 @@ fig, axes = plt.subplots(1, 3, figsize=(13, 3.6), gridspec_kw={"width_ratios": [
 tt = np.linspace(0, 1, 200)
 k_show = np.arange(0, T, 50)
 axes[0].plot(tt, [beta_fn(t) for t in tt], color="k", label=r"$\beta(t)=0.1+19.9t$")
-axes[0].plot((k_show + 1) / T, T * sched.betas.numpy()[k_show], "o", ms=3, color="tab:orange", label=r"$T\,\beta_k$ (dm)")
+axes[0].plot((k_show + 1) / T, T * sched.betas.numpy()[k_show], "o", ms=3, color="tab:orange",
+             label=r"$T\cdot$betas[k] (dm), at $t=(k+1)/T$")
 axes[0].set(xlabel="$t$", ylabel="rate", title="noise rate")
 axes[0].legend()
 axes[1].semilogy(tt, [abar_fn(t) for t in tt], color="k", label=r"$\bar\alpha(t)$, closed form")
-axes[1].semilogy((k_show + 1) / T, AB_DISC[k_show], "o", ms=3, color="tab:orange", label=r"$\bar\alpha_k$ (dm)")
+axes[1].semilogy((k_show + 1) / T, AB_DISC[k_show], "o", ms=3, color="tab:orange", label="alpha_bars[k] (dm)")
 axes[1].set(xlabel="$t$", ylabel="signal fraction", title=r"$\bar\alpha$: continuous vs discrete")
 axes[1].legend()
 show_density_tx(axes[2])
@@ -286,11 +302,16 @@ plt.show()
 # | (a) DDPM ancestral | sample $q(x_s\mid x_t,\hat x_0)$: mean $\frac{\sqrt{a_s}(1-a_t/a_s)\hat x_0+\sqrt{a_t/a_s}(1-a_s)x_t}{1-a_t}$, variance $\frac{1-a_s}{1-a_t}(1-\frac{a_t}{a_s})$ | 1 |
 # | (b) Euler–Maruyama, reverse SDE | $x_t+\big[\tfrac12\beta x_t+\beta\nabla\log p_t\big]h+\sqrt{\beta h}\,z$, with $h=t-s$ | 1 |
 # | (c) Euler, PF-ODE | $x_t+(s-t)\,v(x_t,t)$, with $v=-\tfrac12\beta(x+\nabla\log p_t)$ | 1 |
-# | (d) Heun, PF-ODE | predictor $\tilde x=x_t+(s-t)v(x_t,t)$, then $x_t+(s-t)\tfrac12[v(x_t,t)+v(\tilde x,s)]$ | 2 |
+# | (d) Heun, PF-ODE | predictor $x'_s=x_t+(s-t)v(x_t,t)$, then $x_t+(s-t)\tfrac12[v(x_t,t)+v(x'_s,s)]$ | 2 |
 # | (e) DDIM ($\eta=0$) | $\sqrt{a_s}\,\hat x_0+\sqrt{1-a_s}\,\hat\epsilon$ (derived in §3) | 1 |
 #
 # (a) is DDPM's posterior step, with $\alpha=a_t/a_s$ for a step that may skip many of the original $T$ steps ("respacing",
-# Nichol & Dhariwal 2021). No noise is added on the final step: the sampler returns its best guess.
+# Nichol & Dhariwal 2021).
+#
+# **The last step is special.** The network was never trained at $t=0$, and near $t=0$ the ODE in $(x,t)$ is very steep.
+# So every sampler ends the same way: from $t_{\min}$ it returns the denoised estimate $\hat x_0(x_{t_{\min}},t_{\min})$,
+# with no noise added (1 NFE). DDPM's and DDIM's own formulas reduce to exactly this at $s=0$ (set $a_s=1$). For the other
+# three samplers we special-case it. A plain Euler step from $t_{\min}$ to 0 leaves residual noise behind; §3.2 shows how much.
 #
 # The "network" is the exact noise predictor $\epsilon^*(x,t)=-\sqrt{1-\bar\alpha(t)}\,\nabla\log q_t(x)$ of the mixture,
 # so that **all differences between samplers are discretisation error**.
@@ -318,6 +339,12 @@ def _noise(x, gen):
     return torch.randn(x.shape, generator=gen, dtype=x.dtype)
 
 
+def denoise(eps_fn, x, t, abar=abar_fn):
+    """Tweedie's estimate x0_hat = (x - sqrt(1 - a_t) eps_hat) / sqrt(a_t): every sampler's last step, t_min -> 0."""
+    a_t = abar(t)
+    return (x - math.sqrt(1 - a_t) * eps_fn(x, t)) / math.sqrt(a_t)
+
+
 @torch.no_grad()
 def ddpm_sampler(eps_fn, x, ts, *, abar=abar_fn, gen=None, return_traj=False):
     """(a) Ancestral sampling on the grid ts: x_s ~ q(x_s | x_t, x0_hat), DDPM's posterior with x0 replaced by x0_hat."""
@@ -339,11 +366,12 @@ def euler_maruyama_sampler(eps_fn, x, ts, *, gen=None, return_traj=False):
     """(b) Euler–Maruyama on the reverse-time VP-SDE dx = [-beta x / 2 - beta * score] dt + sqrt(beta) dW, dt < 0."""
     traj = [x]
     for t, s in zip(ts[:-1], ts[1:]):
-        h, b = t - s, beta_fn(t)                            # h > 0: we step backwards in time
-        score = -eps_fn(x, t) / math.sqrt(1 - abar_fn(t))
-        x = x + (0.5 * b * x + b * score) * h
-        if s > 0:
-            x = x + math.sqrt(b * h) * _noise(x, gen)
+        if s == 0:                                          # last step: return the denoised estimate, no noise
+            x = denoise(eps_fn, x, t)
+        else:
+            h, b = t - s, beta_fn(t)                        # h > 0: we step backwards in time
+            score = -eps_fn(x, t) / math.sqrt(1 - abar_fn(t))
+            x = x + (0.5 * b * x + b * score) * h + math.sqrt(b * h) * _noise(x, gen)
         traj.append(x)
     return traj if return_traj else x
 
@@ -354,25 +382,33 @@ def pf_ode_velocity(eps_fn, x, t):
 
 
 @torch.no_grad()
-def euler_ode_sampler(eps_fn, x, ts, *, gen=None, return_traj=False):
-    """(c) Euler's method on the probability-flow ODE, in the original variables (x, t)."""
+def euler_ode_sampler(eps_fn, x, ts, *, gen=None, return_traj=False, denoise_last=True):
+    """(c) Euler's method on the probability-flow ODE, in the original variables (x, t).
+
+    denoise_last=False replaces the final denoising step by a plain Euler step to t = 0 (a common mistake, see §3.2)."""
     traj = [x]
     for t, s in zip(ts[:-1], ts[1:]):
-        x = x + (s - t) * pf_ode_velocity(eps_fn, x, t)
+        if s == 0 and denoise_last:
+            x = denoise(eps_fn, x, t)
+        else:
+            x = x + (s - t) * pf_ode_velocity(eps_fn, x, t)
         traj.append(x)
     return traj if return_traj else x
 
 
 @torch.no_grad()
-def heun_ode_sampler(eps_fn, x, ts, *, gen=None, return_traj=False):
+def heun_ode_sampler(eps_fn, x, ts, *, gen=None, return_traj=False, denoise_last=True):
     """(d) Heun's method (explicit trapezoidal rule, 2nd order) on the probability-flow ODE.
 
-    The last step (to t = 0, where the network was never trained) is a plain Euler step: 2 * steps - 1 NFE."""
+    2 NFE per step, except the last step (to t = 0), which costs 1: n steps cost 2n - 1 NFE."""
     traj = [x]
     for t, s in zip(ts[:-1], ts[1:]):
-        v = pf_ode_velocity(eps_fn, x, t)
-        x_pred = x + (s - t) * v
-        x = x + (s - t) * 0.5 * (v + pf_ode_velocity(eps_fn, x_pred, s)) if s > 0 else x_pred
+        if s == 0:
+            x = denoise(eps_fn, x, t) if denoise_last else x + (s - t) * pf_ode_velocity(eps_fn, x, t)
+        else:
+            v = pf_ode_velocity(eps_fn, x, t)
+            x_pred = x + (s - t) * v                        # predictor x'_s (an Euler step) ...
+            x = x + (s - t) * 0.5 * (v + pf_ode_velocity(eps_fn, x_pred, s))   # ... then average the two slopes
         traj.append(x)
     return traj if return_traj else x
 
@@ -386,7 +422,7 @@ def ddim_sampler(eps_fn, x, ts, *, eta=0.0, abar=abar_fn, gen=None, return_traj=
         eps = eps_fn(x, t)
         x0 = (x - math.sqrt(1 - a_t) * eps) / math.sqrt(a_t)
         gamma = eta * math.sqrt((1 - a_s) / (1 - a_t) * (1 - a_t / a_s))     # std of the fresh noise
-        x = math.sqrt(a_s) * x0 + math.sqrt(max(1 - a_s - gamma ** 2, 0.0)) * eps
+        x = math.sqrt(a_s) * x0 + math.sqrt(max(1 - a_s - gamma ** 2, 0.0)) * eps   # = x0 when s = 0 (a_s = 1)
         if gamma > 0 and s > 0:
             x = x + gamma * _noise(x, gen)
         traj.append(x)
@@ -411,12 +447,12 @@ class ExactEpsModel:
     """dmtools-style model(x, t, y=None) returning the exact eps at integer timesteps t of a dm.NoiseSchedule."""
 
     def __init__(self, dist, schedule):
-        self.dist, self.ab = dist, schedule.alpha_bars.double().cpu()
+        self.dist, self.ab = dist, schedule.alpha_bars.cpu().double()
 
     def __call__(self, x, t, y=None):
         assert (t == t[0]).all(), "the dmtools samplers use one timestep per batch"
         ab = float(self.ab[int(t[0])])
-        return (-math.sqrt(1 - ab) * self.dist.noised(ab).score(x.double().cpu())).to(x.device, x.dtype)
+        return (-math.sqrt(1 - ab) * self.dist.noised(ab).score(x.cpu().double())).to(x.device, x.dtype)
 
 
 def abar_disc(t):
@@ -460,7 +496,7 @@ def steps_for_nfe(name, nfe):
 
 
 def nfe_sweep(eps_fn, x_T, names, nfes, x_ref=None, n_seeds=3):
-    """Run each sampler at each NFE budget. Returns {name: list of dicts(nfe, mmd, sw, path)}.
+    """Run each sampler at each NFE budget. Returns {name: list of dicts(nfe, mmd, sw, stranded, var, path)}.
 
     Stochastic samplers: metrics averaged over n_seeds noise seeds. Deterministic ones: also the pathwise error at
     t_min (before the final jump to t = 0) against the reference solution x_ref."""
@@ -472,12 +508,19 @@ def nfe_sweep(eps_fn, x_T, names, nfes, x_ref=None, n_seeds=3):
             metrics, path = [], None
             for seed in range(n_seeds if stochastic else 1):
                 traj = fn(eps_fn, x_T, uniform_grid(n), gen=torch.Generator().manual_seed(seed), return_traj=True)
-                metrics.append(quality(traj[-1]))
+                x0 = traj[-1]
+                metrics.append(quality(x0) + (stranded_fraction(x0), x0.var(0).sum().item()))
             if x_ref is not None and not stochastic:
                 path = (traj[-2][:N_PATH] - x_ref).norm(dim=1).mean().item()
-            mmd, sw = np.mean(metrics, axis=0)
-            results[name].append(dict(nfe=used, mmd=mmd, sw=sw, path=path))
+            mmd, sw, stranded, var = np.mean(metrics, axis=0)
+            results[name].append(dict(nfe=used, mmd=mmd, sw=sw, stranded=stranded, var=var, path=path))
     return results
+
+
+def first_nfe_in_floor(rows, key="sw"):
+    """Smallest budget at which a sampler's metric is inside the floor band (None if never)."""
+    hi = FLOOR_HI[0] if key == "mmd" else FLOOR_HI[1]
+    return next((r["nfe"] for r in rows if r[key] <= hi), None)
 
 
 x_T = torch.randn(N_EVAL, 2, generator=torch.Generator().manual_seed(0), dtype=torch.float64)
@@ -490,7 +533,12 @@ print(f"sweep: {len(SAMPLERS)} samplers x {len(NFES)} budgets in {time.time() - 
 print(f"{'sampler':20s} " + " ".join(f"{n:>7d}" for n in NFES) + "   <- nominal NFE; MMD^2 x 1e3")
 for name, rows in sweep.items():
     print(f"{name:20s} " + " ".join(f"{1e3 * r['mmd']:7.2f}" for r in rows))
-print(f"{'floor':20s} {1e3 * floor[:, 0].mean():7.2f}")
+print(f"{'floor':20s} {1e3 * floor[:, 0].mean():7.2f}   (band up to {1e3 * FLOOR_HI[0]:.2f})\n")
+print("first NFE inside the floor band (MMD^2 / sliced W1):  "
+      + ",  ".join(f"{name} {first_nfe_in_floor(rows, 'mmd')} / {first_nfe_in_floor(rows, 'sw')}"
+                   for name, rows in sweep.items()))
+print(f"total variance of the samples at NFE {NFES[0]} (exact samples: {x_true.var(0).sum():.2f}):  "
+      + ",  ".join(f"{name} {rows[0]['var']:.2f}" for name, rows in sweep.items()))
 
 # %%
 fig, axes = plt.subplots(1, 2, figsize=(11.5, 4))
@@ -507,15 +555,22 @@ plt.tight_layout()
 plt.show()
 
 # %% [markdown]
-# Reading the figure (the solid lines are deterministic, the dashed ones stochastic):
+# Reading the figure (the solid lines are deterministic, the dashed ones stochastic; the printout above lists where each
+# sampler enters the floor band):
 #
-# * **At small budgets the deterministic samplers win by a wide margin.** With tens of NFE the ODE solvers are already near
-#   the floor, while DDPM and Euler–Maruyama are still clearly off. A stochastic sampler must integrate the injected noise
-#   as well as the drift, and with big steps the noise it adds is badly calibrated.
+# * **At 5 NFE everything is far off, and the ranking is mixed.** **From about 10–20 NFE the first-order ODE solvers
+#   (Euler, DDIM) are clearly ahead of both stochastic samplers**, by a factor of a few in MMD$^2$. The stochastic
+#   samplers catch up only at around 50–100 NFE.
+# * **Why the stochastic samplers need small steps.** There are two concrete reasons. First, the reverse SDE's drift
+#   carries the score with coefficient $\beta$, twice the ODE's $\beta/2$, so an explicit step is stiffer. Euler–Maruyama's
+#   drift step overshoots, and its samples come out *over*-dispersed (see the total variance printed above). Second,
+#   DDPM's ancestral step plugs the point estimate $\hat x_0=\mathbb E[x_0\mid x_t]$ into $q(x_s\mid x_t,x_0)$. The true
+#   reverse kernel is the posterior predictive $p(x_s\mid x_t)=\int q(x_s\mid x_t,x_0)\,p(x_0\mid x_t)\,dx_0$, which is
+#   wider (and, for a mixture, multimodal). With large steps the lost posterior variance of $x_0$ matters, and DDPM's
+#   samples collapse towards the mean, just like DDIM's. §3.1 makes this precise.
 # * **Given enough steps, everything converges** to the floor, because all five samplers discretise equations with the same
-#   marginals. The stochastic samplers only get there at hundreds of NFE. This is why DDPM needed $T=1000$. (The
-#   deterministic curves converge to one fixed sample set, the image of $x_T$ under the exact ODE map. That set is itself
-#   one random draw, which is why they settle at one particular point inside the floor band.)
+#   marginals. (The deterministic curves converge to one fixed sample set, the image of $x_T$ under the exact ODE map.
+#   That set is itself one random draw, which is why they settle at one particular point inside the floor band.)
 # * **Higher order is not automatically better at very low NFE.** With a handful of steps, Heun's corrector evaluates the
 #   field at a poor predicted point, and its ranking at the smallest budgets jumps around: it can do worse than Euler.
 #   Its second-order accuracy only pays off once the steps are small. The next figure makes this precise.
@@ -531,10 +586,10 @@ for name in ["Euler ODE", "Heun ODE", "DDIM"]:
     err = np.array([r["path"] for r in sweep[name]])
     ax.loglog(nfe, err, "o-", color=COL[name], ms=4, label=name)
     slopes[name] = -np.polyfit(np.log(nfe[-3:]), np.log(err[-3:]), 1)[0]   # fitted order over the 3 largest budgets
-n_guide = np.array([50, 1000])
-e_mid = sweep["Euler ODE"][3]["path"]
-ax.loglog(n_guide, e_mid * (n_guide / 50.0) ** -1, "k--", lw=0.8, label=r"$\propto$ NFE$^{-1}$")
-ax.loglog(n_guide, e_mid * (n_guide / 50.0) ** -2, "k:", lw=1.0, label=r"$\propto$ NFE$^{-2}$")
+anchor = sweep["Euler ODE"][len(NFES) // 2]      # guide lines start at a mid-sized budget of the Euler curve
+n_guide = np.array([anchor["nfe"], max(NFES)])
+ax.loglog(n_guide, anchor["path"] * (n_guide / anchor["nfe"]) ** -1.0, "k--", lw=0.8, label=r"$\propto$ NFE$^{-1}$")
+ax.loglog(n_guide, anchor["path"] * (n_guide / anchor["nfe"]) ** -2.0, "k:", lw=1.0, label=r"$\propto$ NFE$^{-2}$")
 ax.set(xlabel="NFE", ylabel=r"mean $\|x_{t_{\min}}-x^{\rm ref}_{t_{\min}}\|$",
        title="pathwise error of the ODE solvers (same $x_T$)")
 ax.grid(alpha=0.3, which="both")
@@ -543,14 +598,16 @@ plt.tight_layout()
 plt.show()
 print("fitted order of convergence (slope over the three largest budgets): "
       + ", ".join(f"{k} {v:.2f}" for k, v in slopes.items()))
+print(f"pathwise error at the largest budget: Euler / Heun = "
+      f"{sweep['Euler ODE'][-1]['path'] / sweep['Heun ODE'][-1]['path']:.0f}x")
 if not FAST:
     assert 0.7 < slopes["Euler ODE"] < 1.3 and 0.7 < slopes["DDIM"] < 1.3 and 1.6 < slopes["Heun ODE"] < 2.4
 
 # %% [markdown]
 # This is the textbook picture. Euler and DDIM are **first-order** methods (halving the step halves the error) and Heun is
-# **second-order** (halving the step quarters it), which is why it ends up orders of magnitude more accurate at the same
-# NFE. At small NFE all solvers are outside this asymptotic regime, which is where *where you put the steps* (§6) and
-# *which variables you integrate in* (§3) matter most.
+# **second-order** (halving the step quarters it). That is why it is more than an order of magnitude more accurate at
+# 1000 NFE, a gap that keeps growing with NFE. At small NFE all solvers are outside this asymptotic regime, which is where
+# *where you put the steps* (§6) and *which variables you integrate in* (§3) matter most.
 #
 # Notice also that on this toy, DDIM is **not** more accurate than plain Euler in $(x,t)$. That seems at odds with DDIM's
 # reputation as "the" fast sampler. §3 explains both the reputation and the exception.
@@ -561,14 +618,26 @@ if not FAST:
 #
 # The DDPM loss only ever looks at the marginals $q(x_t\mid x_0)=\mathcal N(\sqrt{a_t}\,x_0,(1-a_t)I)$, not at how the
 # chain gets from one $t$ to the next. Song, Meng & Ermon (2021) exploited this: *any* process with these marginals is
-# served by the same trained $\hat\epsilon$. They propose the family of reverse kernels (for $s<t$)
+# served by the same trained $\hat\epsilon$. On a time grid $1=t_0>t_1>\dots$ they define a process by running it
+# *backwards* from the noisiest time,
+#
+# $$q_\gamma(x_{t_0},x_{t_1},\dots\mid x_0)=q(x_{t_0}\mid x_0)\prod_i q_\gamma(x_{t_{i+1}}\mid x_{t_i},x_0),$$
+#
+# with the family of reverse kernels (for $s<t$)
 #
 # $$q_\gamma(x_s\mid x_t,x_0)=\mathcal N\!\Big(\sqrt{a_s}\,x_0+\sqrt{1-a_s-\gamma_t^2}\;\frac{x_t-\sqrt{a_t}\,x_0}{\sqrt{1-a_t}},\ \gamma_t^2I\Big).$$
 #
 # **The marginals are preserved, by induction.** If $x_t=\sqrt{a_t}x_0+\sqrt{1-a_t}\,\epsilon$, then the fraction above
 # is just $\epsilon$, so $x_s=\sqrt{a_s}x_0+\sqrt{1-a_s-\gamma_t^2}\,\epsilon+\gamma_t z$. This is Gaussian with mean
 # $\sqrt{a_s}x_0$ and variance $(1-a_s-\gamma_t^2)+\gamma_t^2=1-a_s$, which is exactly $q(x_s\mid x_0)$, for **every**
-# $\gamma_t$. Plugging in the network's guesses $\hat x_0,\hat\epsilon$ gives the **DDIM update**
+# $\gamma_t$.
+#
+# **Why "non-Markovian".** Read forwards in time, the process has the kernel given by Bayes' rule,
+# $q_\gamma(x_t\mid x_s,x_0)\propto q_\gamma(x_s\mid x_t,x_0)\,q(x_t\mid x_0)$. This kernel depends on $x_0$: to take the
+# next noising step the process has to remember where it started. There is one exception ($\eta=1$ below), where it
+# reduces to DDPM's Markov kernel $\mathcal N(\sqrt{a_t/a_s}\,x_s,(1-a_t/a_s)I)$.
+#
+# Plugging in the network's guesses $\hat x_0,\hat\epsilon$ gives the **DDIM update**
 #
 # $$\boxed{\;x_s=\sqrt{a_s}\,\hat x_0+\sqrt{1-a_s-\gamma_t^2}\;\hat\epsilon+\gamma_t z,\qquad
 # \gamma_t=\eta\sqrt{\tfrac{1-a_s}{1-a_t}}\sqrt{1-\tfrac{a_t}{a_s}}\;}$$
@@ -579,40 +648,98 @@ if not FAST:
 # * $\eta=0$ is **deterministic**: "re-noise the clean guess with the *predicted* noise, to the next noise level".
 #   Nothing in the derivation required $s=t-1$, so the steps can be large.
 #
-# Three numerical checks: the marginal claim (Monte Carlo), our sampler against `dm.ddim_sample`, and $\eta=1$ against
-# our DDPM sampler.
+# **Where DDIM's error comes from.** The kernel is exact if it is fed a *sample* $x_0\sim p(x_0\mid x_t)$ from the
+# posterior: then $(x_0,x_t)$ has the right joint distribution, and $x_s\sim q_s$ exactly, however large the step. In
+# other words, the true reverse transition is the posterior predictive
+# $p(x_s\mid x_t)=\int q_\gamma(x_s\mid x_t,x_0)\,p(x_0\mid x_t)\,dx_0$. DDIM (and DDPM) replace the posterior by a point
+# mass at its mean $\hat x_0=\mathbb E[x_0\mid x_t]$. For a Gaussian mixture the posterior is available in closed form: given
+# component $k$ it is Gaussian, with precision $\Sigma_k^{-1}+\frac{a_t}{1-a_t}I$, and the component is picked with the
+# responsibilities of $q_t$. So we can test this claim directly.
+#
+# Four numerical checks: (1) one huge step $t=0.5\to0.05$ fed with posterior samples is exact for every $\eta$, while the
+# posterior mean is not; (2) the forward process depends on $x_0$ unless $\eta=1$; (3) our sampler matches
+# `dm.ddim_sample`; (4) $\eta=1$ matches our DDPM sampler.
 
 # %%
-# CHECK 1: the non-Markovian kernel leaves q(x_s | x_0) = N(sqrt(a_s) x0, (1 - a_s) I) intact, whatever sigma
-g = torch.Generator().manual_seed(7)
-N_MC = 20_000 if FAST else 200_000
-x0_mc = gmm.sample(N_MC, generator=g).double()
-a_t, a_s = abar_fn(0.5), abar_fn(0.3)
-x_t_mc = math.sqrt(a_t) * x0_mc + math.sqrt(1 - a_t) * torch.randn(N_MC, 2, generator=g, dtype=torch.float64)
-print(f"CHECK 1: residual r = x_s - sqrt(a_s) x0 should have mean 0, variance 1 - a_s = {1 - a_s:.4f}, cov(r, x0) = 0, for any gamma")
-for eta in (0.0, 0.5, 1.0):
-    gamma = eta * math.sqrt((1 - a_s) / (1 - a_t) * (1 - a_t / a_s))
-    eps_implied = (x_t_mc - math.sqrt(a_t) * x0_mc) / math.sqrt(1 - a_t)
-    x_s_mc = math.sqrt(a_s) * x0_mc + math.sqrt(1 - a_s - gamma ** 2) * eps_implied \
-        + gamma * torch.randn(N_MC, 2, generator=g, dtype=torch.float64)
-    r = x_s_mc - math.sqrt(a_s) * x0_mc
-    cov_rx = ((r - r.mean(0)) * (x0_mc - x0_mc.mean(0))).mean(0)
-    print(f"  eta = {eta}: mean {r.mean(0).numpy().round(4)}, var {r.var(0).numpy().round(4)}, "
-          f"cov(r, x0) {cov_rx.numpy().round(4)}")
-    assert torch.allclose(r.var(0), torch.full((2,), 1 - a_s, dtype=torch.float64), atol=0.02)
+def posterior_x0_sample(dist, x_t, a_t, gen):
+    """One exact draw x0 ~ p(x0 | x_t) per row, for x_t = sqrt(a_t) x0 + sqrt(1 - a_t) eps and x0 ~ dist (a GMM).
 
-# CHECK 2: our DDIM reproduces dm.ddim_sample on the discrete schedule
+    Bayes per component k: a Gaussian prior N(mu_k, Sigma_k) times a Gaussian likelihood in x0 gives a Gaussian posterior
+    with precision Sigma_k^-1 + a_t / (1 - a_t) I. The component itself is drawn with the responsibilities of q_t at x_t."""
+    k = torch.multinomial(dist.noised(a_t).responsibilities(x_t), 1, generator=gen).squeeze(1)
+    prec_prior = torch.linalg.inv(dist.covs)                                              # (K, d, d)
+    C = torch.linalg.inv(prec_prior + a_t / (1 - a_t) * torch.eye(dist.d, dtype=torch.float64))  # posterior covariances
+    rhs = torch.einsum("nij,nj->ni", prec_prior[k], dist.means[k]) + math.sqrt(a_t) / (1 - a_t) * x_t
+    mean = torch.einsum("nij,nj->ni", C[k], rhs)
+    return mean + torch.einsum("nij,nj->ni", torch.linalg.cholesky(C)[k], _noise(x_t, gen))
+
+
+def oracle_eps(x0_given):
+    """An 'oracle network' that knows x0: eps = (x_t - sqrt(a_t) x0) / sqrt(1 - a_t), so that its x0_hat is x0_given."""
+    def eps_fn(x, t):
+        a_t = abar_fn(t)
+        return (x - math.sqrt(a_t) * x0_given) / math.sqrt(1 - a_t)
+    return eps_fn
+
+
+# CHECK 1: one big DDIM step fed with a posterior SAMPLE of x0 lands exactly on q_s, for every eta;
+#          fed with the posterior MEAN (what DDIM and DDPM actually do) it does not
+N_MC = 20_000 if FAST else 100_000
+g = torch.Generator().manual_seed(7)
+T_BIG, S_BIG = 0.5, 0.05
+a_t, a_s = abar_fn(T_BIG), abar_fn(S_BIG)
+x0_mc = gmm.sample(N_MC, generator=g).double()
+x_t_mc = math.sqrt(a_t) * x0_mc + math.sqrt(1 - a_t) * _noise(x0_mc, g)          # x_t ~ q_t
+x0_post = posterior_x0_sample(gmm, x_t_mc, a_t, g)                                # x0 ~ p(x0 | x_t)
+q_s = gmm.noised(a_s)
+ref_s = q_s.sample(N_MC, generator=torch.Generator().manual_seed(8)).double()
+sw_floor_s = dm.sliced_wasserstein(q_s.sample(N_MC, generator=torch.Generator().manual_seed(9)), ref_s)
+print(f"CHECK 1: one DDIM step t = {T_BIG} -> s = {S_BIG}, sliced W1 to exact samples of q_s "
+      f"(exact vs exact: {sw_floor_s:.4f}); total variance of q_s = {ref_s.var(0).sum():.2f}")
+for eta in (0.0, 0.5, 1.0):
+    step = np.array([T_BIG, S_BIG])
+    x_post = ddim_sampler(oracle_eps(x0_post), x_t_mc, step, eta=eta, gen=torch.Generator().manual_seed(10))
+    x_mean = ddim_sampler(eps_exact, x_t_mc, step, eta=eta, gen=torch.Generator().manual_seed(10))
+    sw_post, sw_mean = dm.sliced_wasserstein(x_post, ref_s), dm.sliced_wasserstein(x_mean, ref_s)
+    print(f"  eta = {eta}:  x0 ~ posterior: W1 {sw_post:.4f}, variance {x_post.var(0).sum():.2f}   |   "
+          f"x0 = posterior mean: W1 {sw_mean:.4f}, variance {x_mean.var(0).sum():.2f}")
+    assert sw_post < 2 * sw_floor_s + 0.005 and sw_mean > 5 * sw_post
+
+# CHECK 2: the implied forward process is non-Markovian. Regress x_t on (x_s, x0, 1), with x_s drawn from the kernel:
+# x0 still helps to predict x_t given x_s unless eta = 1. In closed form the x0 coefficient of E[x_t | x_s, x0] is
+# sqrt(a_t) - c sqrt(a_s), with c = sqrt(1 - a_t) sqrt(1 - a_s - gamma^2) / (1 - a_s).
+print("CHECK 2: coefficient of x0 in the regression of x_t on (x_s, x0); zero means Markovian")
+for eta in (0.0, 0.5, 1.0):
+    x_s = ddim_sampler(oracle_eps(x0_mc), x_t_mc, np.array([T_BIG, S_BIG]), eta=eta,
+                       gen=torch.Generator().manual_seed(11))
+    design = torch.cat([x_s, x0_mc, torch.ones(N_MC, 1, dtype=torch.float64)], 1)
+    coef_x0 = torch.linalg.lstsq(design, x_t_mc).solution[2:4].diagonal()
+    gamma = eta * math.sqrt((1 - a_s) / (1 - a_t) * (1 - a_t / a_s))
+    c = math.sqrt(1 - a_t) * math.sqrt(max(1 - a_s - gamma ** 2, 0.0)) / (1 - a_s)
+    expected = math.sqrt(a_t) - c * math.sqrt(a_s)
+    print(f"  eta = {eta}: measured {coef_x0.numpy().round(3)}, closed form {expected:.3f}")
+    assert torch.allclose(coef_x0, torch.full((2,), expected, dtype=torch.float64), atol=0.1)
+
+# CHECK 3: our DDIM reproduces dm.ddim_sample on the discrete schedule
 for n in (10, 50):
     ours = ddim_sampler(eps_disc, x_chk, disc_grid(n), abar=abar_disc)
     theirs = dm.ddim_sample(exact_model, sched, x_chk.shape, n_steps=n, x_T=x_chk)
-    print(f"CHECK 2: ddim_sampler == dm.ddim_sample ({n} steps): max |diff| = {(ours - theirs).abs().max():.1e}")
+    print(f"CHECK 3: ddim_sampler == dm.ddim_sample ({n} steps): max |diff| = {(ours - theirs).abs().max():.1e}")
     assert torch.allclose(ours, theirs, atol=1e-4)
 
-# CHECK 3: DDIM with eta = 1 is exactly DDPM ancestral sampling (same grid, same random numbers)
+# CHECK 4: DDIM with eta = 1 is exactly DDPM ancestral sampling (same grid, same random numbers)
 ours_ddim = ddim_sampler(eps_exact, x_T[:300], uniform_grid(20), eta=1.0, gen=torch.Generator().manual_seed(8))
 ours_ddpm = ddpm_sampler(eps_exact, x_T[:300], uniform_grid(20), gen=torch.Generator().manual_seed(8))
-print(f"CHECK 3: DDIM(eta=1) == DDPM ancestral (20 steps): max |diff| = {(ours_ddim - ours_ddpm).abs().max():.1e}")
+print(f"CHECK 4: DDIM(eta=1) == DDPM ancestral (20 steps): max |diff| = {(ours_ddim - ours_ddpm).abs().max():.1e}")
 assert torch.allclose(ours_ddim, ours_ddpm, atol=1e-9)
+
+# %% [markdown]
+# CHECK 1 sums up the discretisation error of DDIM and DDPM in one line. A single huge step is exact if $x_0$ is drawn
+# from the posterior. Plugging in the posterior mean instead collapses the variance (printed above), and DDPM's added
+# noise ($\eta=1$) does not restore it. With small steps the kernel depends on $x_0$ only weakly (for $\eta=0$ the
+# coefficient of $x_0$ in its mean, $\sqrt{a_s}-\sqrt{a_t}\sqrt{(1-a_s)/(1-a_t)}$, vanishes as $s\to t$), so the mean is
+# almost as good as a sample. So both samplers become accurate once the steps are small enough. §3.2 and §6 ask how small,
+# and where.
 
 # %% [markdown]
 # ### 3.2 DDIM is Euler's method in the variables $\tilde x=x/\sqrt{\bar\alpha}$ and $\sigma=\sqrt{(1-\bar\alpha)/\bar\alpha}$
@@ -634,10 +761,23 @@ assert torch.allclose(ours_ddim, ours_ddpm, atol=1e-9)
 # $$\boxed{\;\tilde x_s=\frac{\sigma_s}{\sigma_t}\,\tilde x_t+\Big(1-\frac{\sigma_s}{\sigma_t}\Big)\,\hat x_0\;}$$
 #
 # *Move the fraction $1-\sigma_s/\sigma_t$ of the way from where you are to where the denoiser thinks the data is.*
-# Two consequences follow, and we check each below.
 #
-# 1. **It is exact whenever $\hat x_0$ is constant along the step.** The exact trajectory is then the straight line
-#    $\tilde x(\sigma)=\hat x_0+\sigma\hat\epsilon$, and Euler is exact on straight lines.
+# **The exact step, for comparison.** Substitute $y=\tilde x/\sigma$ and $u=1/\sigma$ (the square root of the
+# signal-to-noise ratio). Then
+# $\frac{dy}{du}=\frac{dy/d\sigma}{du/d\sigma}=\frac{(d\tilde x/d\sigma-\tilde x/\sigma)/\sigma}{-1/\sigma^2}=\tilde x-\sigma\frac{d\tilde x}{d\sigma}=D(\tilde x;\sigma)$:
+# the right-hand side is the denoiser output itself, and DDIM is Euler's method in $(u,y)$. Integrating exactly instead
+# of with one Euler step gives
+#
+# $$\tilde x_s=\frac{\sigma_s}{\sigma_t}\,\tilde x_t+\sigma_s\!\int_{\sigma_s}^{\sigma_t}\frac{D(\tilde x(\sigma);\sigma)}{\sigma^2}\,d\sigma,
+# \qquad\text{so}\qquad
+# \text{DDIM error}=\sigma_s\!\int_{\sigma_s}^{\sigma_t}\frac{D(\tilde x(\sigma);\sigma)-D(\tilde x_t;\sigma_t)}{\sigma^2}\,d\sigma .$$
+#
+# (Since $\sigma_s\int_{\sigma_s}^{\sigma_t}\sigma^{-2}d\sigma=1-\sigma_s/\sigma_t$, the DDIM step is this formula with $D$ frozen
+# at its starting value.) Two consequences follow, and we check each below.
+#
+# 1. **It is exact whenever $\hat x_0=D$ is constant along the step**, and changes in $D$ count with weight
+#    $\sigma_s/\sigma^2$. Changes of $\hat x_0$ at noise levels far above the target $\sigma_s$ therefore cost little.
+#    Equivalently, the exact trajectory is a straight line $\tilde x(\sigma)=\hat x_0+\sigma\hat\epsilon$ wherever $D$ is constant.
 # 2. **It can never overshoot.** For any step size it is a convex combination of the current point and the denoised guess.
 #    Euler or Heun in $(x,t)$ have no such guarantee.
 
@@ -674,11 +814,11 @@ def euler_sigma_sampler(eps_fn, x, sigmas, *, return_traj=False):
     return traj if return_traj else traj[-1]
 
 
-# CHECK 4: DDIM (eta = 0) and Euler in (x~, sigma) are the same algorithm
+# CHECK: DDIM (eta = 0) and Euler in (x~, sigma) are the same algorithm
 for n in (5, 50):
     a = ddim_sampler(eps_exact, x_T, uniform_grid(n))
     b = euler_sigma_sampler(eps_exact, x_T, sigmas_of_times(uniform_grid(n)))
-    print(f"CHECK 4: DDIM == Euler in (x~, sigma), {n} steps: max |diff| = {(a - b).abs().max():.1e}")
+    print(f"CHECK: DDIM == Euler in (x~, sigma), {n} steps: max |diff| = {(a - b).abs().max():.1e}")
     assert torch.allclose(a, b, atol=1e-9)
 
 # %% [markdown]
@@ -697,6 +837,16 @@ for s_t, s_s in zip(sig_fine[:-1], sig_fine[1:]):
     xt = xt + (s_s - s_t) * eps
 rec_xt, rec_x0, sig_rec = torch.stack(rec_xt), torch.stack(rec_x0), sig_fine[:-1]
 
+# CHECK the exact-step formula on the recorded (fine) path, for one big step sigma: 2 -> 0.3
+i0, i1 = np.abs(sig_rec - 2.0).argmin(), np.abs(sig_rec - 0.3).argmin()
+s0, s1, s_seg = sig_rec[i0], sig_rec[i1], torch.tensor(sig_rec[i0:i1 + 1])
+integral = -torch.trapezoid(rec_x0[i0:i1 + 1] / s_seg[:, None, None] ** 2, s_seg, dim=0)   # sigma decreases along the path
+x_formula = s1 / s0 * rec_xt[i0] + s1 * integral
+x_one_ddim = s1 / s0 * rec_xt[i0] + (1 - s1 / s0) * rec_x0[i0]
+print(f"CHECK sigma {s0:.2f} -> {s1:.2f}: exact-step formula vs fine path: mean error "
+      f"{(x_formula - rec_xt[i1]).norm(dim=1).mean():.1e};  one DDIM step: {(x_one_ddim - rec_xt[i1]).norm(dim=1).mean():.2f}")
+assert (x_formula - rec_xt[i1]).norm(dim=1).mean() < 0.05 * (x_one_ddim - rec_xt[i1]).norm(dim=1).mean()
+
 fig, axes = plt.subplots(1, 3, figsize=(13, 3.6))
 cols = plt.get_cmap("tab20")(np.arange(N_LINES))
 for i in range(N_LINES):
@@ -714,15 +864,23 @@ plt.show()
 
 # %% [markdown]
 # Over almost the whole range of $\sigma$ the paths are straight lines (left). When $\sigma$ is much larger than the data,
-# the noisy point carries little information about which mode it came from, so $\hat x_0$ sits near the data mean and
-# barely moves (right). All the bending happens in the window where $\sigma$ is comparable to the structure of the data
-# (here roughly $0.1\lesssim\sigma\lesssim3$). There $\hat x_0$ commits to a mode and then to a point within it. DDIM's
-# error comes only from that window. §6 measures this directly and asks where the steps should go.
+# the noisy point carries little information about which mode it came from. Then $\hat x_0$ is a heavily shrunk guess,
+# close to the data mean, which moves away from the mean roughly like $1/\sigma$ as $\sigma$ falls (right). Those changes
+# are cheap, because the exact-step formula weights them by $\sigma_s/\sigma^2$ (the printed check confirms the formula).
+# The bending that matters happens where $\sigma$ is comparable to the structure of the data (roughly
+# $0.1\lesssim\sigma\lesssim5$, measured in §6). There $\hat x_0$ commits to a mode and then to a point within it, and that
+# window is where DDIM's error comes from. §6 asks where the steps should go.
 #
 # **Consequence 2: stability.** The cleanest test is one-dimensional Gaussian data $x_0\sim\mathcal N(0,\lambda)$. Every
 # quantity is then available in closed form: $\hat\epsilon(x,t)=\sqrt{1-a_t}\,x/(\lambda a_t+1-a_t)$, and the exact ODE maps
 # $x_T=1$ to $\sqrt\lambda/\sqrt{\lambda a_1+1-a_1}$. Since the ODE is linear, the sampler's output from $x_T=1$ *is* the
 # standard deviation of the distribution it generates. We vary the data variance $\lambda$ over seven orders of magnitude.
+#
+# All three samplers end with the same denoising step at $t_{\min}$, and that step sets a limit of its own. Structure finer
+# than $\sigma_{\min}\approx0.01$ cannot be resolved: even the *exact* ODE down to $t_{\min}$, followed by
+# $\hat x_0=\mathbb E[x_0\mid x_{t_{\min}}]$, returns a std of about $\sqrt\lambda\cdot\sqrt{\lambda/(\lambda+\sigma_{\min}^2)}$
+# (dotted line). We also run Euler with a plain Euler step to $t=0$ (thin dashed line), to see what the special last
+# step buys.
 
 # %%
 def gaussian_eps_fn(lam):
@@ -735,52 +893,77 @@ def gaussian_eps_fn(lam):
 
 lams = np.logspace(-5, 2, 29)
 one = torch.ones(1, 1, dtype=torch.float64)
-true_std = np.sqrt(lams) / np.sqrt(lams * abar_fn(1.0) + 1 - abar_fn(1.0))
+a_1, a_m = abar_fn(1.0), abar_fn(T_MIN)
+true_std = np.sqrt(lams) / np.sqrt(lams * a_1 + 1 - a_1)
+# best possible with a final denoising step: x_{t_min} from the exact ODE, then x0_hat = sqrt(a_m) lam / (lam a_m + 1 - a_m) x
+best_std = math.sqrt(a_m) * lams / np.sqrt(lams * a_m + 1 - a_m) / np.sqrt(lams * a_1 + 1 - a_1)
+PLAIN = "Euler ODE, plain last step"
 gen_std = {}
 for nfe in (10, 50):
     for name in ["Euler ODE", "Heun ODE", "DDIM"]:
         n, _ = steps_for_nfe(name, nfe)
         out = [SAMPLERS[name][0](gaussian_eps_fn(lam), one, uniform_grid(n)).abs().item() for lam in lams]
         gen_std[(name, nfe)] = np.array(out)
+    gen_std[(PLAIN, nfe)] = np.array([euler_ode_sampler(gaussian_eps_fn(lam), one, uniform_grid(nfe),
+                                                        denoise_last=False).abs().item() for lam in lams])
 
-fig, axes = plt.subplots(1, 2, figsize=(11, 4), sharey=True)
-toy_band = (math.sqrt(gmm.covs.diagonal(dim1=1, dim2=2).min().item()), math.sqrt(x_true.var(0).max().item()))
+fig, axes = plt.subplots(1, 2, figsize=(11, 4.2), sharey=True)
+eig_std = torch.linalg.eigvalsh(gmm.covs).sqrt()             # std of each component along its principal axes
+toy_band = (eig_std.min().item(), math.sqrt(x_true.var(0).max().item()))
 for ax, nfe in zip(axes, (10, 50)):
     ax.axvspan(*toy_band, color="0.9", label="range of scales in our 2-D mixture")
     ax.loglog(true_std, true_std, "k--", lw=0.8, label="exact (generated std = true std)")
+    ax.loglog(true_std, best_std, "k:", lw=1.2, label=r"exact ODE to $t_{\min}$, then $\hat x_0$ (best possible)")
+    ax.loglog(true_std, gen_std[(PLAIN, nfe)], "--", lw=1.0, color=COL["Euler ODE"], alpha=0.6, label=PLAIN)
     for name in ["Euler ODE", "Heun ODE", "DDIM"]:
         ax.loglog(true_std, gen_std[(name, nfe)], "o-", ms=3, color=COL[name], label=name)
     ax.set(xlabel=r"true data std $\sqrt{\lambda}$", title=f"1-D Gaussian data, NFE ≈ {nfe} (uniform $t$ grid)",
-           ylim=(1e-3, 1e2))
+           ylim=(3e-4, 1e2))
     ax.grid(alpha=0.3, which="both")
 axes[0].set_ylabel("std of the generated samples")
-axes[0].legend(loc="upper left")
+axes[1].legend(loc="upper left", fontsize=7)        # the right panel's upper left is empty
 plt.tight_layout()
 plt.show()
+i_01 = np.abs(np.sqrt(lams) - eig_std.min().item()).argmin()      # the narrowest scale in our mixture (std 0.1)
 for nfe in (10, 50):
-    print(f"NFE {nfe}, smallest variance (lambda = {lams[0]:.0e}): generated/true std  "
-          + ", ".join(f"{name} {gen_std[(name, nfe)][0] / true_std[0]:.2g}" for name in ["Euler ODE", "Heun ODE", "DDIM"]))
+    for i in (0, i_01):
+        print(f"NFE {nfe}, true std {math.sqrt(lams[i]):.3f}: generated/true std  "
+              + ", ".join(f"{name} {gen_std[(name, nfe)][i] / true_std[i]:.2g}"
+                          for name in [PLAIN, "Euler ODE", "Heun ODE", "DDIM"])
+              + f"  (best possible {best_std[i] / true_std[i]:.2g})")
 
 # %% [markdown]
-# * **DDIM never overshoots.** Its generated std is never larger than the truth, because each step is a convex combination
-#   of $\tilde x$ and $\hat x_0$. For Gaussian data one can show that every step contracts slightly *more* than the exact
-#   flow. Its errors are on the side of too little spread: for tiny $\lambda$ the final step returns the posterior mean
-#   $\hat x_0$, which suppresses fluctuations smaller than $\sigma_{\min}$. These errors are always small in absolute
-#   terms, since the generated std never exceeds the true one.
 # * **Euler and Heun in $(x,t)$ are exact for $\lambda=1$**: unit-variance Gaussian data is a fixed point of the VP process,
-#   so the ODE does nothing. Away from $\lambda=1$ the ODE becomes **stiff** near $t\to0$ for small $\lambda$: its
-#   right-hand side contains $1/(\lambda a_t+1-a_t)$, which explodes. Explicit Euler then contracts too little and leaves
-#   *residual noise* many times the true std. Heun's corrector overshoots, its output oscillates in sign (the V-shaped dips
-#   are where it happens to cross zero), and it can blow up completely. Adding steps helps only slowly, because the step
-#   must be small compared with the fastest time scale of the ODE, which is set by the smallest data variance. This is a
-#   stiffness problem, and a higher order does not cure it.
+#   so the ODE does nothing. Away from $\lambda=1$ they degrade in both directions. For small $\lambda$ the ODE becomes
+#   **stiff** near $t\to0$: its right-hand side contains $1/(\lambda a_t+1-a_t)$, which explodes. Heun's corrector then
+#   overshoots, its output oscillates in sign (the V-shaped dips are where it happens to cross zero), and it can blow up
+#   completely. Euler's errors are smaller and can go either way; at low NFE it gives too much spread for small
+#   $\lambda$. Adding steps helps only slowly, because the step must be small
+#   compared with the fastest time scale of the ODE, which is set by the smallest data variance. A higher order does not
+#   cure stiffness.
+# * **The last step matters.** With a plain Euler step from $t_{\min}$ to 0 (thin dashed line), Euler in $(x,t)$ leaves
+#   residual noise of order $\sigma_{\min}$ in every low-variance direction, many times the true std. In $(\tilde x,\sigma)$
+#   this cannot happen: the Euler step to $\sigma=0$ *is* the denoiser $\hat x_0$. DDIM gets the right last step for free;
+#   in $(x,t)$ it has to be special-cased, as all our samplers do.
+# * **DDIM never overshoots.** Its generated std is never larger than the truth, because each step is a convex combination
+#   of $\tilde x$ and $\hat x_0$. (For Gaussian data one can show that every step contracts slightly *more* than the exact
+#   flow.) Its failure mode is the opposite: **over-smoothing**. With few steps, the long last step of the uniform-$t$ grid
+#   (at NFE 10, from $\sigma\approx0.4$ straight down to $\sigma_{\min}$) collapses a narrow component towards its
+#   posterior mean.
+#   For tiny $\lambda$ every sampler is limited by the final denoising at $t_{\min}$ (dotted line), and DDIM sits on that
+#   limit.
 #
-# This explains the §2 result. Our 2-D mixture lives in the shaded band, where all three are stable and Euler-in-$t$ is
-# slightly more accurate. Real data is different. Images have a few high-variance directions and a vast number of
-# directions with tiny variance (fine textures, pixel-level detail). There Euler-in-$t$ leaves visible grain, and DDIM's
-# robustness is decisive (try it in Exercise 2). The same convex-combination structure is why DDIM keeps working with
-# 10–50 large steps, and it is the starting point of the "exponential integrator" family of fast solvers (DPM-Solver,
-# Lu et al. 2022). Those integrate the linear part exactly and only approximate how $\hat x_0$ changes.
+# This explains the §2 result. Our 2-D mixture lives in the shaded band. There all three are stable, but at NFE 10 DDIM
+# under-disperses the narrowest components several-fold, while Euler-in-$t$ stays within about 20% of the truth (printed
+# above). So on this toy Euler-in-$t$ wins. Real data is different. Images have a few directions of very large variance
+# (the coarse layout, $\lambda\gg1$, where Euler-in-$t$ also degrades), and a vast number of directions with tiny variance
+# (fine textures, pixel-level detail), where Heun-in-$t$ blows up and Euler-in-$t$ overshoots. DDIM's errors are milder
+# and always on the safe side: a little blur, never noise or blow-up. Its trajectories are close to straight lines
+# (Karras et al. 2022), which is why it became the robust default (try it in Exercise 2). The convex-combination
+# structure is also the starting point of the "exponential integrator" family of fast solvers. These integrate the linear
+# part exactly. DPM-Solver (Lu et al. 2022) approximates how $\hat\epsilon$ changes along the path; DPM-Solver++
+# approximates how $\hat x_0$ changes, i.e. the integral in the exact-step formula above, by a polynomial in $\log\sigma$.
+# Both reduce to DDIM at first order.
 #
 # ## 4 · Trajectories: smooth ODE paths, jagged SDE paths
 #
@@ -843,54 +1026,80 @@ plt.show()
 # In §1.2 we saw that reverse SDE = ODE + Langevin dynamics targeting $p_t$. Langevin dynamics pulls *any* distribution
 # towards $p_t$, so the SDE should **repair** errors in the state that the ODE would faithfully transport to the output.
 # To isolate this, we take *exact* samples of $q_{t_p}$, corrupt them (scale by 1.3, an over-dispersed state like a bad
-# step or an imperfect denoiser would produce), and continue with exact scores from $t_p$ down to 0.
+# step or an imperfect denoiser would produce), and continue with exact scores from $t_p$ down to 0. Besides the overall
+# error we measure two things separately: the **mode weights** (the fraction of samples in the four light outer
+# components, which hold 25% of the mass) and the **shape within each mode** (the mean squared Mahalanobis distance of a
+# sample to its most likely component, about 2 for exact samples, as for any 2-D Gaussian).
 
 # %%
+INV_COVS = torch.linalg.inv(gmm.covs)
+
+
+def mode_stats(x):
+    """(fraction of samples assigned to the light outer components, mean squared Mahalanobis distance to the assigned one)."""
+    lab = gmm.responsibilities(x).argmax(1)              # most likely component of each sample
+    diff = x - gmm.means[lab]
+    maha2 = torch.einsum("ni,nij,nj->n", diff, INV_COVS[lab], diff)
+    return (lab % 2 == 1).double().mean().item(), maha2.mean().item()   # odd components = outer ring (weight 1/16 each)
+
+
 PERT_TIMES = [0.9, 0.7, 0.5, 0.35, 0.2, 0.1, 0.05]
 x0_p = gmm.sample(N_EVAL, generator=torch.Generator().manual_seed(31)).double()
 z_p = torch.randn(N_EVAL, 2, generator=torch.Generator().manual_seed(32), dtype=torch.float64)
-pert = {"ODE (DDIM)": [], "SDE (DDPM)": [], "no corruption": []}
-outputs_at = {}
+PERT_NAMES = ["ODE (DDIM)", "SDE (DDPM)", "no corruption"]
+pert = {name: {"sw": [], "outer": [], "spread": []} for name in PERT_NAMES}
 for tp in PERT_TIMES:
     ab = abar_fn(tp)
     x_tp = math.sqrt(ab) * x0_p + math.sqrt(1 - ab) * z_p           # exact samples of q_tp ...
     grid = np.concatenate([np.linspace(tp, T_MIN, 200), [0.0]])
-    out_ode = ddim_sampler(eps_exact, 1.3 * x_tp, grid)              # ... corrupted, then denoised
-    out_sde = ddpm_sampler(eps_exact, 1.3 * x_tp, grid, gen=torch.Generator().manual_seed(33))
-    pert["ODE (DDIM)"].append(quality(out_ode)[1])
-    pert["SDE (DDPM)"].append(quality(out_sde)[1])
-    pert["no corruption"].append(quality(ddim_sampler(eps_exact, x_tp, grid))[1])
-    outputs_at[tp] = (out_ode, out_sde)
-for k, v in pert.items():
-    print(f"{k:14s} sliced W1: " + "  ".join(f"t_p={tp}: {e:.3f}" for tp, e in zip(PERT_TIMES, v)))
+    outs = {"ODE (DDIM)": ddim_sampler(eps_exact, 1.3 * x_tp, grid),   # ... corrupted, then denoised
+            "SDE (DDPM)": ddpm_sampler(eps_exact, 1.3 * x_tp, grid, gen=torch.Generator().manual_seed(33)),
+            "no corruption": ddim_sampler(eps_exact, x_tp, grid)}
+    for name, x in outs.items():
+        outer, spread = mode_stats(x)
+        pert[name]["sw"].append(quality(x)[1])
+        pert[name]["outer"].append(outer)
+        pert[name]["spread"].append(spread)
+exact_outer, exact_spread = mode_stats(x_true)
+print(f"exact samples: outer fraction {exact_outer:.3f}, within-mode spread {exact_spread:.2f}")
+for name in PERT_NAMES:
+    print(f"{name:14s} " + "  ".join(f"t_p={tp}: W1 {sw:.3f} outer {o:.2f} spread {s:.2f}" for tp, sw, o, s in
+                                     zip(PERT_TIMES, pert[name]["sw"], pert[name]["outer"], pert[name]["spread"])))
 
 # %%
-fig, axes = plt.subplots(1, 3, figsize=(13, 4))
-ax = axes[0]
-ax.semilogy(PERT_TIMES, pert["ODE (DDIM)"], "o-", color=COL["DDIM"], label="ODE (DDIM)")
-ax.semilogy(PERT_TIMES, pert["SDE (DDPM)"], "o--", color=COL["DDPM ancestral"], label="SDE (DDPM ancestral)")
-ax.semilogy(PERT_TIMES, pert["no corruption"], "o:", color="k", ms=3, label="no corruption")
-ax.axhspan(floor[:, 1].mean() - 2 * floor[:, 1].std(), floor[:, 1].mean() + 2 * floor[:, 1].std(), color=COL["floor"],
-           alpha=0.6, label="floor")
-ax.set(xlabel=r"time $t_p$ at which the state is corrupted ($\times1.3$)", ylabel="sliced $W_1$ of the final samples",
-       title="how much of an error survives to $t=0$?", xlim=(1, 0))
-ax.grid(alpha=0.3, which="both")
-ax.legend()
-tp_show = 0.5
-for ax, (name, x, c) in zip(axes[1:], [("ODE", outputs_at[tp_show][0], COL["DDIM"]),
-                                       ("SDE", outputs_at[tp_show][1], COL["DDPM ancestral"])]):
-    dm.scatter2d(x_true, ax=ax, s=2, alpha=0.25, c=COL["data"], lim=LIM)
-    dm.scatter2d(x, ax=ax, s=2, alpha=0.5, c=c, lim=LIM, title=f"{name} output after corruption at $t_p={tp_show}$\n(grey: exact samples)")
+fig, axes = plt.subplots(1, 3, figsize=(13, 3.8))
+style = {"ODE (DDIM)": ("o-", COL["DDIM"], 6), "SDE (DDPM)": ("o--", COL["DDPM ancestral"], 6),
+         "no corruption": ("o:", "k", 3)}
+panels = [("sw", "sliced $W_1$ of the final samples", "overall error"),
+          ("outer", "fraction in the outer components", "mode weights"),
+          ("spread", "mean squared Mahalanobis distance", "shape within each mode")]
+for ax, (key, ylabel, title) in zip(axes, panels):
+    for name in PERT_NAMES:
+        fmt, c, ms = style[name]
+        ax.plot(PERT_TIMES, pert[name][key], fmt, color=c, ms=ms, label=name)
+    ax.set(xlabel=r"time $t_p$ of the corruption ($\times1.3$)", ylabel=ylabel, title=title, xlim=(1, 0))
+    ax.grid(alpha=0.3)
+axes[0].set_yscale("log")
+axes[0].axhspan(floor[:, 1].mean() - 2 * floor[:, 1].std(), FLOOR_HI[1], color=COL["floor"], alpha=0.6, label="floor")
+axes[1].axhline(exact_outer, color=COL["data"], lw=1, label="exact samples")
+axes[2].axhline(exact_spread, color=COL["data"], lw=1, label="exact samples")
+axes[0].legend()
+axes[1].legend()
 plt.tight_layout()
 plt.show()
 
 # %% [markdown]
-# The ODE transports the corruption, whenever it happens, straight into the output: the samples are too spread out. The
-# SDE **erases** errors made at high noise. There the Langevin part runs at rate
-# $\beta(t)/2$, which is large, and $p_t$ is nearly Gaussian, so the chain mixes fast. Errors made late, at low noise, have
-# no time to be corrected. This is the real reason to keep some stochasticity: with an imperfect network and a generous
-# budget, a stochastic sampler can beat a deterministic one (Karras et al. 2022 add a tunable amount of "churn" for
-# this). We test it on a trained network in §8.
+# The ODE carries the corruption into the output, whenever it happens: too much mass ends up in the outer components
+# (middle), and the modes come out too wide (right). The SDE **erases** corruption made at high noise. There the Langevin
+# part runs at rate $\beta(t)/2$, which is large, and $p_t$ is nearly Gaussian, so the chain mixes fast. Corruption made at
+# low noise is only partly repaired. The SDE still repairs much of the shape *within* each mode (right; fully down to
+# $t_p\approx0.2$), but no longer the mode weights (middle), which stay as wrong as the ODE's. Once the modes have separated, Langevin dynamics cannot move mass
+# between them in any reasonable time: this is the metastability of notebook 03, §3a. Whatever split of mass between modes
+# exists by then is final.
+#
+# This is the real reason to keep some stochasticity. With an imperfect network and a generous budget, a stochastic
+# sampler can beat a deterministic one (Karras et al. 2022 add a tunable amount of "churn" for this). We test it on a
+# trained network in §8.
 #
 # ## 5 · DDIM inversion: from data back to noise
 #
@@ -941,8 +1150,8 @@ for n in INV_STEPS:
     z_inv = ddim_invert(eps_exact, x0_inv, uniform_grid(n)[::-1])
     x_back = ddim_sampler(eps_exact, z_inv, uniform_grid(n))
     roundtrip.append((x_back - x0_inv).norm(dim=1).mean().item())
-    if n == 1000:
-        z_accurate = z_inv
+    if n == max(INV_STEPS):
+        z_accurate = z_inv                     # the most accurate latents, for the plots below
 print("round-trip error (mean ||x0 - sample(invert(x0))||): "
       + ", ".join(f"{n} steps {e:.1e}" for n, e in zip(INV_STEPS, roundtrip)))
 # CHECK: the ODE pushes the data distribution onto N(0, I)
@@ -954,14 +1163,15 @@ fig, axes = plt.subplots(1, 3, figsize=(13, 4))
 ax = axes[0]
 ax.loglog(INV_STEPS, roundtrip, "o-", color=COL["DDIM"], label="DDIM invert + DDIM sample")
 ax.loglog(INV_STEPS, roundtrip[2] * (np.array(INV_STEPS) / INV_STEPS[2]) ** -1.0, "k--", lw=0.8, label=r"$\propto n^{-1}$")
-ax.set(xlabel="steps $n$ (each way)", ylabel=r"mean $\|x_0-\hat x_0\|$", title="round-trip reconstruction error")
+ax.set(xlabel="steps $n$ (each way)", ylabel=r"mean $\|x_0-x_0^{\rm rec}\|$",
+       title=r"round trip: $x_0^{\rm rec}$ = sample(invert($x_0$))")
 ax.grid(alpha=0.3, which="both")
 ax.legend()
 comp_cmap = plt.get_cmap("tab10")
 dm.scatter2d(x0_inv, ax=axes[1], s=3, alpha=0.7, c=comp_cmap(lab_inv.numpy()), lim=LIM,
              title="data, coloured by mixture component")
 dm.scatter2d(z_accurate, ax=axes[2], s=3, alpha=0.7, c=comp_cmap(lab_inv.numpy()), lim=LIM,
-             title="their latents $x_T$ (1000-step inversion)")
+             title=f"their latents $x_T$ ({max(INV_STEPS)}-step inversion)")
 axes[2].add_patch(plt.Circle((0, 0), 2.0, fill=False, ls="--", color="k", lw=0.8))
 plt.tight_layout()
 plt.show()
@@ -1061,6 +1271,10 @@ for gname, gfun in GRIDS.items():
 print(f"spacing sweep in {time.time() - t0:.0f} s")
 for (gname, solver), rows in spacing.items():
     print(f"{plain(gname):24s} {solver:13s} sliced W1: " + " ".join(f"{r['sw']:.3f}" for r in rows))
+print("\nsliced W1, Heun / Euler at (almost) the same NFE (> 1: Euler is better):")
+for gname in GRIDS:
+    pairs = zip(spacing[(gname, "Heun")], spacing[(gname, "Euler = DDIM")])
+    print(f"  {plain(gname):24s} " + "  ".join(f"NFE {h['nfe']}/{e['nfe']}: {h['sw'] / e['sw']:.2f}" for h, e in pairs))
 
 # %%
 fig, axes = plt.subplots(1, 2, figsize=(11.5, 4))
@@ -1082,8 +1296,17 @@ plt.show()
 # **Spacing matters a lot.** Uniform-in-$\sigma$ is a disaster at every budget we tried: it spends almost all of its steps
 # at enormous noise levels where nothing happens. Between the two sensible grids, though, the outcome is less clear-cut than
 # EDM's reputation suggests. On this toy, uniform-in-$t$ (for the linear VP schedule) is about as good as Karras $\rho=7$,
-# and often a bit better at small budgets, for both solvers. To understand why, measure **where the solver makes its
-# errors**. Starting from exact states along the reference trajectories, take one step of fixed size in $\log\sigma$ and
+# and often a bit better at small budgets, for both solvers.
+#
+# **Second order pays off only with small steps.** The most visible feature of the left panel is that on both sensible
+# grids EDM's Heun (solid) is *worse* than Euler = DDIM (dashed) at the same NFE, until the two tie at a few tens of NFE
+# (printed above). Heun's corrector evaluates the denoiser at the predicted point $x'_s$ and divides by the *next* noise
+# level $\sigma_s$. When one step spans a large ratio $\sigma_t/\sigma_s$, that predicted point is poor and the
+# correction is large. Second order buys accuracy only once the steps are small. That is EDM's regime: 18 Heun steps, or
+# 35 NFE, for CIFAR-10. Below that, spend the budget on more Euler steps, or use a *multistep* solver such as
+# DPM-Solver++(2M), which reaches second order at 1 NFE per step by reusing the previous step's evaluation.
+#
+# To understand the grids, measure **where the solver makes its errors**. Starting from exact states along the reference trajectories, take one step of fixed size in $\log\sigma$ and
 # compare with the exact result. Measured in VP units, this local error density shows how much each region of noise
 # levels deserves steps.
 
@@ -1144,11 +1367,14 @@ plt.show()
 # wasted at the top (Exercise 3). When you move a diffusion model to a new data type, plotting this error profile is a
 # cheap way to choose a schedule.
 #
-# > **Gotcha: start where your noise is.** The first grid point must be the noise level that $x_T$ actually has. Some
-# > widely used step selections ("leading" spacing) skip the last training timestep, so the sampler treats pure noise as if
-# > it were slightly less noisy. That causes visible artefacts, such as a restricted range of brightness, whenever
-# > $\bar\alpha_T$ is not tiny (Lin et al. 2024). Always
-# > include $t=T-1$ ("trailing" spacing). Our grids start exactly at $t=1$.
+# > **Gotcha: start where your noise is.** The first grid point must be the noise level that $x_T$ actually has. Lin et al.
+# > (2024) found two related flaws in widely used setups. First, many schedules do not reach zero terminal SNR
+# > ($\bar\alpha_T$ is not tiny), so the model never sees pure noise during training, yet sampling starts from pure noise.
+# > Samples then have a restricted range of brightness. Second, the popular "leading" timestep spacing does not even start
+# > at $t=T-1$, which makes the mismatch worse. Their fixes: rescale the schedule to zero terminal SNR (and switch to
+# > $v$-prediction, since $\epsilon$-prediction is degenerate at zero SNR), always start at $t=T-1$ ("trailing" spacing),
+# > and rescale classifier-free guidance. Our schedule has $\bar\alpha(1)\approx4\cdot10^{-5}$, and our grids start exactly
+# > at $t=1$.
 #
 # ## 7 · Advanced (optional): exact log-likelihood from the probability-flow ODE
 #
@@ -1227,9 +1453,14 @@ plt.show()
 # The ODE likelihood matches `dm.GaussianMixture.log_prob` to within a small fraction of a nat, including the two points
 # in the low-density gaps between modes. Putting the steps where the ODE is stiff (quadratic spacing near $t=0$) is
 # worth more than an order of magnitude in accuracy at the same cost: the lesson of §6 again. Replacing the exact $q_1$ by
-# $\mathcal N(0,I)$ changes nothing visible, since $\bar\alpha(1)$ is tiny. With a trained network the same procedure gives
-# the *model's* exact likelihood (Exercise 5). This is how diffusion models report bits-per-dimension, and it is
-# deterministic, unlike the ELBO of notebook 02.
+# $\mathcal N(0,I)$ changes nothing visible, since $\bar\alpha(1)$ is tiny.
+#
+# With a trained network the same procedure gives the exact likelihood of the **ODE model**: the distribution obtained
+# by pushing $\mathcal N(0,I)$ through the network's ODE (Exercise 5). If the learned score is imperfect, this is *not*
+# the distribution that DDPM or SDE sampling with the same network produces (§8 shows that the two differ), and it is
+# not bounded by the ELBO either. With an exact trace it is deterministic. In high dimensions Hutchinson's estimator makes
+# it random (but unbiased). Song et al. (2021) report bits-per-dimension this way, with dequantised data. DDPM (Ho et al.
+# 2020) and VDM (Kingma et al. 2021) report the variational bound of notebook 02 instead.
 #
 # ## 8 · With a trained network: model error sets a floor
 #
@@ -1243,7 +1474,9 @@ plt.show()
 # > The correct conditioning input is the (fractional) index $k^*$ whose training noise level equals the sampler's,
 # > $\bar\alpha_{k^*}=\bar\alpha(t)$, not the clock time $tT-1$. The MLP's sinusoidal time embedding accepts fractional
 # > inputs and interpolates smoothly. Libraries such as `k-diffusion` and `diffusers`' Karras schedulers convert $\sigma$
-# > to a timestep in exactly this way.
+# > to a timestep in exactly this way. Here the correction is tiny (printed below), but it is essential whenever the
+# > sampler's grid has no natural "clock" that matches the network's, for example a Karras $\sigma$ grid, or a network
+# > trained with a different $T$ or schedule.
 
 # %%
 dm.seed_everything(0)
@@ -1264,58 +1497,104 @@ def noise_matched_index(t):
 
 
 @torch.no_grad()
-def net_eps(x, t):
-    """The trained network as an eps_fn(x, t): float64 CPU state in, float64 CPU prediction out."""
-    k = torch.full((x.shape[0],), noise_matched_index(t), device=device)
-    return ema_net(x.float().to(device), k).double().cpu()
+def net_eps(x, t, index_fn=noise_matched_index):
+    """The trained network as an eps_fn(x, t): float64 CPU state in, float64 CPU prediction out.
+
+    The network runs in float32 on `device`; we move its output to the CPU *before* casting to float64,
+    because Apple's MPS backend has no float64."""
+    k = torch.full((x.shape[0],), index_fn(t), device=device)
+    return ema_net(x.float().to(device), k).cpu().double()
 
 
-# CHECK: at the network's own noise levels the conversion returns the integer index
 ks = np.array([0, 10, 250, 500, 999])
-k_back = np.array([float(np.interp(NEG_LOG_AB[k], NEG_LOG_AB, np.arange(T))) for k in ks])
-assert np.allclose(k_back, ks)
 print("clock-time index k  ->  noise-matched index k* at t = (k+1)/T:  "
       + ", ".join(f"{k} -> {noise_matched_index((k + 1) / T):.1f}" for k in ks))
+
+# How good is the network? Relative error of its eps-prediction on exact samples of q_t, with the noise-matched index
+# and with the naive clock index t*T - 1. Notebook 02 §5: denoising is hardest at low noise.
+print("relative eps error  ||eps_net - eps*|| / ||eps*||  on samples of q_t:")
+for t_chk in (0.9, 0.5, 0.2, 0.05, 0.01):
+    xq = gmm.noised(abar_fn(t_chk)).sample(5000, generator=torch.Generator().manual_seed(72)).double()
+    e_star = eps_exact(xq, t_chk)
+    rel = [((net_eps(xq, t_chk, fn) - e_star).norm() / e_star.norm()).item()
+           for fn in (noise_matched_index, lambda t: t * T - 1)]
+    print(f"  t = {t_chk:4}:  noise-matched {rel[0]:.3f}   clock index {rel[1]:.3f}")
 
 # %%
 NFES_8 = [5, 10, 20, 50, 100, 250]
 NAMES_8 = ["DDPM ancestral", "Heun ODE", "DDIM"]
 t0 = time.time()
 sweep_net = nfe_sweep(net_eps, x_T, NAMES_8, NFES_8)
+# the exact-score reference at the same budgets, matched by NFE (not by position) so that NFES_8 can be edited freely
+missing = sorted({nfe for nfe in NFES_8 if nfe not in NFES})
+extra = nfe_sweep(eps_exact, x_T, NAMES_8, missing) if missing else {name: [] for name in NAMES_8}
+sweep_ref = {}
+for name in NAMES_8:
+    by_nominal = dict(zip(NFES, sweep[name])) | dict(zip(missing, extra[name]))
+    sweep_ref[name] = [by_nominal[nfe] for nfe in NFES_8]
 print(f"trained-network sweep in {time.time() - t0:.0f} s")
-for name, rows in sweep_net.items():
-    print(f"{name:16s} sliced W1: " + " ".join(f"{r['sw']:.3f}" for r in rows)
-          + "   (exact score: " + " ".join(f"{r['sw']:.3f}" for r in sweep[name][:len(NFES_8)]) + ")")
+for key, fmt in (("sw", "{:.3f}"), ("stranded", "{:.2%}")):
+    print(f"{key}:")
+    for name in NAMES_8:
+        print(f"  {name:16s} trained net: " + " ".join(fmt.format(r[key]) for r in sweep_net[name])
+              + "   (exact score: " + " ".join(fmt.format(r[key]) for r in sweep_ref[name]) + ")")
 
 # %%
-fig, axes = plt.subplots(1, 2, figsize=(11.5, 4))
-for ax, (j, key, label) in zip(axes, [(0, "mmd", "MMD$^2$"), (1, "sw", "sliced $W_1$")]):
+fig, axes = plt.subplots(1, 3, figsize=(14, 4))
+panels = [(0, "mmd", "MMD$^2$"), (1, "sw", "sliced $W_1$"), (None, "stranded", "% stranded (log $p<-10$)")]
+for ax, (j, key, label) in zip(axes, panels):
+    scale = 100.0 if key == "stranded" else 1.0
     for name in NAMES_8:
-        ax.loglog([r["nfe"] for r in sweep_net[name]], [r[key] for r in sweep_net[name]], "o-", ms=4,
-                  color=COL[name], label=f"{name}, trained network")
-        ax.loglog([r["nfe"] for r in sweep[name][:len(NFES_8)]], [r[key] for r in sweep[name][:len(NFES_8)]], "o:",
-                  ms=3, color=COL[name], alpha=0.6, label=f"{name}, exact score")
-    lo, hi = floor[:, j].mean() - 2 * floor[:, j].std(), floor[:, j].mean() + 2 * floor[:, j].std()
-    ax.axhspan(max(lo, 1e-6), hi, color=COL["floor"], alpha=0.6, label="floor")
-    ax.set(xlabel="NFE", ylabel=f"{label} to exact samples", title=f"trained network vs exact score: {label}")
+        ax.plot([r["nfe"] for r in sweep_net[name]], [scale * r[key] for r in sweep_net[name]], "o-", ms=4,
+                color=COL[name], label=f"{name}, trained network")
+        ax.plot([r["nfe"] for r in sweep_ref[name]], [scale * r[key] for r in sweep_ref[name]], "o:",
+                ms=3, color=COL[name], alpha=0.6, label=f"{name}, exact score")
+    if j is not None:
+        ax.set_yscale("log")
+        ax.axhspan(max(floor[:, j].mean() - 2 * floor[:, j].std(), 1e-6), FLOOR_HI[j], color=COL["floor"], alpha=0.6,
+                   label="floor")
+        ax.set(ylabel=f"{label} to exact samples", title=f"trained network vs exact score: {label}")
+    else:   # a percentage that can be exactly 0: linear near 0, logarithmic above 0.1%
+        ax.set_yscale("symlog", linthresh=0.1)
+        ax.set_ylim(0, 100)
+        ax.set(ylabel="% of samples where log $p(x)<-10$", title="samples stranded in low-density regions")
+    ax.set_xscale("log")
+    ax.set_xlabel("NFE")
     ax.grid(alpha=0.3, which="both")
 axes[0].legend(fontsize=7)
 plt.tight_layout()
 plt.show()
 
 # %% [markdown]
-# At small NFE the trained-network curves (solid) stay close to the exact-score curves (dotted). Discretisation error
-# dominates there, and the choice of sampler matters as much as before. As the budget grows, the exact-score curves
-# fall to the floor, but the deterministic samplers driven by the trained network **level off** above them. More steps
-# solve the network's ODE more accurately, but that ODE belongs to a slightly wrong vector field. The remaining gap is
-# **model error**, and no ODE solver can remove it.
+# At small NFE discretisation error dominates. The trained-network curves (solid) mostly track the exact-score curves
+# (dotted), and the choice of sampler matters as much as before. Heun at the smallest budgets is the exception: its
+# corrector evaluates the network at a poor predicted point, where the network has seen little training data. As the
+# budget grows, the exact-score curves fall to the floor, but in sliced $W_1$ the ODE samplers driven by the network
+# **level off** above it. More steps solve the network's ODE more accurately, but that ODE belongs to the wrong vector
+# field. The remaining gap is **model error**, and no ODE solver can remove it.
 #
-# DDPM behaves differently. Its curve keeps falling and typically ends up much closer to its exact-score counterpart (see
-# the printout). This is §4.1 at work: the Langevin part of the reverse SDE keeps pulling the samples back towards the
-# marginals, which partially corrects the network's systematic errors. The trade-off is clear: at small budgets
-# deterministic samplers win, while at large budgets with an imperfect model, some stochasticity pays (Exercise 1). For
-# ODE samplers, **you only need enough steps to get below the model-error floor**. Beyond that, extra NFE is wasted. This
-# is why well-trained image models are sampled with 20–50 DDIM-like steps, not 1000.
+# **Where is the model error?** The MMD panel hardly separates the samplers at large budgets: at this sample size the
+# model-error floor lies inside MMD's finite-sample band. The right panel shows why. The extra error is concentrated in a
+# small fraction of samples that end up **stranded** in regions the data never visits. The network is least accurate in the
+# gaps between modes, where it saw almost no training data (notebook 03, §3b and §7; see also how its error grows at low
+# noise in the printout above). The ODE transports the latents that lead into those regions faithfully. MMD's bounded
+# kernels barely notice a percent of misplaced samples, while a transport distance like $W_1$ does. Look at more than one
+# metric, and look at the tails.
+#
+# **DDPM behaves differently.** It typically strands fewer samples, and its $W_1$ keeps falling towards its exact-score
+# counterpart (see the printout; the exact numbers depend on the trained network). This is §4.1 at work. The Langevin part
+# of the reverse SDE pulls stranded samples back towards high-density regions. These are regions of the *model's*
+# $\hat p_t$, not of the true $p_t$, but the model is accurate exactly where most of the data is. There is a clean theory
+# behind this. For the SDE sampler,
+# $\mathrm{KL}(p_{\rm data}\,\|\,p^{\rm SDE}_\theta)\le\mathrm{KL}(q_1\,\|\,\mathcal N(0,I))+\tfrac12\int_0^1\beta(t)\,\mathbb E_{q_t}\|\nabla\log q_t-s_\theta\|^2dt$
+# (Song, Durkan, Murray & Ermon 2021; with discretisation, Chen et al. 2023). The error is controlled by the same $L^2$
+# score error that training minimises. No such bound holds for the ODE, whose error also depends on errors in the
+# *derivatives* of the learned score.
+#
+# **In practice:** at small budgets deterministic samplers win. At large budgets with an imperfect model, some
+# stochasticity pays (Exercise 1), especially in the tails. For ODE samplers, **you only need enough steps to get below
+# the model-error floor**; beyond that, extra NFE is wasted. This is why well-trained image models are sampled with
+# 20–50 DDIM-like steps, not 1000.
 #
 # ## 9 · Practical guidance
 #
@@ -1323,7 +1602,8 @@ plt.show()
 # |---|---|---|
 # | reference quality, no time pressure | DDPM ancestral / Euler–Maruyama, or Heun with a little churn | 250–1000 |
 # | the robust default | DDIM ($\eta=0$) / Euler in $\sigma$, uniform-in-$t$ (trailing) or Karras spacing | 25–50 |
-# | best quality per NFE | multistep exponential-integrator solvers: DPM-Solver++(2M), UniPC; or EDM's Heun | 10–20 (Heun: ~35) |
+# | best quality per NFE | multistep exponential-integrator solvers: DPM-Solver++(2M), UniPC (2nd order at 1 NFE per step) | 10–20 |
+# | high quality, moderate budget | EDM's Heun (2nd order, 2 NFE per step; only pays off once the steps are small, §6) | ≳35 |
 # | real-time | distilled or consistency models (progressive distillation, LCM, consistency models, adversarial distillation such as SDXL-Turbo) | 1–4 |
 # | editing / inversion / interpolation | deterministic ($\eta=0$) sampler and its inversion, so that noise ↔ data is a fixed map | 25–100 |
 #
@@ -1333,14 +1613,14 @@ plt.show()
 # * **$\eta$ (stochasticity):** $\eta=0$ for few steps, for reproducibility, and for anything that needs inversion. Some
 #   noise ($\eta>0$, or EDM's churn) helps at large budgets when the model is imperfect (§4.1), but it needs more steps to
 #   pay off.
-# * **The last step** should return the denoised estimate $\hat x_0$ without adding noise. Never evaluate the network at
-#   $t=0$: it was never trained there.
+# * **The last step** should return the denoised estimate $\hat x_0$ without adding noise (§3.2: a plain Euler step to
+#   $t=0$ leaves residual noise). Never evaluate the network at $t=0$: it was never trained there.
 # * **$\hat x_0$ clipping** (to $[-1,1]$ for images, `clip_x0` in `dmtools`) and dynamic thresholding stop guided samplers
 #   from saturating. They change the update, though, so the sampler no longer solves the ODE and exact inversion breaks.
 # * **Precision:** keep schedule coefficients in float64. $1/\sqrt{\bar\alpha}$ reaches about 150 at $t=1$ here, and
 #   $1-\bar\alpha$ near $t=0$ loses digits in float32. bf16 is fine for the network itself.
 # * **Sample with EMA weights**, and pick the step count by checking where quality stops improving (§8). That plateau is
-#   the model's floor.
+#   the model's floor. Judge it with more than one metric, and look at the tails.
 #
 # ## Exercises
 #
@@ -1365,8 +1645,9 @@ plt.show()
 # **Exercise 2 (make the toy image-like).** Images have many directions of tiny variance (fine detail). Embed the mixture
 # in 12-D with 10 extra coordinates of variance $10^{-6}$: `means = F.pad(gmm.means, (0, 10))`, and block-diagonal
 # covariances with `gmm.covs` in the top-left corner and `1e-6 * I` elsewhere. Build
-# `dm.GaussianMixture(gmm.weights, means, covs)` and its `exact_eps_fn`. Predict how Euler-in-$t$, Heun-in-$t$ and DDIM
-# behave in the extra coordinates, then measure the std of the generated samples there (true value 0.001) at 20 and 50 NFE.
+# `dm.GaussianMixture(gmm.weights, means, covs)` and its `exact_eps_fn`. Predict how Euler-in-$t$ (with and without the
+# denoising last step), Heun-in-$t$ and DDIM behave in the extra coordinates, then measure the std of the generated
+# samples there (true value 0.001) at 20 and 50 NFE.
 #
 # <details><summary>Hint / solution</summary>
 #
@@ -1377,29 +1658,65 @@ plt.show()
 # covs[:, 2:, 2:] = 1e-6 * torch.eye(d - 2, dtype=torch.float64)
 # g12 = dm.GaussianMixture(gmm.weights, F.pad(gmm.means, (0, d - 2)), covs)
 # xT12 = torch.randn(2000, d, dtype=torch.float64)
-# for name in ["Euler ODE", "Heun ODE", "DDIM"]:
-#     n, _ = steps_for_nfe(name, 20)
-#     x = SAMPLERS[name][0](exact_eps_fn(g12), xT12, uniform_grid(n))
-#     print(name, x[:, 2:].std().item())   # true: 0.001
+# for nfe in (20, 50):
+#     for name in ["Euler ODE", "Heun ODE", "DDIM"]:
+#         n, _ = steps_for_nfe(name, nfe)
+#         x = SAMPLERS[name][0](exact_eps_fn(g12), xT12, uniform_grid(n))
+#         print(nfe, name, x[:, 2:].std().item())   # true: 0.001
+#     x = euler_ode_sampler(exact_eps_fn(g12), xT12, uniform_grid(nfe), denoise_last=False)
+#     print(nfe, "Euler ODE, plain last step", x[:, 2:].std().item())
 # ```
-# This is the stiffness of §3.2 in action. Euler-in-$t$ leaves residual noise about ten times the true std in every extra
-# direction, Heun-in-$t$ blows up, and DDIM adds no noise (it slightly over-smooths, with an absolute error below 0.001).
-# In the two "interesting" coordinates all three do about as well as before. Real images have thousands of such
-# directions, so the residual noise adds up to visible grain. This is why DDIM-style integrators replaced plain Euler.
+# This is §3.2 in action, and three separate effects show up.
+# (i) **Heun-in-$t$ is unstable** in the stiff directions. At 20 NFE its samples carry noise several times the true std
+# (grain); at 50 NFE it has calmed down.
+# (ii) **Euler-in-$t$ with a plain last step** leaves residual noise of order $\sigma_{\min}\approx0.01$, ten times the
+# true std, in every extra direction. With the denoising last step this residual noise disappears.
+# (iii) **DDIM (and the denoised Euler) return almost no spread there.** The last step returns
+# $\mathbb E[x_0\mid x_{t_{\min}}]$, which shrinks directions whose std is below $\sigma_{\min}$ by
+# $\sqrt{\lambda/(\lambda+\sigma_{\min}^2)}\approx0.1$. More steps do not help, because this is the $t_{\min}$ truncation,
+# not discretisation error, and DDIM sits exactly at that limit. The relative error is large, but the absolute error is
+# below 0.001 and it adds no grain.
+# In the two "interesting" coordinates all of them do about as well as before. Real images have thousands of such
+# directions. Noise of order $\sigma_{\min}$ in each of them adds up to visible grain, while smoothing below $\sigma_{\min}$
+# is invisible.
 # </details>
 #
 # **Exercise 3 (design a schedule).** The error profile in §6 says that the steps at very large $\sigma$ are nearly wasted.
-# Start EDM's Heun sampler at a smaller $\sigma_{\max}$ (EDM uses 80; try 80 and 20):
+# (a) Start EDM's Heun sampler at a smaller $\sigma_{\max}$ (EDM uses 80; try 80 and 20):
 # `heun_sigma_sampler(eps_exact, x_T, karras_sigmas(n, 7.0, s_max=20.0))`. The same unit-variance `x_T` works, because
 # the sampler takes its input in VP units and VP noise always has unit variance. Predict, then measure, the change in
-# sample quality at 10–20 NFE. How much error comes from treating $\sigma=20$ as "pure noise"?
+# sample quality at 10–20 NFE, and compare with `euler_sigma_sampler` at the same NFE. How much error comes from treating
+# $\sigma=20$ as "pure noise"? (b) Go further and build the grid from the measured error profile (`err_heun`,
+# `err_euler`, `prof_sig`). How should the step density depend on the local error?
 #
 # <details><summary>Hint / solution</summary>
 #
-# At $\sigma=20$ the data (std about 1.2) changes the noisy distribution's std by only about 0.2%, so treating it as pure noise
-# costs almost nothing. Every step saved at the top of the schedule goes into the hard region, so quality at 10–20 NFE
-# improves noticeably. You can go further: choose the $\sigma_i$ so that each step carries an equal share of the error
-# profile `err_heun` (cumulative sum, then invert by interpolation). This is a hand-made adaptive schedule.
+# (a) At $\sigma=20$ the data (per-coordinate std about 1) changes the noisy distribution's std by only about 0.1%, so
+# treating it as pure noise costs almost nothing. Every step saved at the top of the schedule goes into the hard region,
+# so Heun's quality at 10–20 NFE improves noticeably. Euler at the same NFE is still at least as good: below a few tens
+# of NFE the extra evaluation is better spent on another Euler step (§6).
+#
+# (b) **Equidistribute the local error.** A solver of order $p$ makes a local error of about $C(u)\,h^{p+1}$ per step of
+# size $h$ in $u=\log\sigma$. With $1/h(u)$ steps per unit of $u$, the total error is about $\int C\,h^{p}\,du$.
+# Minimising it at a fixed number of steps $\int du/h=N$ (a Lagrange multiplier) gives $h\propto C^{-1/(p+1)}$: every step
+# makes the same local error. The profile was measured with one fixed step, so $C\propto$ `err`, and the step density must
+# be $\propto$ `err`$^{1/3}$ for Heun ($\propto$ `err`$^{1/2}$ for Euler). A density $\propto$ `err` would pile almost all
+# steps into the hard band and leave giant steps at both ends.
+#
+# ```python
+# def equidistributed_sigmas(n, err, p):
+#     """n noise levels (then 0) with step density proportional to err**(1/(p+1)) in log sigma."""
+#     cdf = np.concatenate([[0.0], np.cumsum(np.asarray(err) ** (1.0 / (p + 1)))])
+#     log_s = np.interp(np.linspace(0, 1, n), cdf / cdf[-1], np.log(prof_sig))
+#     return np.concatenate([np.exp(log_s), [0.0]])
+#
+# for nfe in (9, 19):
+#     n = (nfe + 1) // 2
+#     print(nfe, quality(heun_sigma_sampler(eps_exact, x_T, equidistributed_sigmas(n, err_heun, 2)))[1],
+#           quality(euler_sigma_sampler(eps_exact, x_T, equidistributed_sigmas(nfe, err_euler, 1)))[1])
+# ```
+# Both beat Karras $\rho=7$ at the same NFE, and at these budgets the Euler version is the best grid-and-solver
+# combination in this notebook. This is a hand-made adaptive schedule.
 # </details>
 #
 # **Exercise 4 (better inversion).** Improve `ddim_invert` with a fixed-point iteration. In each step, first compute
@@ -1410,9 +1727,16 @@ plt.show()
 #
 # Inside the loop: `x_s = step(x, eps_fn(x, t))`, then `for _ in range(3): x_s = step(x, eps_fn(x_s, s))`. The update now
 # uses (an approximation of) the slope at the noisier end, which is what the sampler uses on the way back. Each
-# iteration shrinks the mismatch by a factor that gets smaller as the steps shrink: expect a few times lower error at
-# $n=5$ and well over an order of magnitude at $n=100$. Each iteration costs 1 NFE, and for very large steps the fixed-point
-# iteration need not converge.
+# iteration shrinks the mismatch by a factor of roughly (Lipschitz constant of $\hat\epsilon$) $\times$ (step size), which
+# gets smaller as the steps shrink. Expect a few times lower error at $n=5$ and well over an order of magnitude at
+# $n=100$. Each iteration costs 1 NFE, and for very large steps the iteration need not converge.
+#
+# The conceptual answer: at convergence the iteration solves $\tilde x_s=\tilde x_t+(\sigma_s-\sigma_t)\,\hat\epsilon(x_s,s)$,
+# which is *exactly* the inverse of the sampler's DDIM step from $s$ to $t$. So the round trip becomes exact, up to the
+# fixed-point tolerance. The latent it finds, however, is the exact preimage under the *discrete* DDIM map, which is still
+# only an $O(h)$ approximation of the true PF-ODE latent. Compare it with `z_accurate` from §5. Round-trip exactness
+# and a correct latent are different things. Editing needs the first; anything that relies on the continuous ODE, such
+# as the likelihood of §7, needs the second.
 # </details>
 #
 # **Exercise 5 (the model's likelihood).** Pass the trained network's score
@@ -1426,7 +1750,7 @@ plt.show()
 # ```python
 # def score_net(x, t):
 #     k = torch.full((x.shape[0],), noise_matched_index(t), device=device)
-#     return -ema_net(x.float().to(device), k).double().cpu() / math.sqrt(1 - abar_fn(t))
+#     return -ema_net(x.float().to(device), k).cpu().double() / math.sqrt(1 - abar_fn(t))   # .cpu() first: MPS has no float64
 # u = np.linspace(0, 1, 401)
 # est, _ = ode_log_likelihood(pts, T_MIN + (1 - T_MIN) * u ** 2, score_fn=score_net)
 # print(est - gmm.noised(abar_fn(T_MIN)).log_prob(pts).double())
@@ -1442,21 +1766,26 @@ plt.show()
 # * Sampling a diffusion model means **numerically solving a differential equation**. The DDPM chain is Euler–Maruyama
 #   for the reverse-time SDE $dx=[-\tfrac12\beta x-\beta\nabla\log p_t]dt+\sqrt\beta\,d\bar W$. The **probability-flow ODE**
 #   $\dot x=-\tfrac12\beta(x+\nabla\log p_t)$ has the same marginals, by Fokker–Planck.
-# * The **reverse SDE = ODE + Langevin corrector**. Its noise erases errors made at high noise levels, but it needs many
-#   steps. Deterministic solvers are far better per NFE at small budgets.
-# * **DDIM** follows from a non-Markovian forward process with DDPM's marginals, so it needs no retraining. With $\eta=0$
-#   it is **Euler's method in $(\tilde x=x/\sqrt{\bar\alpha},\ \sigma)$**: a convex step towards $\hat x_0$. It is exact when
-#   $\hat x_0$ is constant and it never overshoots. That stability, in data with many low-variance directions, is what
-#   makes it the robust default.
+# * The **reverse SDE = ODE + Langevin corrector**. Its noise erases errors made at high noise levels, but it cannot move
+#   mass between modes once they have separated, and it needs many steps. Deterministic solvers are far better per NFE
+#   from about 10–20 NFE up to the point where everything converges.
+# * **DDIM** follows from a non-Markovian forward process with DDPM's marginals, so it needs no retraining. Each step is
+#   exact if fed a posterior *sample* of $x_0$; using the posterior *mean* is its (and DDPM's) discretisation error. With
+#   $\eta=0$ it is **Euler's method in $(\tilde x=x/\sqrt{\bar\alpha},\ \sigma)$**: a convex step towards $\hat x_0$. It
+#   is exact when $\hat x_0$ is constant, it never overshoots, and its last step is automatically the denoiser. Its
+#   failure mode at low NFE is over-smoothing, never noise or blow-up, which makes it the robust default.
+# * **Finish with a denoising step**: a plain Euler step to $t=0$ in $(x,t)$ leaves residual noise.
 # * Orders of convergence are real (Euler/DDIM $\propto$ NFE$^{-1}$, Heun $\propto$ NFE$^{-2}$) but only once steps are
-#   small. At very low NFE, *where* the steps go and *which variables* you integrate in matter more.
+#   small. Below a few tens of NFE, a 2-NFE Heun step loses to two Euler steps, and *where* the steps go and *which
+#   variables* you integrate in matter more.
 # * The ODE is a **bijection** between noise and data, a continuous normalising flow. It gives DDIM **inversion** (an
 #   $O(h)$ approximation) and **exact likelihoods** via $\log p_0=\log p_1+\int\nabla\!\cdot f\,dt$.
 # * **Step spacing** should concentrate on the noise levels where the denoiser's output changes. That depends on the
 #   data's range of scales: Karras $\rho=7$ suits images, but on our toy uniform-in-$t$ does as well. Uniform-in-$\sigma$ is
-#   always bad.
+#   always bad. Equidistributing the measured local error (density $\propto$ error$^{1/(p+1)}$) beats both.
 # * With a trained network, **model error sets a floor** for deterministic samplers. Use just enough NFE to reach it, and
-#   count NFE, including CFG's 2×. At large budgets, a stochastic sampler can partially correct model error.
+#   count NFE, including CFG's 2×. The floor hides in a few samples stranded where the network is poorly trained; $W_1$
+#   sees them, MMD barely does. At large budgets, a stochastic sampler can partially correct it.
 #
 # ## Further reading
 #
@@ -1466,7 +1795,9 @@ plt.show()
 # * Karras, Aittala, Aila, Laine (2022). *Elucidating the Design Space of Diffusion-Based Generative Models* (EDM). NeurIPS. arXiv:2206.00364. The $(\tilde x,\sigma)$ view, Heun, $\rho$-spacing and churn.
 # * Lu, Zhou, Bao, Chen, Li, Zhu (2022). *DPM-Solver: A Fast ODE Solver for Diffusion Probabilistic Model Sampling in Around 10 Steps.* NeurIPS. arXiv:2206.00927; and *DPM-Solver++* (2022), arXiv:2211.01095.
 # * Nichol & Dhariwal (2021). *Improved Denoising Diffusion Probabilistic Models.* ICML. arXiv:2102.09672. Respacing the timesteps of a trained model.
-# * Lin, Liu, Li, Yang (2024). *Common Diffusion Noise Schedules and Sample Steps are Flawed.* WACV. arXiv:2305.08891. The "trailing" timestep gotcha.
+# * Lin, Liu, Li, Yang (2024). *Common Diffusion Noise Schedules and Sample Steps are Flawed.* WACV. arXiv:2305.08891. Zero terminal SNR and the "trailing" timestep gotcha.
+# * Song, Durkan, Murray, Ermon (2021). *Maximum Likelihood Training of Score-Based Diffusion Models.* NeurIPS. arXiv:2101.09258; Chen, Chewi, Li, Li, Salim, Zhang (2023). *Sampling is as easy as learning the score.* ICLR. arXiv:2209.11215. Why the SDE sampler's error is controlled by the $L^2$ score error.
+# * Ho, Jain, Abbeel (2020). *Denoising Diffusion Probabilistic Models.* NeurIPS. arXiv:2006.11239; Kingma, Salimans, Poole, Ho (2021). *Variational Diffusion Models.* NeurIPS. arXiv:2107.00630. Likelihoods from the variational bound, for comparison with §7.
 # * Chen, Rubanova, Bettencourt, Duvenaud (2018). *Neural Ordinary Differential Equations.* NeurIPS. arXiv:1806.07366; Grathwohl et al. (2019). *FFJORD.* ICLR. arXiv:1810.01367. The instantaneous change of variables and Hutchinson's trace estimator.
 # * Salimans & Ho (2022). *Progressive Distillation for Fast Sampling of Diffusion Models.* ICLR. arXiv:2202.00512; Song, Dhariwal, Chen, Sutskever (2023). *Consistency Models.* ICML. arXiv:2303.01469; Sauer, Lorenz, Blattmann, Rombach (2023). *Adversarial Diffusion Distillation.* arXiv:2311.17042. 1–4-step samplers.
 # * Sander Dieleman, *Diffusion is spectral autoregression* (sander.ai, 2024). Why images have structure at every noise level.

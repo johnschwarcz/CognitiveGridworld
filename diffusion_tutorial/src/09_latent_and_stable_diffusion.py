@@ -35,9 +35,10 @@
 # **Prerequisites:** 01 (forward process, SNR), 02 (DDPM), 03 (Tweedie), 04 (DDIM), 05 (U-Net, EMA, training recipe),
 # 06 (classifier-free guidance, negative prompts), 07 (SDEdit, inpainting). Section 8 refers to 08 (flow matching).
 #
-# **Runtime:** Part A: about 10–20 min on a 4-core laptop CPU (two short training runs: the autoencoder and the latent
-# diffusion model), about 2–3 min on a GPU. Part B (optional): needs a CUDA GPU with ≥ 6 GB of memory (or an Apple-silicon
-# Mac) and a one-off download of several GB of weights per model; after that, a few minutes.
+# **Runtime:** Part A: about 10–15 min on a 4-core CPU, most of it two short training runs (the autoencoder and the
+# latent diffusion model), and longer if other jobs share the CPU; about 2–3 min on a GPU. Part B (optional)
+# needs a CUDA GPU with ≥ 6 GB of memory (or an Apple-silicon Mac) and a one-off download of several GB of weights per
+# model; after that, a few minutes.
 
 # %%
 import copy
@@ -46,6 +47,7 @@ import importlib.util
 import math
 import time
 
+import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
@@ -71,9 +73,9 @@ def autocast():
 
 
 Z_CH, LAT = 4, 7                                  # latent shape (4, 7, 7), like SD's 4 latent channels
-AE_STEPS = 40 if FAST else 2000                   # autoencoder training steps (batch 128)
+AE_STEPS = 40 if FAST else 1500                   # autoencoder training steps (batch 128)
 LDM_STEPS = 40 if FAST else 3000                  # latent diffusion training steps (batch 128)
-N_EVAL = 20 if FAST else 500                      # generated samples per guidance scale for the classifier check
+N_EVAL = 20 if FAST else 300                      # generated samples per guidance scale for the classifier check
 C_PIX, C_LAT, C_REAL = "tab:blue", "tab:orange", "0.35"   # colours used throughout
 print(f"FAST={FAST}  USE_AMP={USE_AMP}  AE_STEPS={AE_STEPS}  LDM_STEPS={LDM_STEPS}")
 
@@ -330,7 +332,11 @@ plt.show()
 
 # %% [markdown]
 # The reconstructions are close to the originals and the classifier still recognises them. That is the property that
-# matters: the autoencoder keeps the *semantics*. The latents are not images: each digit becomes four coarse 7×7
+# matters: the autoencoder keeps the *semantics*. Measured by MSE, it is about as good as PCA with the same number of
+# dimensions; MNIST is easy, and PCA is the best *linear* code for MSE. The autoencoder's advantages lie elsewhere:
+# its latent is a spatial grid, so the denoiser can still be a convolutional U-Net, and on natural images it can be
+# trained with perceptual and adversarial losses to keep what matters to the eye rather than what has the most
+# variance. The latents are not images: each digit becomes four coarse 7×7
 # feature maps that still roughly follow the shape of the digit. That spatial correspondence is what lets
 # Stable Diffusion's latent U-Net use convolutions, and lets inpainting masks be downsampled into latent space.
 # Whatever the decoder cannot reproduce, the latent diffusion model cannot generate either: **the autoencoder's
@@ -402,8 +408,13 @@ for ab, s, _, _, lab in curves:
 
 # %% [markdown]
 # **Left:** after scaling, the latent values have unit variance, as the forward process assumes (they need not be
-# Gaussian; the diffusion model will learn their actual shape). **Right:** the scale factor is a vertical shift of the
-# log-SNR curve. The printout makes the endpoint problem concrete. With Stable Diffusion's "scaled_linear"
+# Gaussian; the diffusion model will learn their actual shape). The sharp spikes are latent cells over blank
+# background, which all receive the same value. The printout shows two things a single global number
+# ignores: the latent mean is not exactly zero, and the channels have different spreads. A global scale is the
+# simplest fix that is good enough; diffusers' `AutoencoderKL` config also has `shift_factor` and per-channel
+# `latents_mean` / `latents_std` fields for models that standardise more carefully.
+#
+# **Right:** the scale factor is a vertical shift of the log-SNR curve. The printout makes the endpoint problem concrete. With Stable Diffusion's "scaled_linear"
 # schedule, *unscaled* latents would keep a clearly non-zero correlation with the data at $t=T-1$, yet sampling starts
 # from pure noise. Even with scaling, SD's terminal SNR is not zero. Lin et al. (2024) show that this small leftover
 # signal is why SD struggles to generate very bright or very dark images, and propose rescaling the schedule to
@@ -501,8 +512,8 @@ assert torch.allclose(ours, ref, atol=1e-3)
 
 # %% [markdown]
 # Now the samples. Each row of the left grid asks for one digit with guidance scale $w=3$. On the right, a quantitative
-# check with the classifier: generate `N_EVAL` digits per guidance scale (labels spread evenly over the classes) and
-# measure how often the classifier agrees with the requested label. $w=0$ is the unconditional model (it ignores the
+# check with the classifier: generate `N_EVAL` digits per guidance scale (labels spread evenly over the classes, 25
+# DDIM steps) and measure how often the classifier agrees with the requested label. $w=0$ is the unconditional model (it ignores the
 # label), $w=1$ the plain conditional model, $w>1$ guided.
 
 # %%
@@ -514,7 +525,7 @@ WS = [0.0, 1.0, 2.0, 3.0, 5.0]
 y_req = torch.arange(N_EVAL) % 10
 acc_w, conf_w = [], []
 for w in WS:
-    pred, prob = classify(generate(y_req, guidance_scale=w, seed=123))
+    pred, prob = classify(generate(y_req, guidance_scale=w, n_steps=25, seed=123))   # 25 steps suffice here (§7)
     acc_w.append((pred == y_req).float().mean().item())
     conf_w.append(prob.max(1).values.mean().item())
 
@@ -535,10 +546,13 @@ for w, a, c in zip(WS, acc_w, conf_w):
 # %% [markdown]
 # Latent diffusion produces recognisable digits from a 7×7×4 latent after a short CPU training run. As in
 # notebook 06, $w=0$ agrees with the requested label only at chance level (it never sees the label), $w=1$ follows it
-# most of the time, and guidance pushes agreement and classifier confidence up further, at the price of diversity.
+# most of the time, and guidance pushes agreement and classifier confidence up further. At large $w$ the agreement
+# reaches or exceeds the classifier's accuracy on *real* test digits: guided samples are more prototypical, and
+# less diverse, than real data (notebook 06).
 #
-# **What does the denoiser see?** The left column of the figure below is the latent $z_t$ itself (channel 0); the
-# middle column decodes $z_t$ directly; the right column decodes the Tweedie estimate $\hat z_0(z_t)$ at the same step.
+# **What does the denoiser see?** The top row of the figure below is the latent $z_t$ itself (channel 0, colour scale
+# $\pm3$); the middle row decodes $z_t$ directly; the bottom row decodes the Tweedie estimate $\hat z_0(z_t)$ at the
+# same step.
 
 # %%
 snaps = []
@@ -568,8 +582,9 @@ plt.tight_layout()
 plt.show()
 
 # %% [markdown]
-# The noisy latent $z_t$ means nothing to the decoder until the last few steps (middle row). Denoising has to happen in
-# latent space, and only the final, clean latent is decoded. Decoding the Tweedie estimate $\hat z_0$ (bottom row)
+# Decoding the noisy latent (middle row) gives meaningless fragments for most of the trajectory; only once the noise is
+# small does it look like a digit. Denoising has to happen in latent space, and only the final, clean latent is
+# decoded. Decoding the Tweedie estimate $\hat z_0$ (bottom row)
 # shows the coarse-to-fine progression of notebook 05, now in latent space: the digit's identity is settled early, and
 # later steps only refine it. Diffusers' pipelines decode the latents only at the very end for the same reason; a
 # live preview of a running generation shows something like the bottom row.
@@ -648,18 +663,22 @@ for ax, (name, (tp, tl)) in zip(axes, cost.items()):
     ax.set(ylabel="milliseconds (batch 64)", title=f"{name}: {tp / tl:.1f}× faster")
 plt.tight_layout()
 plt.show()
-print(f"parameters: pixel U-Net {dm.count_params(pixel_unet):,}, latent U-Net {dm.count_params(ldm_ema):,}")
+n_params = lambda m: sum(p.numel() for p in m.parameters())      # dm.count_params skips frozen (EMA) weights
+print(f"parameters: pixel U-Net {n_params(pixel_unet):,}, latent U-Net {n_params(ldm_ema):,}")
 for name, (tp, tl) in cost.items():
     print(f"{name:15s}: pixel {1000 * tp:8.1f} ms, latent {1000 * tl:8.1f} ms  -> speed-up {tp / tl:.1f}x")
 print(f"decoder: {1000 * t_decode:.1f} ms per batch of {B} (paid once per sample)")
 
 # %% [markdown]
-# Both networks have a similar number of parameters, but the latent one is several times cheaper per call, because a
-# convolution's cost scales with the number of spatial positions (16× fewer here) and the attention cost with its
-# square. The printed speed-up is smaller than 16× because the pixel U-Net's deeper levels already work at
-# 14×14 and 7×7, and because tiny tensors are dominated by fixed per-operation overheads. For Stable Diffusion the
-# arithmetic is far more dramatic: a U-Net at 512×512 instead of 64×64 would need about 64× the compute per step, and
-# its attention layers far more. The one-off cost, training the autoencoder, is amortised over every diffusion model
+# The two networks have parameter counts of the same order, but compute is a different matter: a convolution costs
+# its parameter count times the number of positions it is applied at, and the latent grid has 16× fewer positions.
+# The printed speed-up is smaller than 16× because the pixel U-Net's deeper levels already work at 14×14 and 7×7, and
+# because small tensors are dominated by fixed per-operation overheads (even more so on a GPU). Fixed costs (the
+# optimiser update, mixed-precision casts) are also why the training-step speed-up is usually smaller than the
+# forward-pass one. (Timings on a shared machine are noisy; the medians above are over several repeats.) For Stable Diffusion
+# the arithmetic is far more dramatic: a U-Net at 512×512 instead of 64×64 would need about 64× the compute per step
+# in its convolutions, and its self-attention layers, whose cost grows with the *square* of the number of positions,
+# far more. The one-off cost, training the autoencoder, is amortised over every diffusion model
 # trained on its latents: Stable Diffusion 1.1 to 1.5 all share one autoencoder.
 #
 # What latent diffusion costs: (i) the autoencoder's reconstruction error is a ceiling on quality, which shows up in
@@ -715,8 +734,8 @@ def sdedit(x_src, y_target, strength, guidance_scale=3.0, n_steps=50, seed=0):
     return decode(z / SCALE).clamp(-1, 1)
 
 
-STRENGTHS = [0.2, 0.4, 0.5, 0.6, 0.7, 0.8, 1.0]
-n_src = 16 if FAST else 200
+STRENGTHS = [0.1, 0.2, 0.25, 0.3, 0.35, 0.4, 0.5, 0.7, 1.0]
+n_src = 16 if FAST else 128
 x_src, y_src = x_test[2000:2000 + n_src], y_test[2000:2000 + n_src]
 y_tgt = (y_src + 3) % 10
 edits = {s: sdedit(x_src, y_tgt, s).cpu() for s in STRENGTHS}
@@ -726,7 +745,8 @@ dist_src = [(edits[s] - x_src).pow(2).mean().sqrt().item() for s in STRENGTHS]
 
 fig = plt.figure(figsize=(10, 3.6))
 ax = fig.add_subplot(1, 2, 1)
-rows = [torch.cat([x_src[i:i + 1]] + [edits[s][i:i + 1] for s in STRENGTHS]) for i in range(4)]
+show_idx = [int((y_src == c).nonzero()[0]) for c in y_src.unique()[:4]]   # four inputs with different labels
+rows = [torch.cat([x_src[i:i + 1]] + [edits[s][i:i + 1] for s in STRENGTHS]) for i in show_idx]
 dm.show_images(torch.cat(rows), nrow=len(STRENGTHS) + 1, ax=ax,
                title="input, then strength " + ", ".join(map(str, STRENGTHS)))
 ax = fig.add_subplot(1, 2, 2)
@@ -738,19 +758,22 @@ ax2.plot(STRENGTHS, dist_src, "^--", color=C_REAL, label="RMS pixel distance to 
 ax2.set_ylabel("RMS distance to input")
 h1, l1 = ax.get_legend_handles_labels()
 h2, l2 = ax2.get_legend_handles_labels()
-ax.legend(h1 + h2, l1 + l2, loc="center left", fontsize=7)
+ax.legend(h1 + h2, l1 + l2, loc="center right", fontsize=7)
 plt.tight_layout()
 plt.show()
-print("first four requests: " + ", ".join(f"{a} -> {b}" for a, b in zip(y_src[:4].tolist(), y_tgt[:4].tolist())))
+print("rows of the image grid: " + ", ".join(f"{y_src[i].item()} -> {y_tgt[i].item()}" for i in show_idx))
 for s, a, b, d in zip(STRENGTHS, frac_tgt, frac_src, dist_src):
-    print(f"strength {s:.1f} ({int(50 * s):2d} of 50 steps): new label {a:.2f}, input's label {b:.2f}, distance {d:.3f}")
+    print(f"strength {s:.2f} ({int(50 * s):2d} of 50 steps): new label {a:.2f}, input's label {b:.2f}, distance {d:.3f}")
 
 # %% [markdown]
 # `strength` trades faithfulness for editability. At low strength the output keeps the input's identity (blue
 # curve high) and stays close to it in pixels. At high strength the new label wins (orange curve), and the
-# output keeps less and less of the input, until at `strength=1` it is unrelated to it apart from the shared random
-# seed. The interesting edits happen in between, where the coarse shape of the input (position, slant, thickness)
-# survives and the identity changes. Stable Diffusion's img2img does exactly this, with text instead of labels.
+# output keeps less and less of the input, until at `strength=1` it is unrelated to it. The switch happens over a
+# narrow range of strengths, where the noise level reaches the scale of the features that distinguish the two
+# digits; there the coarse shape of the input (position, slant, thickness) survives while the identity changes.
+# Where exactly that range lies depends on the schedule, the step grid and the guidance scale, which is why
+# img2img users tune `strength` per image. Stable Diffusion's img2img does exactly this, with text instead of
+# labels.
 #
 # ## 7 · Bridge: our model under 🤗 diffusers' schedulers
 #
@@ -821,24 +844,31 @@ if HAVE_DIFFUSERS:
     z_mine = ddim_cfg(ldm_ema, z_T, y_cmp, 3.0, grid_hf)
     z_euler = diffusers_sample(ldm_ema, EulerDiscreteScheduler(**OUR_SCHEDULE), z_T, y_cmp, 3.0, timesteps=grid_hf)
     print(f"DDIMScheduler timesteps: {grid_hf}")
-    print(f"max |DDIMScheduler - our ddim_cfg|            = {(z_hf - z_mine).abs().max().item():.2e}")
-    print(f"max |EulerDiscreteScheduler - DDIMScheduler|  = {(z_euler - z_hf).abs().max().item():.2e}")
-    assert torch.allclose(z_hf, z_mine, atol=1e-3) and torch.allclose(z_euler, z_hf, atol=1e-2)
+    rel = lambda a, b: ((a - b).pow(2).mean() / b.pow(2).mean()).sqrt().item()   # relative RMS difference
+    print(f"DDIMScheduler vs our ddim_cfg:          max |diff| {(z_hf - z_mine).abs().max().item():.1e}, "
+          f"relative RMS {rel(z_hf, z_mine):.1e}")
+    print(f"EulerDiscreteScheduler vs DDIMScheduler: max |diff| {(z_euler - z_hf).abs().max().item():.1e}, "
+          f"relative RMS {rel(z_euler, z_hf):.1e}")
+    assert rel(z_hf, z_mine) < 1e-3 and rel(z_euler, z_hf) < 1e-2
 else:
     print("diffusers is not installed: `pip install diffusers transformers accelerate` to run this section")
 
 # %% [markdown]
-# Both checks pass: the scheduler is notebook 04's arithmetic, packaged. (The tiny Euler–DDIM difference comes from
-# Euler starting at exactly $\sigma_{\max}$ rather than $\sqrt{\sigma_{\max}^2+1}$, a relative difference of
-# about $10^{-5}$.)
+# Both checks pass: the scheduler is notebook 04's arithmetic, packaged. (The small Euler–DDIM difference is
+# floating-point rounding, since Euler's variable $x/\sqrt{\bar\alpha}$ is up to $\sigma_{\max}\approx160$ times
+# larger, plus the fact that Euler starts at exactly $\sigma_{\max}$ rather than at $\sqrt{\sigma_{\max}^2+1}$.)
 #
 # Now the comparison that matters in practice: sample quality versus cost. Every deterministic sampler here
 # approximately solves the same probability-flow ODE from the same $z_T$, so we can measure **sampler error alone**,
-# separately from model error. The reference is a 200-step DPM-Solver++ solution from the same starting noise. We
-# include DDIM twice, with **"trailing"** timesteps (the grid starts at $t=999$) and with **"leading"** timesteps,
-# the default of `DDIMScheduler` and of SD 1.5's config. With leading spacing and $N$ steps, the first timestep is
-# $T - T/N$ (plus `steps_offset`), not $T-1$: the sampler starts from pure noise but tells the network it is at a
-# lower noise level. Lin et al. (2024) pointed out this flaw.
+# separately from model error. The reference is a 200-step DPM-Solver++ solution from the same starting noise.
+# Each sampler uses its default timestep grid, and we include DDIM twice:
+#
+# * **"trailing"** timesteps start at $t=T-1$: for $N=4$, $\{999, 749, 499, 249\}$;
+# * **"leading"** timesteps (the default of `DDIMScheduler`, and SD 1.5's config) are $\{0, T/N, 2T/N, \dots\}$
+#   reversed (plus `steps_offset`): for $N=4$, $\{750, 500, 250, 0\}$. The sampler starts from pure noise but tells
+#   the network that it is at $t=750$. Lin et al. (2024) pointed out this flaw;
+# * Euler's default "linspace" grid, $\{999, 666, 333, 0\}$ for $N=4$, ends with a network call at $t=0$, where almost
+#   no noise is left to remove.
 
 # %%
 if HAVE_DIFFUSERS:
@@ -860,33 +890,46 @@ if HAVE_DIFFUSERS:
             if n == NFES[1]:
                 imgs_at[name] = x_n[:10].cpu()
 
-    fig = plt.figure(figsize=(10, 3.8))
-    ax = fig.add_subplot(1, 2, 1)
+    fig, axes = plt.subplots(1, 2, figsize=(10, 3.9), gridspec_kw=dict(width_ratios=[1, 1.05]))
+    ax = axes[0]
     for name, (_, c, style) in samplers.items():
         ax.plot(NFES, errors[name], style, color=c, label=name, ms=4)
-    ax.set(xscale="log", yscale="log", xlabel="number of sampling steps (each = 1 batched CFG network call)",
+    ax.set(xscale="log", yscale="log", xlabel="sampling steps (each = one batched CFG network call)",
            ylabel="RMS pixel error vs reference", title="Sampler error on our latent model (w = 3)")
     ax.set_xticks(NFES, [str(n) for n in NFES])
-    ax.legend()
+    ax.xaxis.set_minor_formatter(matplotlib.ticker.NullFormatter())
+    ax.legend(loc="lower left")
     ax.grid(alpha=0.3, which="both")
-    ax = fig.add_subplot(1, 2, 2)
     rows = torch.cat([x_ref[:10].cpu()] + [imgs_at[name] for name in samplers])
-    dm.show_images(rows, nrow=10, ax=ax, title=f"rows: reference, then {NFES[1]} steps of: " + ", ".join(samplers))
+    dm.show_images(rows, nrow=10, ax=axes[1], title=f"reference (top), then {NFES[1]} steps of each sampler\n"
+                                                    "(rows in legend order)")
     plt.tight_layout()
     plt.show()
     for name in samplers:
         print(f"{name:18s}: " + "  ".join(f"{n}:{e:.3f}" for n, e in zip(NFES, errors[name])))
+    # How much signal does the first "leading" timestep claim? For unit-variance data corr(z_t, z_0) = sqrt(abar_t).
+    for n in (4, 8):
+        t1 = (n - 1) * (1000 // n)
+        print(f"leading grid, {n} steps: first t = {t1}; corr(z_t, z_0) there = {np.sqrt(abar_ours[t1]):.3f} "
+              f"under our schedule vs {np.sqrt(abar_sd[t1]):.3f} under SD's (pure noise: 0)")
 
 # %% [markdown]
-# Three practical lessons, all on a model we trained ourselves:
+# At 6 steps the samples of all four samplers already look much alike (right); the curves quantify the differences.
+# Practical lessons, all on a model we trained ourselves:
 #
-# * **DDIM and Euler are the same first-order method** (their curves nearly coincide); the small differences come from
-#   their default timestep grids.
-# * **DPM-Solver++ (2M)**, a second-order multistep solver (Lu et al. 2022), reaches a given error with fewer steps.
-#   That is why 20–25 DPM-Solver++ steps are a common default for Stable Diffusion, instead of 50 DDIM or PNDM steps.
-# * **"Leading" timesteps hurt at small step counts**: at 4–8 steps the sampler skips the high-noise part of the
-#   schedule. With 50 steps it hardly matters, which is why the flaw went unnoticed for a while. Use
-#   `timestep_spacing="trailing"` for few-step sampling.
+# * **The grid matters as much as the solver.** DDIM and Euler are the same first-order method (the check above), yet
+#   their curves differ, because of their default grids: Euler spends one of its few network calls at $t=0$.
+# * **DPM-Solver++ (2M)**, a second-order multistep solver (Lu et al. 2022), has the smallest error for most step
+#   counts and the steepest decline. That is why 20–25 DPM-Solver++ steps are a common default for Stable Diffusion,
+#   instead of 50 DDIM or PNDM steps.
+# * **"Leading" vs "trailing" depends on the schedule.** The leading grid starts from pure noise while claiming a
+#   lower noise level. How wrong that is depends on how much signal the schedule leaves at that timestep (printed).
+#   Under our linear schedule almost none is left at $t=750$, so the mismatch is negligible, and leading here even
+#   tends to come out ahead: it spends its few steps at lower noise levels, where they matter more. Under SD's "scaled_linear"
+#   schedule a clearly non-zero correlation remains at the first leading timestep, so the sampler starts from a
+#   distribution the network does not expect. That is the flaw Lin et al. (2024) identified, and why
+#   `timestep_spacing="trailing"` is recommended for few-step sampling with SD-like schedules. The general rule is to
+#   check what the first timestep means under *your* schedule.
 #
 # # Part B · Stable Diffusion with 🤗 diffusers
 #
@@ -899,8 +942,9 @@ if HAVE_DIFFUSERS:
 # * `pip install "diffusers>=0.30" transformers accelerate`. This notebook's Part B was written against
 #   **diffusers 0.43, transformers 5.23 and accelerate 1.16**; every class, method and argument used below was checked
 #   against those versions. The model weights could not be downloaded when this notebook was prepared, so Part B
-#   has not been executed end to end, and the descriptions of its outputs say what to expect, not what was
-#   measured.
+#   has not been run with the real model, and the descriptions of its outputs say what to expect, not what was
+#   measured. The code itself was run end to end on a tiny, randomly initialised pipeline built from the same
+#   component classes, where the hand-written loop of B.3 reproduced `pipe(...)` exactly.
 #
 # Set `RUN_SD = True` in the next cell to run Part B. With `RUN_SD = False` (the default), the cells only print a
 # message, so the notebook still runs top to bottom anywhere.
@@ -987,6 +1031,8 @@ else:
 # %%
 if SD_OK:
     for name, comp in pipe.components.items():
+        if comp is None:                                 # optional components this pipeline does not use
+            continue
         n_par = f"{sum(p.numel() for p in comp.parameters()) / 1e6:8.1f} M params" if isinstance(comp, nn.Module) else ""
         print(f"{name:18s} {type(comp).__name__:32s} {n_par}")
     print("latent channels:", pipe.unet.config.in_channels, "| latent size:", pipe.unet.config.sample_size,
@@ -1041,7 +1087,8 @@ def sd_sample(prompt, negative_prompt="", scheduler=None, steps=30, guidance_sca
 
 if SD_OK:
     from diffusers import DDIMScheduler
-    pipe.scheduler = DDIMScheduler.from_config(pipe.scheduler.config)            # swap the sampler (B.4)
+    # swap the sampler (B.4); clip_sample=False because DDIMScheduler's default clips latents to [-1, 1] (§7)
+    pipe.scheduler = DDIMScheduler.from_config(pipe.scheduler.config, clip_sample=False)
     z_T = torch.randn((1, 4, 64, 64), generator=torch.Generator("cpu").manual_seed(1), dtype=SD_DTYPE)
     mine = sd_sample(PROMPT, steps=30, latents=z_T)
     theirs = pipe(PROMPT, num_inference_steps=30, guidance_scale=7.5, latents=z_T, output_type="pt").images
@@ -1056,7 +1103,11 @@ else:
 #
 # Schedulers are interchangeable because they share the training-schedule config:
 # `NewScheduler.from_config(pipe.scheduler.config)` builds a different sampler for the *same* trained network. Extra
-# keyword arguments override the config, e.g. `DDIMScheduler.from_config(cfg, timestep_spacing="trailing")`.
+# keyword arguments override the config, e.g. `DDIMScheduler.from_config(cfg, timestep_spacing="trailing")`. For DDIM,
+# always pass `clip_sample=False`: the training config of SD 1.5 belongs to a different scheduler class, and
+# `DDIMScheduler`'s own default clips the predicted latents to $[-1, 1]$ (§7). We also switch to "trailing" timesteps:
+# under SD's schedule the first "leading" timestep at 5 steps, $t=801$, still claims a correlation of about 0.2 with
+# the data (§7).
 # For the high-level API, assign it: `pipe.scheduler = DPMSolverMultistepScheduler.from_config(pipe.scheduler.config)`.
 #
 # *What you will see:* a 3×4 grid, samplers in rows and 5/10/20/40 steps in columns, all from the same seed. At 5 steps
@@ -1066,11 +1117,14 @@ else:
 # %%
 if SD_OK:
     from diffusers import DDIMScheduler, DPMSolverMultistepScheduler, EulerDiscreteScheduler
-    sd_samplers = {"DDIM": DDIMScheduler, "Euler": EulerDiscreteScheduler, "DPM-Solver++ (2M)": DPMSolverMultistepScheduler}
+    cfg = pipe.scheduler.config
+    sd_samplers = {"DDIM": lambda: DDIMScheduler.from_config(cfg, clip_sample=False, timestep_spacing="trailing"),
+                   "Euler": lambda: EulerDiscreteScheduler.from_config(cfg, timestep_spacing="trailing"),
+                   "DPM-Solver++ (2M)": lambda: DPMSolverMultistepScheduler.from_config(cfg, timestep_spacing="trailing")}
     STEP_LIST = [5, 10, 20, 40]
     imgs, titles = [], []
-    for name, cls in sd_samplers.items():
-        sch = cls.from_config(pipe.scheduler.config)
+    for name, make in sd_samplers.items():
+        sch = make()
         for n in STEP_LIST:
             t0 = time.time()
             imgs.append(sd_sample(PROMPT, scheduler=sch, steps=n, seed=0))
@@ -1095,7 +1149,7 @@ else:
 
 # %%
 if SD_OK:
-    dpm = DPMSolverMultistepScheduler.from_config(pipe.scheduler.config)
+    dpm = DPMSolverMultistepScheduler.from_config(pipe.scheduler.config, timestep_spacing="trailing")
     WS_SD = [1.0, 3.0, 7.5, 15.0]
     imgs = [sd_sample(PROMPT, scheduler=dpm, steps=25, guidance_scale=w, seed=0) for w in WS_SD]
     show_pils(imgs, [f"guidance_scale = {w}" for w in WS_SD], ncols=4)
@@ -1351,7 +1405,8 @@ else:
 # * A text-to-image pipeline is **condition → $z_T\sim\mathcal N(0,I)$ → guided denoising loop → decode**. Every line of
 #   it comes from notebooks 01–06; Stable Diffusion adds a CLIP text encoder and cross-attention.
 # * diffusers' **schedulers** are the samplers of notebook 04 behind `set_timesteps` / `scale_model_input` / `step`.
-#   DDIM is Euler; DPM-Solver++ converges faster; use "trailing" timesteps for few-step sampling; set
+#   DDIM is Euler; DPM-Solver++ converges faster; the timestep grid matters as much as the solver (check that the
+#   first timestep matches pure noise under your schedule, e.g. "trailing" spacing for SD); set
 #   `clip_sample=False` for latents.
 # * Practical knobs map to concepts: `guidance_scale` = CFG weight, `negative_prompt` = the unconditional branch,
 #   img2img `strength` = SDEdit's starting time, inpainting = replacement or a mask-conditioned U-Net, turbo models =

@@ -23,14 +23,15 @@
 #
 # **You will learn:**
 # - why behaviour cloning by regression fails on multimodal demonstrations (it returns the
-#   posterior *mean*), and how a conditional diffusion model fixes this by *sampling*;
+#   posterior *mean*), and how a conditional diffusion model fixes this by *sampling*, with the
+#   right state-dependent proportions of the modes (checked against ground truth);
 # - how to build and train a **diffusion policy** that maps the current state to a chunk of future
 #   waypoints, and how the noisiest denoiser *is* the regression policy;
 # - how to run it **closed-loop** with receding-horizon replanning, and why that buys robustness
 #   to perturbations;
 # - **planning as inpainting** (Diffuser): an unconditional trajectory prior plus clamped start and goal;
-# - **cost guidance**: steering the learned prior around an obstacle it has never seen, and the
-#   guidance-strength trade-off;
+# - **cost guidance**: steering the learned prior around an obstacle it has never seen, the
+#   guidance-strength trade-off, and how guided samples differ from the exact tilted distribution;
 # - why the **prediction target** ($\varepsilon$, $v$ or $\tau_0$) matters here: it decides which
 #   noise levels the network cares about, and the route is chosen at low signal-to-noise ratio;
 # - practical details: few-step sampling for real-time control, $\hat\tau_0$ clipping, schedule
@@ -39,7 +40,7 @@
 # **Prerequisites:** 01–04 (forward process, DDPM, Tweedie, DDIM), 06 (conditioning, guidance),
 # 07 (inpainting with the replacement trick).
 #
-# **Runtime:** about 5–8 min on a 4-core CPU (mostly training three small MLPs), 1–3 min on a GPU.
+# **Runtime:** about 4–8 min on a 4-core CPU (mostly training three small MLPs), 1–3 min on a GPU.
 
 # %%
 import time
@@ -87,9 +88,9 @@ N_EVAL = 200 if FAST else 1000        # starts used to compute metrics
 # The world is a plane with a disc obstacle at the origin. The agent starts somewhere in a box on
 # the left and has to reach the goal $G=(1,0)$ on the right. The expert's demonstrations are
 # smooth curves (cubic Bézier curves with random control points, traversed at constant speed,
-# plus a little waypoint jitter) that pass **above or below the obstacle with probability ½ each,
-# from every start**. So the distribution we want to imitate, $p(\tau\mid s)$, is bimodal for every
-# state $s$ in the start box.
+# plus a little waypoint jitter) that pass **above or below the obstacle**: a fair coin picks the
+# side, and curves that would pass too close to the obstacle are thrown away and redrawn. So the
+# distribution we want to imitate, $p(\tau\mid s)$, is bimodal for every state $s$ in the start box.
 #
 # This is not an artificial difficulty: human demonstrations are full of it. There are several
 # equally good ways to do most tasks, and different demonstrators (or the same one on different
@@ -137,7 +138,8 @@ def make_demos(n, rng, start_box=START_BOX, goal_box=None, clearance=0.15, jitte
 
     Each is a cubic Bezier curve whose two inner control points lie either above or below the
     obstacle (a fair coin decides), re-sampled at constant speed, plus a little waypoint jitter.
-    Curves passing closer than `clearance` to the obstacle are redrawn (rejection sampling).
+    Curves passing closer than `clearance` to the obstacle are redrawn from scratch (new start,
+    new coin flip): rejection sampling of the whole demonstration.
     goal_box=None uses the fixed GOAL; otherwise goals are uniform in the box.
     Returns (demos, route) with route = 1 for 'above' and 0 for 'below'.
     """
@@ -173,15 +175,17 @@ assert (clearance > 0).all() and np.allclose(demos[:, -1], GOAL)
 # A few helpers for drawing the world and trajectories, used in every figure below.
 
 # %%
-def draw_world(ax, extra_obstacles=(), title=None, start_box=START_BOX, goal=True):
-    """Obstacle (grey disc), start region (dashed green box) and goal (star)."""
+def draw_world(ax, extra_obstacles=(), title=None, start_box=START_BOX, goal=True, goal_box=None):
+    """Obstacle (grey disc), start region (dashed green box), goal (star) or goal region
+    (dashed gold box)."""
     ax.add_patch(Circle(OBST_C, OBST_R, color=COL["obstacle"], zorder=1))
     for c, r in extra_obstacles:
         ax.add_patch(Circle(c, r, color=COL["new"], alpha=0.7, zorder=1))
-    if start_box is not None:
-        (x0, x1), (y0, y1) = start_box
-        ax.add_patch(Rectangle((x0, y0), x1 - x0, y1 - y0, fill=False, ls="--", lw=1,
-                               color=COL["start"]))
+    for box, colour in [(start_box, COL["start"]), (goal_box, "goldenrod")]:
+        if box is not None:
+            (x0, x1), (y0, y1) = box
+            ax.add_patch(Rectangle((x0, y0), x1 - x0, y1 - y0, fill=False, ls="--", lw=1,
+                                   color=colour))
     if goal:
         ax.plot(*GOAL, marker="*", ms=13, color="gold", mec="k", zorder=6)
     ax.set_xlim(-1.3, 1.3)
@@ -231,6 +235,34 @@ plt.show()
 # %% [markdown]
 # Two clean modes, and their mean lies *inside* the obstacle. Keep that red dashed line in mind.
 #
+# **How likely is each route from a given start?** The coin is fair, but the rejection step is
+# not neutral. From a start high in the box, a curve that dips *below* the obstacle has to turn
+# harder, so it comes too close and is discarded more often than one that goes over. Keeping only
+# accepted demonstrations is conditioning on the event "accepted", so by Bayes' rule the route
+# probability from start $s$ is
+#
+# $$\pi(s)=P(\text{above}\mid s,\text{acc})=\frac{P(\text{acc}\mid s,\text{above})\cdot\tfrac12}
+# {P(\text{acc}\mid s,\text{above})\cdot\tfrac12+P(\text{acc}\mid s,\text{below})\cdot\tfrac12},$$
+#
+# which is ½ only where the two acceptance rates are equal, i.e. near the centre line. (The overall
+# fraction above stays close to ½ because the start box is symmetric.) We own the generator, so we
+# can measure $\pi(s)$ by Monte Carlo: run it with the start box shrunk to a single point.
+
+# %%
+def route_prob(s, n=2000, seed=1):
+    """Monte-Carlo estimate of pi(s) = P(above | start s) for the expert generator."""
+    _, r = make_demos(n, np.random.default_rng(seed), start_box=((s[0],) * 2, (s[1],) * 2))
+    return r.mean()
+
+
+for y in [-0.3, 0.0, 0.3]:
+    print(f"experts starting at (-1.0, {y:+.1f}): P(above) = {route_prob(np.array([-1.0, y])):.3f}")
+
+# %% [markdown]
+# So $p(\tau\mid s)=\pi(s)\,p_{\text{above}}(\tau\mid s)+\big(1-\pi(s)\big)\,p_{\text{below}}(\tau\mid s)$,
+# with $\pi(s)$ leaning towards the near side. That makes a useful test: a good imitator must
+# reproduce both routes, and also the right *proportion* of each from every state.
+#
 # ### Training pairs: (state, next $H$ waypoints)
 #
 # A policy must be queryable from *any* state the agent finds itself in, not only from the start.
@@ -238,6 +270,15 @@ plt.show()
 # $i$ the condition is the state $s = w_i$ and the target is the chunk
 # $\tau = (w_{i+1},\dots,w_{i+H})$. Beyond the end of a demonstration we pad with the goal
 # (the agent waits there). From the start state ($i=0$) the target is the whole demonstration.
+#
+# A side effect: a state $s$ in the start box is the start of some demonstrations, but also the
+# 1st or 2nd waypoint of others that began nearby (one expert step is about 0.08). So the
+# conditional the policy is actually fit to, $p_{\text{pairs}}(\tau\mid s)$, mixes demo phases. A
+# demonstration that has already moved upwards is more likely heading above, so towards the edges
+# of the box this conditional leans to the near side even more than $\pi(s)$ does. We need its
+# ground truth later. To get
+# it, we draw a large *fresh* set of demonstrations, cut them into pairs in the same way, and keep
+# the pairs whose state lies within a small radius of the query state (a kernel estimate).
 #
 # *Gotcha:* the network sees a chunk as a flat vector of length $2H$ ordered
 # $(x_1, y_1, x_2, y_2, \dots)$. Flatten and un-flatten with the same convention everywhere
@@ -281,6 +322,38 @@ plt.show()
 # The chunk from $w_{20}$ reaches the goal after 12 steps and then "waits" there (the remaining
 # dots pile up on the star), so every target has the same length $H$.
 #
+# Now the ground-truth sampler for the training-pair conditional, built from fresh demonstrations
+# (never used for training), and a comparison of the two route probabilities.
+
+# %%
+ref_demos, ref_route = make_demos(4000 if FAST else 40000, np.random.default_rng(10))
+ref_padded = np.concatenate([ref_demos, np.repeat(ref_demos[:, -1:], H, axis=1)], axis=1)
+
+
+def reference_pairs(s, radius=0.03):
+    """Fresh (state, chunk) pairs whose state lies within `radius` of s, cut exactly as in
+    make_windows: a Monte-Carlo sample of p_pairs(tau | s).
+    Returns states (n, 2), chunks (n, H, 2) and route labels (n,)."""
+    dist = np.linalg.norm(ref_padded[:, :H] - s, axis=-1)          # (N, H): one per window
+    n_i, i_i = np.nonzero(dist < radius)
+    chunks = ref_padded[n_i[:, None], i_i[:, None] + 1 + np.arange(H)]
+    return ref_padded[n_i, i_i], chunks, ref_route[n_i]
+
+
+# same convention as make_windows: pair (demo n, step i) = (w_i, w_{i+1..i+H})
+_st, _ch, _ = reference_pairs(ref_demos[0, 0], radius=1e-9)
+assert np.allclose(_ch[0], make_windows(ref_demos[:1])[1][0])
+for y in [-0.3, 0.0, 0.3]:
+    s = np.array([-1.0, y])
+    _, _, r = reference_pairs(s)
+    print(f"s = (-1.0, {y:+.1f}):  P(above) experts starting at s {route_prob(s):.3f}   "
+          f"training pairs with state near s {r.mean():.3f}  ({len(r)} pairs)")
+
+# %% [markdown]
+# Both conditionals are about ½ on the centre line and lean towards the near side away from it,
+# the pair conditional more strongly towards the edges of the box. From now on "ground truth" for
+# anything trained on pairs means $p_{\text{pairs}}(\tau\mid s)$.
+#
 # ## 2 · Baseline: behaviour cloning by regression
 #
 # The obvious approach is to regress the chunk on the state with a squared loss,
@@ -293,10 +366,11 @@ plt.show()
 # because the cross term $2\,\mathbb{E}\big[(\tau-\mathbb{E}[\tau|s])^\top(\mathbb{E}[\tau|s]-f(s))\big]$
 # vanishes once you condition on $s$. So $f^\star(s)=\mathbb{E}[\tau\mid s]$: the Bayes-optimal
 # point estimate under squared loss, the posterior mean. For our bimodal demonstrations,
-# $p(\tau\mid s)=\tfrac12 p_{\text{above}}(\tau\mid s)+\tfrac12 p_{\text{below}}(\tau\mid s)$, hence
-# $f^\star(s)=\tfrac12(\mu_{\text{above}}+\mu_{\text{below}})$: a path through the middle. The
-# posterior mean of a bimodal posterior is a value the posterior itself considers nearly
-# impossible. Averaging two good actions gives a bad one whenever the set of good actions is not
+# $p(\tau\mid s)=\pi(s)\,p_{\text{above}}(\tau\mid s)+(1-\pi(s))\,p_{\text{below}}(\tau\mid s)$, hence
+# $f^\star(s)=\pi(s)\,\mu_{\text{above}}(s)+(1-\pi(s))\,\mu_{\text{below}}(s)$ (with $\pi$ the
+# training-pair route probability): a path through the middle, pulled a little towards the more
+# likely route. The posterior mean of a bimodal posterior is a value the posterior itself
+# considers nearly impossible. Averaging two good actions gives a bad one whenever the set of good actions is not
 # convex, which is the usual situation in control.
 
 # %%
@@ -335,20 +409,26 @@ print(f"BC trained in {time.time() - t0:.0f} s")
 
 # %% [markdown]
 # **Check.** Because we own the data generator we can compute $\mathbb{E}[\tau\mid s]$ by Monte
-# Carlo: draw thousands of fresh demonstrations from one fixed start $s^\ast$ and average them. The
-# regression network should reproduce that average.
+# Carlo: average the chunks of the fresh reference pairs whose state lies near a fixed $s^\ast$.
+# The regression network should reproduce that average. (Averaging fresh demonstrations that
+# *start* exactly at $s^\ast$ would be the wrong reference: as we saw, the training pairs mix demo
+# phases.)
 
 # %%
+def rms_dist(a, b):
+    """Root-mean-square distance between corresponding waypoints of two (H, 2) paths."""
+    return np.sqrt(((a - b) ** 2).sum(-1).mean())
+
+
 s_star = np.array([-1.0, 0.1])
-fresh, fresh_route = make_demos(4000, np.random.default_rng(1),
-                                start_box=((s_star[0],) * 2, (s_star[1],) * 2))
-mc_mean = fresh[:, 1:].mean(0)                                  # E[tau | s*], (H, 2)
+ref_states, ref_chunks, ref_routes = reference_pairs(s_star)
+mc_mean = ref_chunks.mean(0)                                   # E[tau | s*], (H, 2)
 with torch.no_grad():
     bc_plan = to_paths(bc(to_tensor(s_star[None])))[0]
-rms = np.sqrt(((bc_plan - mc_mean) ** 2).sum(-1).mean())
-print(f"RMS distance BC(s*) vs Monte-Carlo E[tau|s*]: {rms:.3f}   "
+print(f"{len(ref_chunks)} reference pairs near s*, {ref_routes.mean():.1%} of them above")
+print(f"RMS distance BC(s*) vs Monte-Carlo E[tau|s*]: {rms_dist(bc_plan, mc_mean):.3f}   "
       f"(distance between the two route means: "
-      f"{np.sqrt(((fresh[fresh_route == 1, 1:].mean(0) - fresh[fresh_route == 0, 1:].mean(0)) ** 2).sum(-1).mean()):.2f})")
+      f"{rms_dist(ref_chunks[ref_routes == 1].mean(0), ref_chunks[ref_routes == 0].mean(0)):.2f})")
 
 # %% [markdown]
 # The network has learned the conditional mean (the RMS error is small compared with the distance
@@ -362,19 +442,21 @@ print(f"RMS distance BC(s*) vs Monte-Carlo E[tau|s*]: {rms:.3f}   "
 
 # %%
 def plan_metrics(starts, paths, obstacles=((OBST_C, OBST_R),), goals=GOAL):
-    """Summary statistics for plans paths (N, H, 2) that start at starts (N, 2)."""
+    """Summary statistics for plans paths (N, H, 2) that start at starts (N, 2).
+    goals=None skips the goal error (for plans whose endpoint is free or clamped)."""
     full = np.concatenate([starts[:, None], paths], 1)
     hit = np.zeros(len(full), dtype=bool)
     for c, r in obstacles:
         hit |= polyline_dist(full, c) < r
     above = np.array(route_colours(full)) == COL["above"]
-    goal_err = np.linalg.norm(full[:, -1] - goals, axis=-1)
     rough = (np.diff(full, 2, axis=1) ** 2).sum(-1).mean(1)
     i_mid = np.abs(full[..., 0] - OBST_C[0]).argmin(1)
     y_cross = full[np.arange(len(full)), i_mid, 1]
     spread = np.mean([y_cross[m].std() for m in (above, ~above) if m.sum() > 1])
-    return {"collision": hit.mean(), "above": above.mean(), "goal err": goal_err.mean(),
-            "roughness": rough.mean(), "spread": spread}
+    out = {"collision": hit.mean(), "above": above.mean()}
+    if goals is not None:
+        out["goal err"] = np.linalg.norm(full[:, -1] - goals, axis=-1).mean()
+    return {**out, "roughness": rough.mean(), "spread": spread}
 
 
 def print_metrics(name, m):
@@ -399,9 +481,10 @@ plt.tight_layout()
 plt.show()
 
 # %% [markdown]
-# Exactly as predicted: BC plans (red) are smooth, end at the goal, and drive straight through the
-# obstacle, nearly every time. More data or a bigger network cannot fix this; the *loss* asks for
-# the mean. (Classical fixes are mixture-density outputs, discretised actions, or energy-based
+# Exactly as predicted: BC plans (red) end at the goal, lean a little towards the start's side
+# (that is $\pi(s)$ at work), and drive through the obstacle nearly every time. They are also
+# somewhat rougher than the experts' curves. More data or a bigger network cannot fix the
+# collisions; the *loss* asks for the mean. (Classical fixes are mixture-density outputs, discretised actions, or energy-based
 # "implicit" policies. Diffusion has proved one of the most effective, especially for
 # high-dimensional action chunks.)
 #
@@ -508,8 +591,12 @@ class TrajectoryDenoiser(nn.Module):
 # * *Schedule.* The cosine schedule clamps its last $\beta$ at 0.999, which makes $\bar\alpha_{T-1}$
 #   tiny. With $\varepsilon$-prediction the first sampling step then computes
 #   $\hat\tau_0=(\tau_T-\sqrt{1-\bar\alpha}\,\hat\varepsilon)/\sqrt{\bar\alpha}$, amplifying the
-#   network's error by $1/\sqrt{\bar\alpha_{T-1}}$ (printed below); in our tests that produced
-#   plans with goal errors of 100+ units. We use the linear schedule.
+#   network's error by $1/\sqrt{\bar\alpha_{T-1}}$ (printed below, about ten times more than for the
+#   linear schedule). Without clipping (next bullet) that can throw plans far outside the
+#   workspace; clipping hides the symptom but not the cause. The problem is specific to
+#   $\varepsilon$-prediction: with $v$-prediction $\hat\tau_0=\sqrt{\bar\alpha_t}\,\tau_t-\sqrt{1-\bar\alpha_t}\,\hat v$
+#   stays well-conditioned as $\bar\alpha\to0$, which is why "zero terminal SNR" schedules are
+#   paired with $v$. Since we also train an $\varepsilon$-model, we use the linear schedule.
 # * *Clipping.* The workspace is bounded, so we clip $\hat\tau_0$ to $[-1.5,1.5]$ at every sampling
 #   step, just as images are clipped to $[-1,1]$.
 # * *Learning-rate decay.* Waypoints must be precise to a few hundredths. `dm.train_diffusion` keeps
@@ -565,6 +652,10 @@ for pred in ["eps", "v"]:
 # **Check.** The reweighting identities, on a real batch. For the $\varepsilon$-network, the
 # per-sample $\varepsilon$-error must equal $\mathrm{SNR}_t$ times the error of its implied
 # $\hat\tau_0$, and the error of its implied $\hat v$ must equal $(1+\mathrm{SNR}_t)$ times it.
+# This verifies the algebra (and our coefficient broadcasting), but note that it would hold for
+# *any* predictor, even one with random outputs: the forward process ties $\tau_0-\hat\tau_0$ to
+# $\varepsilon-\hat\varepsilon$ exactly. Whether the trained $\varepsilon$-network really neglects
+# low SNR is an empirical question, which we test right after.
 
 # %%
 idx = torch.randint(0, len(P_train), (512,), device=device)
@@ -583,6 +674,61 @@ print("eps identity, max rel. error:", ((eps_err - snr_chk * x0_err).abs() / eps
 print("v   identity, max rel. error:", ((v_err - (1 + snr_chk) * x0_err).abs() / v_err).max().item())
 assert torch.allclose(eps_err, snr_chk * x0_err, rtol=1e-3)
 assert torch.allclose(v_err, (1 + snr_chk) * x0_err, rtol=1e-3)
+
+# %% [markdown]
+# **The direct test.** For both trained networks, measure the quantity that matters for
+# sampling, the error of $\hat\tau_0$, separately at every noise level, on held-out pairs (cut from
+# the fresh reference demonstrations). We clip $\hat\tau_0$ as the sampler does. Two reference
+# levels help to read the plot. As $\mathrm{SNR}\to0$ the best possible error is that of
+# predicting $\tau_0$ from $s$ alone, i.e. the error of the BC regressor (dashed). And the shaded
+# band marks the noise levels where, as we will see below, the sampler chooses the route.
+
+# %%
+def random_reference_pairs(n, rng):
+    """n random (state, flat chunk) pairs from the fresh reference demonstrations."""
+    n_i, i_i = rng.integers(0, len(ref_padded), n), rng.integers(0, H, n)
+    chunks = ref_padded[n_i[:, None], i_i[:, None] + 1 + np.arange(H)]
+    return to_tensor(ref_padded[n_i, i_i]), to_tensor(chunks).flatten(1)
+
+
+S_ho, P_ho = random_reference_pairs(500 if FAST else 2000, np.random.default_rng(11))
+t_grid = np.arange(0, sched.T, 3)
+torch.manual_seed(0)
+noise_ho = torch.randn_like(P_ho)
+x0_mse = {pred: [] for pred in policies}
+for t in t_grid:
+    tt = torch.full((len(P_ho),), int(t), device=device, dtype=torch.long)
+    x_t = sched.q_sample(P_ho, tt, noise_ho)                 # same noise for both models
+    for pred, net in policies.items():
+        _, x0_hat = dm.model_predictions(net, x_t, tt, sched, y=S_ho, pred=pred, clip_x0=CLIP)
+        x0_mse[pred].append(((x0_hat - P_ho) ** 2).sum(1).mean().item())
+with torch.no_grad():
+    bc_mse = ((bc(S_ho) - P_ho) ** 2).sum(1).mean().item()
+
+snr_grid = sched.snr(torch.as_tensor(t_grid, device=device)).cpu().numpy()
+fig, ax = plt.subplots(figsize=(5.4, 3.3))
+ax.axvspan(1e-2, 3e-1, color="0.9", label="route is chosen here")
+ax.loglog(snr_grid, x0_mse["eps"], "^:", color=COL["bc"], ms=4, label=r"$\varepsilon$-model")
+ax.loglog(snr_grid, x0_mse["v"], "s-", color="k", ms=4, label="$v$-model")
+ax.axhline(bc_mse, color="0.4", ls="--", lw=1, label=r"BC regression ($\approx$ best at $\mathrm{SNR}=0$)")
+ax.set_xlabel(r"$\mathrm{SNR}_t$  (noise level; high noise on the left)")
+ax.set_ylabel(r"$\mathbb{E}\,\|\tau_0-\hat\tau_0\|^2$ (held out)")
+ax.set_title(r"error of $\hat\tau_0$ per noise level")
+ax.legend(fontsize=7)
+plt.tight_layout()
+plt.show()
+mid = (snr_grid > 1e-2) & (snr_grid < 3e-1)
+print(f"in the shaded band the eps-model's x0 error is "
+      f"{np.mean(np.array(x0_mse['eps'])[mid]) / np.mean(np.array(x0_mse['v'])[mid]):.1f}x the v-model's "
+      f"(average over {mid.sum()} noise levels)")
+
+# %% [markdown]
+# This is the loss weighting made visible. At high SNR the two models are comparably accurate
+# (the $\varepsilon$-loss puts its weight there). Towards low SNR the $v$-model's error levels off at
+# about the BC error, exactly as "the noisiest denoiser is the regression policy" predicts. The
+# $\varepsilon$-model's error instead grows roughly like $1/\mathrm{SNR}$: small errors in
+# $\hat\varepsilon$ are divided by $\sqrt{\bar\alpha_t}$, until clipping to the workspace caps them.
+# In the band where routes are chosen it is several times larger.
 
 # %% [markdown]
 # ### A sampler with hooks
@@ -702,36 +848,94 @@ axes[0, 0].legend(loc="lower left")
 plt.tight_layout()
 plt.show()
 
+# %% [markdown]
+# (20 samples per start.) From each start the diffusion policies produce plans along *both*
+# routes, while the BC plan (dashed red) splits the difference. With the same network and training
+# budget, the $v$-model is clearly better where it matters: far fewer plans cut through or graze
+# the obstacle, and its spread is much closer to the experts'. The $\varepsilon$-model's failures
+# are exactly the low-SNR kind: plans that never properly decided between the routes (they also
+# inflate its spread), while its committed plans are, if anything, *smoother*: it spends its
+# capacity on low-noise detail. Neither model is perfect, and both improve with more training and
+# a bigger network.
+#
+# **Check (probability matching).** Covering both routes is not enough. From every state the
+# policy should pick each route as often as the training pairs do, $\pi_{\text{pairs}}(s)$, and we
+# have that ground truth from `reference_pairs`. We sample many plans from each of a line of starts
+# and compare. (The overall "above" fraction printed earlier cannot test this: it is about ½ for
+# *any* rule that is symmetric in $y$, including "always take the nearer side".)
+
+# %%
+ys = np.linspace(-0.4, 0.4, 9)
+n_per = 40 if FAST else 300
+line_starts = np.stack([np.full(len(ys), -1.0), ys], 1)
+pi_gen = np.array([route_prob(s) for s in line_starts])
+pi_pairs, n_pairs = zip(*[(r.mean(), len(r)) for _, _, r in map(reference_pairs, line_starts)])
+pi_pairs, n_pairs = np.array(pi_pairs), np.array(n_pairs)
+starts_rep = np.repeat(line_starts, n_per, 0)
+pi_policy = {}
+for pred, net in policies.items():
+    torch.manual_seed(0)
+    paths = to_paths(sample_plans(net, to_tensor(starts_rep), pred=pred, n_steps=N_STEPS_POLICY))
+    full = np.concatenate([starts_rep[:, None], paths], 1)
+    pi_policy[pred] = (np.array(route_colours(full)) == COL["above"]).reshape(len(ys), n_per).mean(1)
+    print(f"{pred:3s}-policy: largest |P(above) - pi_pairs| over the starts = "
+          f"{np.abs(pi_policy[pred] - pi_pairs).max():.3f}")
+
+fig, ax = plt.subplots(figsize=(5.4, 3.4))
+se = np.sqrt(pi_pairs * (1 - pi_pairs) / n_pairs)
+ax.fill_between(ys, pi_pairs - 2 * se, pi_pairs + 2 * se, color="0.85")
+ax.plot(ys, pi_pairs, "o-", color="k", ms=4, label=r"ground truth $\pi_{\rm pairs}(s)$ ($\pm$2 s.e.)")
+ax.plot(ys, pi_gen, "o--", color="0.55", ms=3, lw=1, label=r"experts starting at $s$, $\pi(s)$")
+ax.plot(ys, pi_policy["v"], "s-", color=COL["above"], ms=4, label="$v$-policy")
+ax.plot(ys, pi_policy["eps"], "^:", color=COL["bc"], ms=4, label=r"$\varepsilon$-policy")
+ax.axhline(0.5, color="0.7", lw=0.8)
+ax.set_xlabel("start height $y$  (start $s=(-1, y)$)")
+ax.set_ylabel("P(route above | s)")
+ax.set_title(f"probability matching ({n_per} plans per start)")
+ax.legend(fontsize=7, loc="upper left")
+plt.tight_layout()
+plt.show()
+
 policy = policies["v"]           # the policy we use from now on
 
 # %% [markdown]
-# (20 samples per start.) From each start the diffusion policies produce plans along *both* routes, in roughly the
-# experts' 50/50 proportion (a "probability-matching" policy, in the language of decision making),
-# while the BC plan (dashed red) splits the difference. With the same network and training budget,
-# the $v$-model is clearly better where it matters: far fewer plans cut through or graze the
-# obstacle, and its spread is much closer to the experts'. The $\varepsilon$-model's failures are
-# exactly the low-SNR kind: plans that never properly decided between the routes (they also
-# inflate its spread), while its committed plans are, if anything, *smoother*: it spends its
-# capacity on low-noise detail. Neither model is perfect, and both improve with more training and
-# a bigger network. We use the $v$-model from now on.
+# The ground truth is ½ near the centre line and leans towards the near side further out. The
+# $v$-policy follows it fairly closely: it *probability-matches*, as a generative model should,
+# instead of always picking the more likely route. The $\varepsilon$-policy gets the proportions
+# wrong. It over-commits to the near side, behaving more like a "take the nearer route" rule than
+# like the experts. That is another symptom of poorly learned low-SNR levels, the levels where the
+# choice is made. (With 300 plans per start, each policy point has a sampling error of about ±3
+# percentage points; larger deviations are model error.) We use the $v$-model from now on.
 #
 # ### Watching the policy make up its mind
 #
 # Let's verify the punchline of the maths. Below, 16 samples from one start, and the model's
-# running guess $\hat\tau_0$ at a few points of the reverse process (20 steps; dashed red = BC plan).
+# running guess $\hat\tau_0$ at a few points of the reverse process (20 steps; dashed red = BC
+# plan). Each title counts the guesses whose path runs through the obstacle; in the last panel,
+# any final plan that collides is drawn in solid red.
 
 # %%
+def hits_obstacle(paths):
+    """Which paths (N, L, 2) enter the obstacle."""
+    return polyline_dist(paths, OBST_C) < OBST_R
+
+
 torch.manual_seed(1)
 cond = to_tensor(np.repeat(s_star[None], 16, 0))
 _, x0_hist = sample_plans(policy, cond, n_steps=20, return_x0=True)
 ts20 = ddim_timesteps(sched.T, 20)
 frames = [0, 6, 9, 12, 19]
-fig, axes = plt.subplots(1, len(frames), figsize=(13, 2.8))
+fig, axes = plt.subplots(1, len(frames), figsize=(13, 3.0))
 for ax, k in zip(axes, frames):
     paths = np.concatenate([np.repeat(s_star[None, None], 16, 0), to_paths(x0_hist[k])], 1)
+    hit = hits_obstacle(paths)
     ab = sched.alpha_bars[ts20[k]].item()
-    draw_world(ax, title=f"$\\hat\\tau_0$ at t = {ts20[k]}  (SNR={ab / (1 - ab):.1e})")
-    plot_paths(ax, paths, alpha=0.7)
+    draw_world(ax, title=f"$\\hat\\tau_0$ at t = {ts20[k]}  (SNR={ab / (1 - ab):.1e})\n"
+                         f"{hit.sum()}/16 through the obstacle")
+    colours = route_colours(paths)
+    if k == frames[-1]:                       # final plans: show failures in red
+        colours = [COL["bc"] if h else c for h, c in zip(hit, colours)]
+    plot_paths(ax, paths, colours=colours, alpha=0.7)
     ax.plot(bc_plan[:, 0], bc_plan[:, 1], "--", color=COL["bc"], lw=1.2)
 plt.tight_layout()
 plt.show()
@@ -740,36 +944,49 @@ plt.show()
 # At the highest noise level every sample's $\hat\tau_0$ lies on top of the BC plan: the noisiest
 # denoiser *is* the regression policy, mean path through the obstacle included. As the SNR grows
 # past roughly $10^{-2}$ the guesses peel away from the mean towards one route or the other, and
-# by $\mathrm{SNR}\approx 0.3$ each sample has committed and is merely being refined. The route is
-# chosen at low SNR, which is exactly where $\varepsilon$-prediction puts little weight
+# by $\mathrm{SNR}\approx 0.3$ most samples have committed and are merely being refined. The route
+# is chosen at low SNR, which is exactly where $\varepsilon$-prediction puts little weight
 # (Exercise 6 shows what this figure looks like for the $\varepsilon$-model).
 #
-# **Check (tower property).** Averaging Tweedie's estimate over the noise gives back the BC answer
-# at *every* noise level,
+# Not every sample need commit in time. A sample whose guess is still near the mean path when the
+# noise runs out ends up *on* it, through the obstacle. That is the policy's residual failure mode
+# (the remaining collisions in the table above), and it is a low-SNR failure: the decision was
+# never made. Watch for red solid paths in the last panel; rerun with other seeds to see how
+# often it happens.
+#
+# **Check (tower property).** Averaging Tweedie's estimate over the noise gives back the
+# conditional mean at *every* noise level,
 # $\mathbb{E}_{\tau_t\mid s}\big[\mathbb{E}[\tau_0\mid\tau_t,s]\big]=\mathbb{E}[\tau_0\mid s]$, even
-# though individual estimates at low noise are far from it. We noise the fresh demonstrations from
-# $s^\ast$, denoise them in one shot with the network, and compare.
+# though individual estimates at low noise are far from it. We noise the reference chunks near
+# $s^\ast$, denoise them in one shot with the network (conditioned on each pair's own state), and
+# compare with their Monte-Carlo mean. How informative is this? At low noise $\tau_t\approx\sqrt{\bar\alpha_t}\,\tau_0$
+# already, so even the *trivial* estimator $\tau_t/\sqrt{\bar\alpha_t}$, which knows nothing about
+# $p(\tau\mid s)$, averages back to the mean. We print it as a baseline. Only where it fails
+# (high noise) does agreement show that the network has learned $\mathbb{E}[\tau_0\mid s]$.
 
 # %%
-fresh_flat = to_tensor(fresh[:, 1:]).flatten(1)
-cond = to_tensor(np.repeat(s_star[None], len(fresh_flat), 0))
+ref_flat, ref_cond = to_tensor(ref_chunks).flatten(1), to_tensor(ref_states)
 torch.manual_seed(0)
+print(f"{'t':>3s} {'SNR':>8s}   RMS(mean x0_hat - MC mean): network   trivial"
+      f"   mean RMS(single x0_hat - BC)")
 for t in [5, 30, 60, 90]:
-    tt = torch.full((len(fresh_flat),), t, device=device, dtype=torch.long)
-    with torch.no_grad():
-        _, x0_hat = dm.model_predictions(policy, sched.q_sample(fresh_flat, tt), tt, sched,
-                                         y=cond, pred="v")
+    tt = torch.full((len(ref_flat),), t, device=device, dtype=torch.long)
+    x_t = sched.q_sample(ref_flat, tt)
+    _, x0_hat = dm.model_predictions(policy, x_t, tt, sched, y=ref_cond, pred="v")
     avg = x0_hat.mean(0).reshape(H, 2).cpu().numpy()
+    avg_trivial = (x_t / sched.sqrt_alpha_bars[t]).mean(0).reshape(H, 2).cpu().numpy()
     single = x0_hat.reshape(-1, H, 2).cpu().numpy()
-    print(f"t = {t:2d}: RMS(average x0_hat - MC mean) = {np.sqrt(((avg - mc_mean) ** 2).sum(-1).mean()):.3f}"
-          f"   RMS(average x0_hat - BC) = {np.sqrt(((avg - bc_plan) ** 2).sum(-1).mean()):.3f}"
-          f"   mean RMS(single x0_hat - BC) = {np.sqrt(((single - bc_plan) ** 2).sum(-1).mean(1)).mean():.3f}")
+    print(f"{t:3d} {sched.snr(t).item():8.1e}   {rms_dist(avg, mc_mean):33.3f}   "
+          f"{rms_dist(avg_trivial, mc_mean):7.3f}   "
+          f"{np.sqrt(((single - bc_plan) ** 2).sum(-1).mean(1)).mean():27.3f}")
 
 # %% [markdown]
-# The *average* denoised chunk agrees with both the Monte-Carlo mean and the BC network to within a
-# few hundredths at every noise level. *Individual* denoised chunks agree with BC only at high
-# noise; at low noise they are far from it, on one route or the other. Diffusion and regression
-# agree on the mean; only diffusion gets the distribution right.
+# At low noise the network and the trivial estimator both agree with the Monte-Carlo mean, as they
+# must. At high noise the trivial estimator is useless while the network's *average* stays within
+# a few hundredths of the mean: it has learned $\mathbb{E}[\tau_0\mid s]$, the BC answer.
+# *Individual* denoised chunks agree with BC only at high noise; at low noise they are far from
+# it, on one route or the other. Diffusion and regression agree on the mean; only diffusion gets
+# the distribution right.
 #
 # ### How many denoising steps does a controller need?
 #
@@ -787,7 +1004,8 @@ for name, (pred, eta) in variants.items():
         torch.manual_seed(0)
         t0 = time.time()
         paths = to_paths(sample_plans(policies[pred], cond_eval, pred=pred, n_steps=n_steps, eta=eta))
-        nfe_res[name].append({**plan_metrics(eval_starts, paths), "ms": 1e3 * (time.time() - t0)})
+        ms = 1e3 * (time.time() - t0)            # time the sampler only, not the metrics
+        nfe_res[name].append({**plan_metrics(eval_starts, paths), "ms": ms})
     print(f"{name:28s} collision rate vs steps: " +
           " ".join(f"{n}:{r['collision']:.3f}" for n, r in zip(nfe_list, nfe_res[name])))
 
@@ -815,9 +1033,14 @@ plt.show()
 # With very few steps most samples land *between* the routes: the route is decided over a range of
 # noise levels, and two or three big steps cannot resolve that decision (the $v$-model then returns
 # something close to the mean path, the regression answer; the $\varepsilon$-model returns
-# garbage). Stochastic sampling ($\eta=1$) collides less than the deterministic ODE ($\eta=0$) at
-# equal cost, because the fresh noise lets later steps correct earlier errors. The
-# $\varepsilon$-model collides more at every budget, yet its plans are smooth once it has
+# garbage). With 2–5 steps every variant fails often, and their order there means little
+# (deterministic DDIM is often as good or better at such tiny budgets, as the DDIM paper found).
+# From about 10 steps on, stochastic sampling ($\eta=1$) collides less than the deterministic ODE
+# ($\eta=0$) at equal cost, and its plans are also much smoother. The fresh noise, re-denoised at
+# every step, acts as a corrector that washes out earlier errors, whereas the ODE carries its
+# residual errors (and leftover noise the network failed to remove) all the way to the end
+# (Karras et al. 2022 discuss this trade-off). The $\varepsilon$-model collides more than the
+# $v$-model at every practical budget (10 steps or more), yet its plans are smooth once it has
 # committed: the signature of a loss that favours low-noise detail over the high-noise decision.
 # In practice diffusion policies are trained with many noise levels but executed with tens of
 # steps or fewer, and few-step generation (distillation, consistency models; see notebook 08 for
@@ -838,8 +1061,9 @@ plt.show()
 # far from where the plan said it would be.
 #
 # The environment is a kinematic point mass: each step it moves towards the commanded waypoint
-# at most `V_MAX` per step (a little faster than the experts); if its path segment enters an
-# obstacle it crashes and stays put, and once it is within 0.1 of the goal the episode is a success. To test robustness we **perturb** the agent: at step 12 it is
+# at most `V_MAX` per step (about twice the experts' step, so it can always reach the next
+# waypoint); if its path segment enters an obstacle it crashes and stays put, and once it is within
+# 0.1 of the goal the episode is a success. To test robustness we **perturb** the agent: at step 12 it is
 # teleported to its mirror image $y\to -y$, i.e. to the other side of the obstacle (think of a
 # push, or a sudden correction of its state estimate). An open-loop agent keeps chasing its stale
 # plan, which now lies on the far side of the obstacle.
@@ -922,9 +1146,11 @@ def diffusion_planner(states, **kw):
 
 
 def draw_rollouts(ax, res, title):
+    """Executed paths: black = reached the goal, red with x = crashed, grey = ran out of time."""
     draw_world(ax, title=title)
-    for p, crashed in zip(res["path"], res["crashed"]):
-        ax.plot(p[:, 0], p[:, 1], color=COL["bc"] if crashed else "k", lw=1.0, alpha=0.8)
+    for p, crashed, success in zip(res["path"], res["crashed"], res["success"]):
+        colour = COL["bc"] if crashed else ("k" if success else "0.6")
+        ax.plot(p[:, 0], p[:, 1], color=colour, lw=1.0, alpha=0.8)
         if crashed:
             last = p[~np.isnan(p[:, 0])][-1]
             ax.plot(*last, "x", color=COL["bc"], ms=7, mew=2, zorder=6)
@@ -943,7 +1169,8 @@ plt.tight_layout()
 plt.show()
 
 # %% [markdown]
-# Black paths reached the goal, red ones crashed (×); the gaps are the teleport at step 12. After
+# Black paths reached the goal, red ones crashed (×), grey ones (if any) ran out of time; the gaps
+# are the teleport at step 12. After
 # the push, the open-loop agents steer straight back towards their stale plans, through the
 # obstacle. The closed-loop agent notices it is off-plan, replans from where it actually is, and
 # usually just continues along the route on its new side: the multimodal policy offers a good plan
@@ -966,14 +1193,16 @@ for name, (fn, k) in controllers.items():
 # With the push, open-loop controllers fail (they are executing a plan for a world that no longer
 # exists) while the receding-horizon diffusion policy recovers in most episodes.
 #
-# The last row holds a surprise worth understanding: feedback rescues much of *BC* too. Its plan
-# from an off-centre start leans slightly towards one side; after a few steps the agent is at a
-# state that, in the demonstrations, is mostly followed by one route, so there the conditional
-# mean is (nearly) unimodal and safe. Replanning amplifies the small asymmetry, a bit like a ball
-# rolling off a ridge. BC still crashes from starts near the centre line, where the average stays
-# ambiguous all the way to the obstacle: the regression policy's failure set shrinks to the
-# symmetric situations, but it does not vanish, and it would grow with noisier states or modes
-# that start out closer together. The diffusion policy needs no such luck because it commits to
+# The last row holds a surprise worth understanding: feedback rescues much of *BC* too. From an
+# off-centre start $\pi_{\text{pairs}}(s)\neq\tfrac12$ (the probability-matching plot), so the
+# conditional mean leans towards the more likely route. After a few steps along it the agent is at
+# a state from which, in the training pairs, that route dominates even more (further out, $\pi$
+# approaches 0 or 1), so there the conditional mean is (nearly) unimodal and safe. Replanning
+# amplifies the initial asymmetry, a bit like a ball rolling off a ridge. BC still crashes from
+# starts near the centre line, where $\pi\approx\tfrac12$ and the average stays ambiguous all the
+# way to the obstacle: the regression policy's failure set shrinks to the symmetric situations,
+# but it does not vanish, and it would grow with noisier states or modes that start out closer
+# together. The diffusion policy needs no such luck because it commits to
 # a mode by *sampling*. Either way, closed loop costs compute: one planning run per replanning step.
 #
 # ## 5 · Planning as inpainting (Diffuser)
@@ -985,8 +1214,9 @@ for name, (fn, k) in controllers.items():
 #
 # $$\tau\sim p(\tau\mid w_0=s,\;w_H=g),$$
 #
-# and the same network can then plan between *any* start and goal (and, below, satisfy new
-# constraints) without retraining. We use the **replacement trick**: after every reverse step,
+# and the same network can then plan between any start/goal pair within the range it was trained
+# on, without retraining (and, with the guidance of Section 6, satisfy new constraints too). We use
+# the **replacement trick**: after every reverse step,
 # overwrite the known coordinates $y$ with a sample of the forward process at the new noise level,
 # $\sqrt{\bar\alpha_{t'}}\,y+\sqrt{1-\bar\alpha_{t'}}\,\varepsilon$, so that the network always sees a
 # consistently-noised trajectory. (Diffuser's own code instead clamps the known states to their
@@ -994,7 +1224,8 @@ for name, (fn, k) in controllers.items():
 #
 # Replacement is only approximately right: the unknown coordinates learn about the clamped ones
 # solely through the network's next prediction, so with few steps the two parts may not agree
-# ("harmonisation" error, notebook 07). RePaint's remedy is to **resample**: after a step
+# (a "harmonisation" error; notebook 07 shows that replacement is biased even with a perfect
+# model). RePaint's remedy is to **resample**: after a step
 # $t\to t'$, diffuse back $t'\to t$ with the forward kernel
 # $\tau_t=\sqrt{\bar\alpha_t/\bar\alpha_{t'}}\,\tau_{t'}+\sqrt{1-\bar\alpha_t/\bar\alpha_{t'}}\;z$ and
 # repeat the step, giving the network several chances to make the two parts consistent (the
@@ -1041,12 +1272,20 @@ def seam_ratio(paths):
 # We plan between random start/goal pairs with plain replacement and with 5× resampling.
 
 # %%
+def in_box(points, box):
+    """Which points (N, 2) lie inside the box ((x0, x1), (y0, y1)), with a small tolerance."""
+    (x0, x1), (y0, y1) = box
+    tol = 0.02
+    return ((points[:, 0] > x0 - tol) & (points[:, 0] < x1 + tol)
+            & (points[:, 1] > y0 - tol) & (points[:, 1] < y1 + tol))
+
+
 torch.manual_seed(0)
 uncond = to_paths(sample_plans(diffuser, None, n=N_EVAL, n_steps=20, dim=D_TRAJ))
-print_metrics("trajectory demos", plan_metrics(traj_demos[:, 0], traj_demos[:, 1:],
-                                               goals=traj_demos[:, -1]))
-print_metrics("unconditional samples", plan_metrics(uncond[:, 0], uncond[:, 1:],
-                                                    goals=uncond[:, -1]))
+for name, tr in [("trajectory demos", traj_demos), ("unconditional samples", uncond)]:
+    print_metrics(name, plan_metrics(tr[:, 0], tr[:, 1:], goals=None))
+    print(f"    start in start box {in_box(tr[:, 0], WIDE_START).mean():.1%}, "
+          f"end in goal box {in_box(tr[:, -1], GOAL_BOX).mean():.1%}")
 
 rng_pairs = np.random.default_rng(5)
 pair_starts = np.stack([rng_pairs.uniform(*WIDE_START[0], N_EVAL),
@@ -1059,22 +1298,25 @@ for resample in [1, 5]:
     inp = inpaint_plans(diffuser, pair_starts, pair_goals, resample=resample)
     err = max(np.abs(inp[:, 0] - pair_starts).max(), np.abs(inp[:, -1] - pair_goals).max())
     assert err < 1e-5, err
-    print_metrics(f"inpainted, resample={resample}", plan_metrics(inp[:, 0], inp[:, 1:], goals=pair_goals))
+    print_metrics(f"inpainted, resample={resample}", plan_metrics(inp[:, 0], inp[:, 1:], goals=None))
     print(f"    max endpoint error {err:.1e}, seam ratio {seam_ratio(inp):.2f}")
 
 # %%
 pairs = [((-1.0, 0.6), (1.0, -0.6)), ((-1.0, -0.6), (1.0, 0.6)), ((-1.0, 0.0), (1.0, 0.0))]
 fig, axes = plt.subplots(2, 4, figsize=(13, 5.6))
-draw_world(axes[0, 0], title="training trajectories", start_box=WIDE_START, goal=False)
+draw_world(axes[0, 0], title="training trajectories", start_box=WIDE_START, goal=False,
+           goal_box=GOAL_BOX)
 plot_paths(axes[0, 0], traj_demos[:30], alpha=0.6)
-draw_world(axes[1, 0], title="unconditional samples", start_box=WIDE_START, goal=False)
+draw_world(axes[1, 0], title="unconditional samples", start_box=WIDE_START, goal=False,
+           goal_box=GOAL_BOX)
 plot_paths(axes[1, 0], uncond[:30], alpha=0.6)
 for row, resample in enumerate([1, 5]):
     for ax, (s_, g_) in zip(axes[row, 1:], pairs):
         torch.manual_seed(0)
         paths = inpaint_plans(diffuser, np.repeat([s_], 12, 0), np.repeat([g_], 12, 0),
                               resample=resample)
-        draw_world(ax, title=f"{s_} -> {g_}, resample={resample}", start_box=WIDE_START, goal=False)
+        draw_world(ax, title=f"{s_} -> {g_}, resample={resample}", start_box=WIDE_START,
+                   goal=False, goal_box=GOAL_BOX)
         plot_paths(ax, paths, alpha=0.7)
         ax.plot(*s_, "o", color="k", ms=6, zorder=6)
         ax.plot(*g_, "*", color="gold", mec="k", ms=13, zorder=6)
@@ -1082,8 +1324,9 @@ plt.tight_layout()
 plt.show()
 
 # %% [markdown]
-# The unconditional model has learned "trajectories from somewhere on the left to somewhere on
-# the right, around the obstacle". Clamping two waypoints turns it into a goal-conditioned
+# The unconditional model has learned "trajectories from somewhere in the start region (dashed
+# green) to somewhere in the goal region (dashed gold), around the obstacle". Clamping two
+# waypoints turns it into a goal-conditioned
 # planner, still with both routes, including for start/goal combinations that cross diagonally.
 # With plain replacement (top row) the clamped endpoints and the rest of the plan do not always
 # agree: plans begin or end with a jump (a seam ratio well above 1) and are jittery. Resampling
@@ -1106,21 +1349,38 @@ plt.show()
 # $$\nabla_{\tau_t}\log\tilde p_t(\tau_t)=\nabla_{\tau_t}\log p_t(\tau_t\mid s)
 # +\nabla_{\tau_t}\log\mathbb{E}\big[e^{-\lambda C(\tau_0)}\,\big|\,\tau_t\big].$$
 #
-# The second term is intractable; the usual approximation (as in DPS, Chung et al. 2023) replaces
-# $\tau_0$ by its posterior mean $\hat\tau_0(\tau_t)$, giving $-\lambda\nabla_{\tau_t}C(\hat\tau_0)$.
-# If we further approximate $\partial\hat\tau_0/\partial\tau_t\approx I/\sqrt{\bar\alpha_t}$
-# (ignoring the network's Jacobian) and convert the score correction into an
-# $\varepsilon$ correction, $\Delta\varepsilon=-\sqrt{1-\bar\alpha_t}\,\Delta\text{score}$, the
-# update of $\hat\tau_0=(\tau_t-\sqrt{1-\bar\alpha_t}\,\varepsilon)/\sqrt{\bar\alpha_t}$ is
+# The second term is intractable. DPS (Chung et al. 2023) replaces $\tau_0$ inside the expectation
+# by its posterior mean $\hat\tau_0(\tau_t)$, giving the correction
+# $-\lambda\,\nabla_{\tau_t}C(\hat\tau_0)=-\lambda\,(\partial\hat\tau_0/\partial\tau_t)^\top\nabla C(\hat\tau_0)$.
+# The Jacobian has a neat closed form. Differentiating Tweedie's formula
+# $\hat\tau_0=\big(\tau_t+(1-\bar\alpha_t)\nabla\log p_t(\tau_t)\big)/\sqrt{\bar\alpha_t}$ and using
+# the second-order Tweedie identity
+# $\mathrm{Cov}[\tau_0\mid\tau_t]=\tfrac{1-\bar\alpha_t}{\bar\alpha_t}\big(I+(1-\bar\alpha_t)\nabla^2\log p_t(\tau_t)\big)$
+# gives
 #
-# $$\hat\tau_0\;\leftarrow\;\hat\tau_0-\lambda\,\frac{1-\bar\alpha_t}{\bar\alpha_t}\,\nabla C(\hat\tau_0).$$
+# $$\frac{\partial\hat\tau_0}{\partial\tau_t}=\frac{\sqrt{\bar\alpha_t}}{1-\bar\alpha_t}\,\mathrm{Cov}[\tau_0\mid\tau_t],$$
 #
-# We implement the simplest member of this family: a gradient step of *constant* size $\gamma$ on
-# $\hat\tau_0$, i.e. $\lambda_t=\gamma\,\bar\alpha_t/(1-\bar\alpha_t)=\gamma\cdot\mathrm{SNR}_t$:
-# weak guidance while the sample is mostly noise, strong guidance near the end. That is the
-# `cost_fn` hook of `sample_plans`. It is cheap (no backpropagation through the network) and
-# keeps $\gamma$ interpretable: $\gamma=\tfrac12$ moves a waypoint that penetrates the margin by
-# exactly its penetration depth.
+# a symmetric matrix. What does the correction do to the denoiser's output? With $\tau_t$ held
+# fixed, Tweedie's formula moves $\hat\tau_0$ by $(1-\bar\alpha_t)/\sqrt{\bar\alpha_t}$ times the
+# change of the score, so
+#
+# $$\Delta\hat\tau_0=-\lambda\,\mathrm{Cov}[\tau_0\mid\tau_t]\,\nabla C(\hat\tau_0):$$
+#
+# a gradient step on $\hat\tau_0$, preconditioned by the posterior covariance. (In the sampler, the
+# $\hat\varepsilon$ recomputed from the edited $\hat\tau_0$ then carries the corrected score.) Two
+# limits are worth knowing. Late in sampling (high SNR) the posterior is sharp and isotropic,
+# $\mathrm{Cov}\approx I/\mathrm{SNR}_t$, because only the noisy observation constrains it, so
+# $\Delta\hat\tau_0\approx-(\lambda/\mathrm{SNR}_t)\nabla C$. Early on (low SNR) $\mathrm{Cov}$
+# approaches the covariance of plans given $s$, which couples all the waypoints, so the exact
+# correction would move whole plans coherently.
+#
+# We implement the cheapest heuristic in this family: an *unpreconditioned* gradient step of
+# constant size $\gamma$ on $\hat\tau_0$. That is the high-SNR form above with
+# $\lambda_t=\gamma\,\mathrm{SNR}_t$; it is not an approximation of DPS at low SNR. It needs no
+# Jacobian (no backpropagation through the network), and it keeps $\gamma$ interpretable:
+# $\gamma=\tfrac12$ moves a waypoint that penetrates the margin by exactly its penetration depth.
+# That is the `cost_fn` hook of `sample_plans`. Because $\lambda_t$ changes with $t$, the result
+# is not a sample from $\tilde p$ for any single $\lambda$; we will measure how far it is from one.
 #
 # We put a new obstacle on the lower route and sweep $\gamma$.
 
@@ -1204,19 +1464,39 @@ plt.show()
 #
 # Notice also what guidance does *not* do: the fraction of plans going above barely changes,
 # although the upper route is the obvious way to avoid the new obstacle. The route is decided at
-# low SNR, where $\hat\tau_0$ is (close to) the mean path through the middle, which never touches
-# the new obstacle; so the point-estimate guidance term is zero exactly when it would matter for
-# the global choice. When that matters, cheap exact alternatives exist for low-dimensional
-# decisions: draw many plans and keep those with zero cost (rejection sampling from $\tilde p$
-# with $\lambda\to\infty$), or weight them by $e^{-\lambda C}$.
+# low SNR, where $\hat\tau_0$ is (close to) the mean path through the middle. That path never
+# touches the new obstacle, so $\nabla C(\hat\tau_0)=0$ and the point-estimate guidance term
+# vanishes exactly when it would matter for the global choice. (No preconditioner can fix a zero
+# gradient: the cost of the *mean* plan cannot see that half of the posterior's mass is heading
+# for trouble.) Guidance starts acting only once a sample has committed to the lower route, and
+# then it can only bend that plan locally.
+#
+# What would the target $\tilde p$ itself look like? For a low-dimensional decision like ours,
+# exact alternatives are cheap. Draw many unguided plans and keep those with zero cost: that is
+# rejection sampling from $\tilde p\propto p\,e^{-\lambda C}$ with $\lambda\to\infty$, i.e. from
+# $p(\tau\mid s)\,\mathbb{1}[C(\tau)=0]$. (Alternatively, weight the plans by $e^{-\lambda C}$.)
 
 # %%
-torch.manual_seed(0)
 raw = guide_paths[0.0]
 full = np.concatenate([eval_starts[:, None], raw], 1)
-accept = (polyline_dist(full, NEW_C) >= NEW_R) & (polyline_dist(full, OBST_C) >= OBST_R)
-print(f"rejection sampling: {accept.mean():.1%} of unguided plans avoid both obstacles; "
-      f"accepted plans go above {np.mean(np.array(route_colours(full))[accept] == COL['above']):.1%} of the time")
+cost = new_obstacle_cost(to_tensor(raw).flatten(1)).cpu().numpy()   # C(tau), as in guidance
+accept = cost == 0
+above = np.array(route_colours(full)) == COL["above"]
+print(f"rejection sampling: {accept.mean():.1%} of unguided plans have zero cost")
+print(f"fraction above: {above.mean():.1%} of all unguided plans, {above[accept].mean():.1%} of "
+      f"the accepted ones")
+print(f"accepted plans that hit the old obstacle (the policy's own failures): "
+      f"{hits_obstacle(full)[accept].mean():.1%}")
+
+# %% [markdown]
+# Exact sampling from $\tilde p$ moves almost all of the mass to the upper route: given that a
+# plan must avoid the new obstacle, the experts would mostly have gone over. Guidance keeps the
+# policy's route split and repairs the lower plans locally, so **guided samples are not samples
+# from $\tilde p$**. (Rejection also inherits the policy's own failures, the accepted plans that
+# clip the old obstacle; add that obstacle to the acceptance test to filter them too.) Which behaviour you want depends on the application. Rejection keeps the learned
+# distribution exactly, but costs about one over the acceptance rate in samples (about twice as
+# many here), and it breaks down when feasible plans are rare. Guidance always returns a plan,
+# at the price of distorting it.
 
 # %% [markdown]
 # ### Putting it together: guided, closed-loop control
@@ -1256,9 +1536,11 @@ plt.show()
 # points are exactly what we saw: multimodality without mode averaging, stable training (it is
 # just regression), and the ability to emit high-dimensional, temporally-consistent action chunks.
 #
-# **Diffuser** (Janner et al. 2022) is Sections 5–6: a trajectory prior over states *and*
-# actions, conditioning by inpainting, and reward maximisation by guidance with a learned,
-# noise-aware value function $\nabla_{\tau_t}J_\phi(\tau_t)$ instead of our hand-written cost.
+# **Diffuser** (Janner et al. 2022) is Section 5 plus the guidance idea of Section 6: a trajectory
+# prior over states *and* actions, conditioning by inpainting, and reward maximisation by guidance
+# with a learned, noise-aware value function $\nabla_{\tau_t}J_\phi(\tau_t)$ instead of our
+# hand-written cost. (We guided the conditional policy, but the hook works the same way for the
+# inpainting planner: pass `cost_fn` and `guide` to `sample_plans` inside `inpaint_plans`.)
 #
 # **Decision Diffuser** (Ajay et al. 2023) replaces value guidance by *classifier-free* guidance:
 # the model is trained conditioned on the return (or on constraints and skills) with label dropout,
@@ -1273,15 +1555,19 @@ plt.show()
 # constraints need search, sampling-and-filtering, or learning. (iv) Safety cannot be guaranteed
 # by a soft penalty; real systems add a hard safety layer.
 #
-# **For cognitive modelling.** A conditional diffusion model is a flexible, likelihood-free
-# generative model of *behaviour*: trained on human trajectories (mouse-tracking, reaching, eye
-# movements, navigation), it reproduces their full variability, including several strategies and
-# probability matching between them, rather than an average. The same machinery supports
-# inference questions: inpainting the rest of a partially observed trajectory is a posterior
-# predictive over what an agent will do next, and sampling under different goal conditions and
-# comparing with what is observed is a route to inverse planning (inferring goals from
-# behaviour). And "planning as sampling from prior $\times$ $e^{-\text{cost}}$" is the
-# planning-as-inference view in a new, very expressive guise.
+# **For cognitive modelling.** A conditional diffusion model is a flexible generative model of
+# *behaviour*: trained on human trajectories (mouse-tracking, reaching, eye movements,
+# navigation), it reproduces their full variability, including several strategies and
+# probability matching between them, rather than an average. Unlike many flexible simulators it
+# is *not* likelihood-free: $\log p(\tau\mid s)$ is available, bounded by the ELBO or computed
+# exactly with the probability-flow ODE (Song et al. 2021; notebook 04), at the cost of
+# many network evaluations per trajectory. That opens the usual Bayesian toolbox: likelihood-based
+# comparison with classical models, fitting to individual participants, and inverse planning,
+# $p(\text{goal}\mid\tau)\propto p(\tau\mid\text{goal})\,p(\text{goal})$, with a goal-conditioned
+# model. Inpainting the rest of a partially observed trajectory gives an approximation to the
+# posterior predictive of what the agent will do next (biased with few steps; RePaint- or
+# DPS-style corrections reduce the bias). And "planning as sampling from prior $\times$
+# $e^{-\text{cost}}$" is the planning-as-inference view in a new, very expressive guise.
 #
 # ## Exercises
 #
@@ -1303,23 +1589,25 @@ plt.show()
 # `REPLAN_TOL` off (set it to `np.inf`) to see how much the event-triggered replanning matters.
 # </details>
 #
-# **Exercise 2 (unbalanced experts).** Make the experts go above 80% of the time
-# (`side = np.where(rng.random(m) < 0.8, 1.0, -1.0)` in `make_demos`), retrain both policies and
-# compare. Predict the BC plan and the diffusion route fraction first.
+# **Exercise 2 (unbalanced experts).** Give the expert an unfair coin that says "above" 80% of the
+# time (`side = np.where(rng.random(m) < 0.8, 1.0, -1.0)` in `make_demos`), regenerate the demos
+# and the reference set, retrain BC and the $v$-policy, and rerun the probability-matching check.
+# Predict the BC plan and the diffusion route fractions first.
 #
 # <details><summary>Hint / solution</summary>
 #
-# Diffusion should match the experts' 80/20 split (probability matching). BC returns the weighted
-# mean $0.8\mu_{\text{above}}+0.2\mu_{\text{below}}$: with crossing heights of about $\pm0.6$ it
-# crosses $x=0$ at about $0.6\cdot0.6\approx0.37$, right at the obstacle's edge (radius 0.35),
+# The diffusion policy should track the new, lopsided $\pi_{\text{pairs}}(s)$: about 0.8 near the
+# centre line, still leaning towards the near side further out. Near the centre line BC returns
+# roughly $0.8\mu_{\text{above}}+0.2\mu_{\text{below}}$. With crossing heights of about $\pm0.6$
+# it crosses $x=0$ at about $0.6\cdot0.6\approx0.36$, right at the obstacle's edge (radius 0.35),
 # with none of the margin the experts keep. A posterior *mean* only becomes safe when one mode
 # dominates overwhelmingly.
 # </details>
 #
 # **Exercise 3 (choose the route with classifier-free guidance, à la Decision Diffuser).** Give
 # `TrajectoryDenoiser` a route label: condition on `torch.cat([s, onehot])` where `onehot` is
-# (1,0) for above, (0,1) for below and (0,0) for "unknown", drop the label to (0,0) with probability
-# 0.2 during training, and at sampling time combine the two network outputs (CFG is linear, so it
+# (1,0) for above, (0,1) for below and (0,0) for "unknown", drop the label to (0,0) for about 20% of
+# the training pairs, and at sampling time combine the two network outputs (CFG is linear, so it
 # works for $v$ as for $\varepsilon$): $\hat v=\hat v_{\text{u}}+w(\hat v_{\text{c}}-\hat v_{\text{u}})$.
 # How does the fraction of plans on the requested route depend on $w$?
 #
@@ -1327,11 +1615,27 @@ plt.show()
 #
 # The route label is `route` from `make_demos`, repeated for every window of a demo (the windows
 # are stacked time-major, so `np.tile(route, H)` lines up with `win_states`). The simplest label
-# dropout is data duplication: concatenate the training set with a copy whose one-hot is zeroed,
-# then call `train_denoiser(net, P, cond=torch.cat([S, onehot], 1))` with `cond_dim=4`. In
-# `sample_plans`, evaluate the network on the conditional and the null condition and combine. With
-# $w=1$ the requested route should be followed most of the time; $w>1$ pushes towards 100% at some
-# cost in diversity and smoothness, the same trade-off as in notebook 06.
+# dropout needs no change to `train_denoiser`: zero the one-hot of a random 20% of the rows once,
+# e.g. `onehot[torch.rand(len(onehot), device=device) < 0.2] = 0`, then call
+# `train_denoiser(net, P_train, cond=torch.cat([S_train, onehot], 1))` with `cond_dim=4`. (With
+# 64k pairs both the conditional and the unconditional model see plenty of data; re-drawing the
+# dropout mask in every batch, as `dm.diffusion_loss` does with `p_uncond`, is the textbook
+# version.) To reuse `sample_plans` unchanged, wrap the network:
+#
+# ```python
+# class CFG(nn.Module):
+#     def __init__(self, net, w):
+#         super().__init__()
+#         self.net, self.w = net, w
+#     def forward(self, x, t, c):
+#         null = torch.cat([c[:, :2], torch.zeros_like(c[:, 2:])], 1)
+#         out_c, out_u = self.net(x, t, c), self.net(x, t, null)
+#         return out_u + self.w * (out_c - out_u)
+# ```
+#
+# and call `sample_plans(CFG(net, w), torch.cat([s, onehot], 1), ...)`. With $w=1$ the requested
+# route should be followed most of the time; $w>1$ pushes towards 100% at some cost in diversity
+# and smoothness, the same trade-off as in notebook 06.
 # </details>
 #
 # **Exercise 4 (the $\tau_0$-model).** Train a third policy with `pred="x0"` (same network and
@@ -1345,8 +1649,8 @@ plt.show()
 # $\varepsilon$-loss, the $\tau_0$-loss down-weights low noise levels by $1/\mathrm{SNR}_t$, and
 # those are exactly the levels where within-route detail is learned. The network learns *which*
 # route but otherwise ignores $\tau_t$. A metric that only checks safety would crown this model;
-# a distributional metric (the spread, or `dm.sliced_wasserstein` against fresh demonstrations from
-# the same start) exposes it. $v$-prediction sits between the two.
+# a distributional metric (the spread, or `dm.sliced_wasserstein` between flattened samples and
+# the chunks from `reference_pairs(s)`) exposes it. $v$-prediction sits between the two.
 # </details>
 #
 # **Exercise 5 (predicting another agent).** Use the Diffuser model as an observer: clamp the
@@ -1357,9 +1661,11 @@ plt.show()
 # <details><summary>Hint / solution</summary>
 #
 # Set `mask[:, :2 * n_obs] = True` and copy the observed waypoints into `known`. The fraction of
-# completions on each route is a posterior predictive $p(\text{route}\mid w_{0:n})$; it starts near
-# the prior and sharpens to 0 or 1 as soon as the observed prefix starts curving. This is the
-# "inverse planning" use of a behaviour model from Section 7, done by inpainting.
+# completions on each route approximates the posterior predictive $p(\text{route}\mid w_{0:n})$
+# (approximately, because replacement is biased with few steps; try `resample=5`). It should
+# start near the prior and sharpen towards 0 or 1 as soon as the observed prefix starts curving.
+# This is the "predict what the agent will do next" use of a behaviour model from Section 7, done
+# by inpainting.
 # </details>
 #
 # **Exercise 6 (looking inside an $\varepsilon$-network).** Redo the "watching the policy make
@@ -1382,9 +1688,10 @@ plt.show()
 #
 # - Regression-based behaviour cloning learns $\mathbb{E}[\tau\mid s]$; with multimodal
 #   demonstrations that mean can be a terrible action (here: through the obstacle).
-# - A conditional diffusion model over action chunks samples $p(\tau\mid s)$ instead. Its noisiest
-#   denoiser *is* the BC regressor; the chain of increasingly-informed regressions makes the
-#   decision between modes, at low SNR.
+# - A conditional diffusion model over action chunks samples $p(\tau\mid s)$ instead, including the
+#   state-dependent proportions of the modes (check them against ground truth, not just the
+#   overall fraction). Its noisiest denoiser *is* the BC regressor; the chain of
+#   increasingly-informed regressions makes the decision between modes, at low SNR.
 # - The prediction target is a loss weighting over noise levels: $\varepsilon$, $v$ and $\tau_0$
 #   weight the $\tau_0$-error by $\mathrm{SNR}_t$, $1+\mathrm{SNR}_t$ and $1$. With a small network,
 #   $\varepsilon$ neglects the low-SNR levels where the route is chosen and $\tau_0$ neglects the
@@ -1396,10 +1703,14 @@ plt.show()
 #   knocked off the plan) gives robustness to perturbations that open-loop plans lack; the chunk
 #   length trades reactivity against compute and temporal consistency.
 # - An *unconditional* trajectory prior becomes a planner by inpainting start and goal (Diffuser);
-#   RePaint-style resampling removes the seams that plain replacement leaves.
+#   RePaint-style resampling reduces (but does not remove) the seams that plain replacement
+#   leaves, at proportionally higher cost.
 # - Cost guidance composes the learned prior with new objectives zero-shot, with a trade-off
-#   between satisfying the constraint and staying on the data manifold; point-estimate guidance
-#   acts locally and does not make global (route) decisions.
+#   between satisfying the constraint and staying on the data manifold. Point-estimate guidance
+#   acts locally and does not make global (route) decisions, so its samples are not samples of
+#   prior $\times\,e^{-\lambda C}$; for low-dimensional choices, rejection or reweighting is exact.
+# - A diffusion model of behaviour is not likelihood-free: ELBO and probability-flow likelihoods
+#   make it usable for model comparison and inverse planning.
 #
 # ## Further reading
 #
@@ -1420,6 +1731,12 @@ plt.show()
 #   (introduces $v$-prediction). ICLR. arXiv:2202.00512
 # - D. Kingma, T. Salimans, B. Poole, J. Ho (2021). *Variational Diffusion Models* (loss weighting
 #   in terms of the SNR). arXiv:2107.00630
+# - Y. Song, J. Sohl-Dickstein, D. P. Kingma, A. Kumar, S. Ermon, B. Poole (2021). *Score-Based
+#   Generative Modeling through Stochastic Differential Equations* (probability-flow ODE, exact
+#   likelihoods). ICLR. arXiv:2011.13456
+# - T. Karras, M. Aittala, T. Aila, S. Laine (2022). *Elucidating the Design Space of
+#   Diffusion-Based Generative Models* (EDM; deterministic vs stochastic sampling). arXiv:2206.00364
+# - Y. Song, P. Dhariwal, M. Chen, I. Sutskever (2023). *Consistency Models.* ICML. arXiv:2303.01469
 # - A. Lugmayr, M. Danelljan, A. Romero, F. Yu, R. Timofte, L. Van Gool (2022). *RePaint:
 #   Inpainting using Denoising Diffusion Probabilistic Models.* CVPR. arXiv:2201.09865
 # - W. Peebles, S. Xie (2023). *Scalable Diffusion Models with Transformers* (DiT, adaLN

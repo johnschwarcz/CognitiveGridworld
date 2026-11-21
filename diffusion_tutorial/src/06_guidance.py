@@ -961,7 +961,8 @@ plt.show()
 # * Raising $w$ makes the digits cleaner and more "prototypical": samples that are noisy or ambiguous at $w=1$
 #   often turn into clean, confident digits. Samples also become *more alike*: the three columns of a row tend to
 #   converge in style.
-# * At large $w$ the strokes get thick and blob-like. This **over-saturation** happens because the guided
+# * At large $w$ the strokes get thick and blob-like, and grainy artefacts can appear in the background. This
+#   **over-saturation** happens because the guided
 #   prediction extrapolates *past* the conditional one, $\tilde\epsilon=\epsilon_c+(w-1)(\epsilon_c-\epsilon_u)$, so
 #   $\hat x_0$ is pushed beyond the data range, and the excess survives into the final sample.
 #
@@ -1053,8 +1054,8 @@ plt.show()
 # steadily as $w$ grows. Past the plateau, increasing $w$ buys almost no fidelity and keeps costing diversity, while
 # the strokes get bolder (more ink) and more raw pixel values are pushed far beyond the data range.
 #
-# If the ink curve starts above 1, some samples carry residual noise speckles even without guidance (visible in the
-# grid above, typical of a briefly trained model). What matters here is how it grows with $w$.
+# If the ink curve starts above 1 even without guidance, the model draws slightly bolder digits than the data or
+# leaves faint background speckle, both signs of limited training. What matters here is how ink grows with $w$.
 #
 # A caveat on the diversity metric: at small $w$ it can exceed the real-data level. Some samples are then garbled
 # or show the wrong digit, and such samples lie far from the class in feature space, so they count as "diverse".

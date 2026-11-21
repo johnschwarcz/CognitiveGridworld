@@ -24,12 +24,13 @@
 # - how the ELBO turns into "predict the noise": the loss $L_\text{simple}$, and what it drops
 # - the sinusoidal time embedding, a residual-MLP denoiser and a 20-line training loop
 # - why the loss plateaus far above zero (the Bayes-optimal floor), and how it depends on $t$
-# - ancestral sampling, what the model "believes" along the way ($\hat x_0$-predictions), and how to score samples (MMD, sliced Wasserstein)
-# - practical knobs: EMA weights, $\epsilon$- vs $x_0$- vs $v$-prediction, the number of steps $T$, the sampler variance
+# - ancestral sampling, what the model "believes" along the way ($\hat x_0$ as a posterior mean), and how to score samples (MMD, sliced Wasserstein)
+# - practical knobs: EMA weights, $\epsilon$- vs $x_0$- vs $v$-prediction, the number of steps $T$, the sampler variance,
+#   and Fourier input features for data with sharp edges
 #
 # **Prerequisites:** 01 · The forward process (noise schedules, $q(x_t\mid x_0)$, the posterior $q(x_{t-1}\mid x_t, x_0)$).
 #
-# **Runtime:** about 6–10 min on a laptop CPU (nine small MLPs, about 25 s each, plus sampling); about 2–3 min on a GPU.
+# **Runtime:** about 7–10 min on a laptop CPU (ten small MLPs, 20–35 s each, plus sampling); roughly 2–4 min on a GPU.
 
 # %%
 import copy
@@ -87,7 +88,8 @@ print(f"FAST={FAST}: {STEPS} training steps per model, {N_SAMPLE} samples per ev
 # Applying Tweedie's formula (notebook 03) to the single step $x_t = \sqrt{\alpha_t}x_{t-1} + \sqrt{\beta_t}\,\epsilon$ gives,
 # exactly and for any step size,
 # $$\mathbb E[x_{t-1}\mid x_t] = \frac{1}{\sqrt{\alpha_t}}\Big(x_t + \beta_t\,\nabla_{x_t}\log q_t(x_t)\Big).$$
-# So, given a perfect network, the only approximation in DDPM's reverse step is its *shape*: a Gaussian with a fixed
+# §4 shows that DDPM's reverse mean, fed the Bayes-optimal noise prediction, is exactly this expression. So, given a
+# perfect network, the only approximation in DDPM's reverse step is its *shape*: a Gaussian with a fixed
 # variance. Below is the 2-D version of notebook 01's experiment. It uses the data of this whole notebook,
 # `dm.default_gmm()` (an 8-component mixture whose noised marginals $q_t$ are again mixtures with known densities), and the
 # three step sizes of our ablation in §9b.
@@ -124,7 +126,14 @@ def make_schedule(T_steps, device=device):
     s.posterior_coef_x0 = betas * abar_prev.sqrt() / (1 - abar)
     s.posterior_coef_xt = (1 - abar_prev) * (1 - betas).sqrt() / (1 - abar)
     s.log_snr = torch.log(abar) - torch.log1p(-abar)
+    # Guard: if dm.NoiseSchedule ever gains another coefficient, it would silently keep its cosine values here.
+    assert {k for k, v in vars(s).items() if torch.is_tensor(v)} == set(OVERWRITTEN), \
+        "dm.NoiseSchedule gained a field: update make_schedule"
     return s.to(device)                                 # .to() also casts to float32
+
+
+OVERWRITTEN = ("betas", "alphas", "alpha_bars", "alpha_bars_prev", "sqrt_alpha_bars", "sqrt_one_minus_alpha_bars",
+               "posterior_variance", "posterior_coef_x0", "posterior_coef_xt", "log_snr")
 
 
 sched = make_schedule(T)
@@ -155,7 +164,8 @@ def true_reverse_kernel(sched_T, t, x_t, n_grid=241, half_width=5.0):
     gauss = torch.distributions.MultivariateNormal(mean, cov)
     kl = (p * (torch.log(p / cell + 1e-300) - gauss.log_prob(pts))).sum().item()
     tweedie = (x_t + b * gmm.noised(float(sched_T.alpha_bars[t])).score(x_t[None].double())[0]) / a.sqrt()
-    return dict(X=X, Y=Y, p=p.view(n_grid, n_grid), mean=mean, cov=cov, kl=kl, tweedie=tweedie, beta=b.item())
+    return dict(X=X, Y=Y, p=p.view(n_grid, n_grid), mean=mean, cov=cov, kl=kl, tweedie=tweedie, beta=b.item(),
+                beta_tilde=float(sched_T.posterior_variance[t]), var=cov.trace().item() / 2)   # var per coordinate
 
 
 def draw_cov_ellipse(ax, mean, cov, n_std=2.0, **kw):
@@ -168,6 +178,10 @@ def draw_cov_ellipse(ax, mean, cov, n_std=2.0, **kw):
 
 
 x_query, tau = torch.tensor([0.0, 0.0], dtype=torch.float64), 0.1   # a point between the four inner blobs
+# (0, 0) is a symmetry point of the mixture (it is invariant under 90-degree rotations), so there the kernel mean and
+# Tweedie's formula are both exactly 0 whatever the formula. The check therefore uses asymmetric points.
+x_checks = torch.tensor([[0.4, -0.7], [1.0, 0.3], [-1.2, 0.9]], dtype=torch.float64)
+n_typical = 10 if FAST else 40                                       # typical x_t ~ q_t for an average KL
 fig, axes = plt.subplots(1, 4, figsize=(13, 3.4))
 dm.scatter2d(gmm.sample(3000, generator=torch.Generator().manual_seed(0)), ax=axes[0], c=C["data"], lim=2.8,
              title="data $q(x_0)$ and the query point")
@@ -176,15 +190,22 @@ for ax, T_ in zip(axes[1:], (1000, 50, 10)):
     s_T = make_schedule(T_)
     t_idx = round(tau * T_) - 1                                      # the step that ends at time tau
     k = true_reverse_kernel(s_T, t_idx, x_query)
-    assert torch.allclose(k["mean"], k["tweedie"], atol=1e-4), "Tweedie one-step mean mismatch"
+    for xq in x_checks:                                              # the mean of the true step is Tweedie's
+        kq = true_reverse_kernel(s_T, t_idx, xq)
+        assert torch.allclose(kq["mean"], kq["tweedie"], atol=1e-4), f"Tweedie one-step mean mismatch at {xq}"
+    x_typ = gmm.noised(float(s_T.alpha_bars[t_idx])).sample(n_typical, generator=torch.Generator().manual_seed(1))
+    kl_typ = np.array([true_reverse_kernel(s_T, t_idx, x.double(), n_grid=161)["kl"] for x in x_typ])
     ax.contourf(k["X"], k["Y"], k["p"], levels=15, cmap="Greys")
     draw_cov_ellipse(ax, k["mean"], k["cov"], 1.0, color=C["oracle"], ls="--", lw=1)
     draw_cov_ellipse(ax, k["mean"], k["cov"], 2.0, color=C["oracle"], ls="--", lw=1)
     ax.plot(*k["tweedie"], "x", color=C["oracle"], ms=8)
     ax.set_aspect("equal")
     ax.set_title(f"T={T_}: one step, $\\beta$={k['beta']:.3f}\nKL(true ‖ best Gaussian) = {k['kl']:.3f} nats")
-    print(f"T={T_:4d}: beta={k['beta']:.4f}  KL={k['kl']:.4f}  mean={k['mean'].numpy().round(3)}  "
-          f"Tweedie mean={k['tweedie'].numpy().round(3)}")
+    print(f"T={T_:4d}: at (0,0): KL={k['kl']:.4f}, true Var[x_t-1|x_t] per coord={k['var']:.4f} "
+          f"(beta={k['beta']:.4f}, beta_tilde={k['beta_tilde']:.4f})\n"
+          f"        typical x_t ~ q_t: KL median {np.median(kl_typ):.4f}, mean {kl_typ.mean():.4f}\n"
+          f"        at x_t={xq.numpy()}: grid mean {kq['mean'].numpy().round(4)} == Tweedie {kq['tweedie'].numpy().round(4)}")
+print("numerical mean of the true reverse step == Tweedie's formula at every asymmetric test point  ✓")
 axes[1].set_ylabel("$x_{t-1}$ (each panel zoomed to its step size)")
 plt.suptitle(f"True reverse step $q(x_{{t-1}}\\mid x_t)$ at $x_t$ = (0, 0), continuous time {tau} "
              "(grey), with the moment-matched Gaussian (red dashed: 1 and 2 sd; x: mean)", y=1.02)
@@ -194,9 +215,15 @@ plt.show()
 # %% [markdown]
 # With 1000 steps the true reverse step from this point is a tiny bump that a Gaussian fits essentially perfectly (KL ≈ 0).
 # With 50 steps it already has four lobes, one per nearby inner blob. With 10 steps it is four separate modes, and the
-# best Gaussian puts its mean (red ×) in the empty space between them. In every panel the numerical mean equals the
-# Tweedie formula (asserted above). The mean is always right; small steps are what make the *Gaussian shape* right. §9b
-# shows what this does to the samples.
+# best Gaussian puts its mean (red ×) in the empty space between them. The printout adds three facts.
+# - **The mean is always right.** At asymmetric test points, the numerical mean of the true kernel matches Tweedie's
+#   formula for every step size (asserted above). (At $(0,0)$ the match would prove nothing: both sides are 0 by symmetry.)
+#   Small steps are what make the *Gaussian shape* right.
+# - **The variance is not $\beta_t$.** At this ambiguous point, the true reverse step for $T=50$ and $T=10$ is markedly
+#   wider than either standard choice of $\sigma_t^2$ ($\beta_t$ or $\tilde\beta_t$). §9c explains why.
+# - **This point is a worst case.** Averaged over typical $x_t\sim q_t$, the kernel is much closer to Gaussian.
+#   Non-Gaussianity concentrates in the low-density gaps between modes, which few particles visit. That is why $T=50$
+#   does far better than $T=10$ in §9b, even though both kernels look bad at this point.
 #
 # ## 2 · The training objective: from the ELBO to "predict the noise"
 #
@@ -229,9 +256,12 @@ plt.show()
 # $$L_\text{simple} = \mathbb E_{t\sim\mathcal U,\;x_0,\;\epsilon}\,\big\|\epsilon-\epsilon_\theta(\sqrt{\bar\alpha_t}x_0+\sqrt{1-\bar\alpha_t}\,\epsilon,\ t)\big\|^2 .$$
 # What did we drop, and why is that fine?
 # - $L_T$ has no parameters. $L_0$ is treated like the other terms: on continuous data our last step simply outputs the mean.
-# - $\lambda_t$ is largest at small $t$ (plot below). So the true bound spends most of its effort on nearly imperceptible noise
-#   levels. Uniform weighting is a *reweighted* bound that emphasises the harder, larger-$t$ tasks. Ho et al. found it gives
-#   better samples, while the true bound gives better likelihoods.
+# - $\lambda_t$ is largest at small $t$ (plot below). The true bound puts a disproportionate share of its weight on nearly
+#   imperceptible noise levels: roughly a third on the first 10% of steps. Uniform weighting is a *reweighted* bound that
+#   shifts this emphasis to intermediate noise levels, where the global structure (which blob, which digit) is decided.
+#   Ho et al. call these the "more difficult denoising tasks at larger $t$". They are difficult in $x_0$-space (recovering
+#   the structure), even though, as §5 shows, the $\epsilon$-loss itself is small there. Ho et al. found that $L_\text{simple}$
+#   gives better samples, while the true bound gives better likelihoods.
 # - Crucially, the weighting does **not** change the optimum. For each $t$ separately, the minimiser of the squared error is the
 #   posterior mean $\epsilon^*(x_t,t)=\mathbb E[\epsilon\mid x_t]$. The network is an amortised Bayesian observer that infers the
 #   noise from a noisy observation. A weighting only decides where an imperfect network spends its capacity.
@@ -281,8 +311,10 @@ plt.show()
 # %% [markdown]
 # Left (log axes): the two natural choices for the reverse variance differ only for the first few dozen steps, where
 # $\tilde\beta_t\to 0$. Right: relative to the uniform weighting of $L_\text{simple}$, the true ELBO weights the
-# lowest-noise steps tens of times more than average, and the noisiest steps about half as much. So $L_\text{simple}$ moves
-# the emphasis towards the noisier, "structural" denoising tasks.
+# lowest-noise steps tens of times more than average, and intermediate steps ($t\approx 200$–$600$) only half to
+# two-thirds as much.
+# At the noisiest steps the two weightings roughly agree. So $L_\text{simple}$ moves weight from the nearly noise-free
+# steps to intermediate noise levels, the "structural" denoising tasks.
 #
 # ## 3 · The denoiser network
 #
@@ -297,8 +329,12 @@ plt.show()
 # separate neighbouring steps. A small learned MLP on top turns them into the features the network needs.
 #
 # > **Gotcha:** the frequency range must match how you scale $t$. With $t$ in $[0, 999]$ the fastest feature has
-# > a period of about 6 steps and the slowest barely changes over the whole range. If you feed $t/T\in[0,1]$ into the same
-# > embedding, almost every feature is constant and the network is nearly blind to the noise level.
+# > a period of about 6 steps and the slowest barely changes over the whole range. If you feed $t/T\in[0,1)$ into the same
+# > embedding, all but a few of the fastest features are almost constant. The multi-scale code collapses to a handful of
+# > smooth functions of $t$, which is essentially raw $t/T$ again. The network can still read the noise level from them,
+# > so it is not blind, but it loses fine resolution in $t$. How much that costs depends on how sharply the ideal
+# > denoiser changes with $t$ (Exercise 6 tests it here). Codebases therefore rescale continuous time (e.g. feed $1000\,t$)
+# > or embed $\log\sigma$ with a matched frequency range.
 
 # %%
 def sinusoidal_embedding(t, dim, max_period=10000.0):
@@ -316,27 +352,31 @@ print("matches dm.SinusoidalEmbedding  ✓")
 
 emb_n = F.normalize(emb, dim=1)
 fig, axes = plt.subplots(1, 3, figsize=(12, 3.4), gridspec_kw={"width_ratios": [1.1, 1, 1.1]})
-im = axes[0].imshow(emb.numpy(), aspect="auto", cmap="RdBu_r", interpolation="antialiased")
+# rows of every 4th step, no interpolation: keeps the image small (the fastest columns alias either way)
+im = axes[0].imshow(emb[::4].numpy(), aspect="auto", cmap="RdBu_r", interpolation="nearest", extent=(0, 64, T, 0))
 axes[0].set(xlabel="feature (cos | sin, fast → slow)", ylabel="t", title="Embedding matrix emb(t)")
 plt.colorbar(im, ax=axes[0], fraction=0.05)
 im = axes[1].imshow((emb_n[::4] @ emb_n[::4].T).numpy(), cmap="viridis", vmin=0, vmax=1,
                     extent=(0, T, T, 0))                              # every 4th step keeps the image small
 axes[1].set(xlabel="t", ylabel="t'", title="Cosine similarity of emb(t), emb(t')")
 plt.colorbar(im, ax=axes[1], fraction=0.05)
-emb_unit = F.normalize(sinusoidal_embedding(t_all / T, 64), dim=1)   # the gotcha: t rescaled to [0, 1)
-for t0, c in ((100, C["eps"]), (500, C["v"])):
-    axes[2].plot(t_all, (emb_n @ emb_n[t0]).numpy(), color=c, label=f"t'={t0}, integer t")
-    axes[2].plot(t_all, (emb_unit @ emb_unit[t0]).numpy(), "--", color=c, label=f"t'={t0}, t/T in [0,1)")
-axes[2].set(xlabel="t", ylabel="cosine similarity", title="Similarity to one reference step", ylim=(-0.8, 1.05))
-axes[2].legend(loc="lower center", ncol=2)
+emb_unit = sinusoidal_embedding(t_all / T, 64)                       # the gotcha: t rescaled to [0, 1)
+for e, ls, lab in ((emb, "-", "integer t in [0, 999]"), (emb_unit, "--", "t/T in [0, 1)")):
+    feat_range = (e.max(0).values - e.min(0).values).numpy()        # how much each feature changes over all t
+    axes[2].plot(np.arange(32), feat_range[:32], ls, color=C["eps"], label=f"cos features, {lab}")
+    axes[2].plot(np.arange(32), feat_range[32:], ls, color=C["x0"], label=f"sin features, {lab}")
+axes[2].set(xlabel="frequency index k (fast → slow)", ylabel="max − min over all t",
+            title="How much each feature varies with t")
+axes[2].legend(loc="center left", fontsize=7)
 plt.tight_layout()
 plt.show()
 
 # %% [markdown]
 # Left: each column is one feature. Fast oscillations on the left, slow drifts on the right, so every $t$ gets a unique,
 # smoothly varying code. Middle: nearby steps have similar embeddings and distant steps dissimilar ones; the similarity
-# band is narrow, so the code resolves $t$ finely. Right: with $t$ rescaled to $[0,1)$ (dashed) the similarity to every
-# other step stays near 1, so the network would barely be able to tell noise levels apart.
+# band is narrow, so the code resolves $t$ finely. Right: with integer $t$ (solid) the fast and middle frequencies sweep
+# their full range $[-1, 1]$, and only the slowest third change partially. With $t/T$ (dashed) only the first few
+# frequencies change appreciably, and the rest of the embedding is dead weight: the gotcha above.
 #
 # ### 3b · A residual-MLP denoiser
 # For 2-D data a small MLP suffices. Two design choices matter more than size:
@@ -345,7 +385,8 @@ plt.show()
 #   Image U-Nets do the same thing with scale-and-shift ("FiLM") in each ResBlock (notebook 05).
 #
 # `dm.MLPDenoiser` is exactly this network (plus optional class labels for notebook 06). We check that below by
-# copying our weights into it.
+# copying our weights into it. The `fourier_octaves` option (Fourier features of the *input*, the same trick as §3a
+# applied to $x$) is off by default; §10 explains when it is needed.
 
 # %%
 class SinusoidalTime(nn.Module):
@@ -362,19 +403,28 @@ class SinusoidalTime(nn.Module):
 class ResMLPDenoiser(nn.Module):
     """eps_theta(x, t) for low-dimensional data: residual MLP with the time embedding added in each block."""
 
-    def __init__(self, data_dim=2, hidden=128, n_blocks=2, emb_dim=64):
+    def __init__(self, data_dim=2, hidden=128, n_blocks=2, emb_dim=64, fourier_octaves=0):
         super().__init__()
+        self.fourier_octaves = fourier_octaves
         self.time_emb = nn.Sequential(SinusoidalTime(emb_dim), nn.Linear(emb_dim, hidden), nn.SiLU(),
                                       nn.Linear(hidden, hidden))
-        self.inp = nn.Linear(data_dim, hidden)
+        self.inp = nn.Linear(data_dim * (1 + 2 * fourier_octaves), hidden)
         self.blocks = nn.ModuleList([
             nn.Sequential(nn.LayerNorm(hidden), nn.Linear(hidden, hidden), nn.SiLU(), nn.Linear(hidden, hidden))
             for _ in range(n_blocks)])
         self.out = nn.Sequential(nn.LayerNorm(hidden), nn.SiLU(), nn.Linear(hidden, data_dim))
 
+    def input_features(self, x):
+        """x itself, plus sin/cos(2^k pi x) for k < fourier_octaves (used in §10; none by default)."""
+        if not self.fourier_octaves:
+            return x
+        freqs = math.pi * 2.0 ** torch.arange(self.fourier_octaves, device=x.device, dtype=x.dtype)
+        args = (x[..., None] * freqs).flatten(1)                    # (B, data_dim * octaves)
+        return torch.cat([x, torch.sin(args), torch.cos(args)], dim=1)
+
     def forward(self, x, t, y=None):           # y unused: keeps the tutorial-wide signature model(x, t, y=None)
         emb = self.time_emb(t)
-        h = self.inp(x)
+        h = self.inp(self.input_features(x))
         for block in self.blocks:
             h = h + block(h + emb)             # residual update, conditioned on t
         return self.out(h)
@@ -414,9 +464,9 @@ def diffuse(x0, t, eps, schedule, pred="eps"):
 
 
 @torch.no_grad()
-def ema_update(ema_model, model, step, decay=0.999):
+def ema_update(ema_model, model, step, decay=0.999, warmup=True):
     """theta_ema <- d * theta_ema + (1 - d) * theta, with warm-up d = min(decay, (1+step)/(10+step))."""
-    d = min(decay, (1 + step) / (10 + step))
+    d = min(decay, (1 + step) / (10 + step)) if warmup else decay
     for p_ema, p in zip(ema_model.parameters(), model.parameters()):
         p_ema.lerp_(p, 1 - d)
 
@@ -429,7 +479,7 @@ def heldout_loss(model, x0, t, eps, schedule, pred="eps"):
 
 
 def train_ddpm(model, data, schedule, pred="eps", steps=STEPS, batch_size=256, lr=1e-3, ema_decay=0.999,
-               grad_clip=1.0, eval_batch=None, eval_every=None, seed=0, log_every=None):
+               ema_warmup=True, grad_clip=1.0, eval_batch=None, eval_every=None, seed=0, log_every=None):
     """DDPM training (Ho et al. 2020, Alg. 1) with Adam, gradient clipping and an EMA copy of the weights."""
     g = torch.Generator(device=device).manual_seed(seed)
     model.to(device).train()
@@ -447,7 +497,7 @@ def train_ddpm(model, data, schedule, pred="eps", steps=STEPS, batch_size=256, l
         loss.backward()
         nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
         opt.step()
-        ema_update(ema, model, step, ema_decay)
+        ema_update(ema, model, step, ema_decay, ema_warmup)
         losses.append(loss.item())          # .item() syncs a GPU every step: fine for tiny models
         if eval_batch is not None and step % eval_every == 0:
             evals.append((step, heldout_loss(model, *eval_batch, schedule, pred),
@@ -481,10 +531,18 @@ print("loss == dm.diffusion_loss  ✓    ema_update == dm.EMA  ✓")
 
 # %% [markdown]
 # **How low can the loss go?** For each $t$ the best possible predictor is the posterior mean $\epsilon^*(x_t,t)=\mathbb E[\epsilon\mid x_t]$.
-# Its loss is not zero but the average posterior variance $\mathbb E\,\mathrm{tr}\,\mathrm{Cov}[\epsilon\mid x_t]$: many
-# $(x_0,\epsilon)$ pairs produce the same $x_t$. Our mixture lets us compute $\epsilon^*$ exactly. Tweedie's formula
-# (derived in notebook 03) gives $\mathbb E[\epsilon\mid x_t] = -\sqrt{1-\bar\alpha_t}\,\nabla\log q_t(x_t)$, and
-# `gmm.noised(abar).score` is that gradient in closed form. This **oracle** is the yardstick for everything that follows:
+# Its loss is not zero: many $(x_0,\epsilon)$ pairs produce the same $x_t$. The loss is a mean over the $d=2$
+# coordinates, so its floor is the average posterior variance per coordinate, $\mathbb E\,\mathrm{tr}\,\mathrm{Cov}[\epsilon\mid x_t]/d$.
+#
+# Our mixture lets us compute $\epsilon^*$ exactly, via Tweedie's formula (notebook 03 develops it fully). The derivation
+# takes two lines. The score of a marginal is the posterior average of the likelihood's score (Fisher's identity):
+# $$\nabla\log q_t(x_t) = \mathbb E\big[\nabla_{x_t}\log q(x_t\mid x_0)\,\big|\,x_t\big]
+# = -\,\mathbb E\Big[\frac{x_t-\sqrt{\bar\alpha_t}\,x_0}{1-\bar\alpha_t}\,\Big|\,x_t\Big]
+# = -\frac{\mathbb E[\epsilon\mid x_t]}{\sqrt{1-\bar\alpha_t}}
+# \quad\Longrightarrow\quad \epsilon^*(x_t,t) = -\sqrt{1-\bar\alpha_t}\;\nabla\log q_t(x_t).$$
+# `gmm.noised(abar).score` is that gradient in closed form. Substituting $\epsilon^*$ into DDPM's mean of §2 gives
+# $\mu_\theta = \big(x_t + \beta_t\nabla\log q_t(x_t)\big)/\sqrt{\alpha_t}$, exactly the true reverse mean of §1. With a
+# perfect network, DDPM's reverse step has the right mean. This **oracle** is the yardstick for everything that follows:
 # it is what a perfect network would output.
 
 # %%
@@ -610,8 +668,10 @@ print(f"average over t: model {err_main.mean():.4f}, oracle {err_oracle.mean():.
 # ratio of signal variance to noise variance:
 # - **small $t$** (noise much smaller than the data's local spread): a tiny perturbation cannot be told apart from the data's
 #   own variability, so $\epsilon$ is nearly unidentifiable and the error approaches 1, its prior variance. This is the
-#   *hard* end for $\epsilon$-prediction. Fortunately, a wrong $\hat\epsilon$ barely moves $x_t$ here, because it is multiplied by
-#   $\sqrt{1-\bar\alpha_t}\approx 0$.
+#   *hard* end for $\epsilon$-prediction. Fortunately, a wrong $\hat\epsilon$ barely changes the sampler update or $\hat x_0$
+#   here, because it enters with a factor of about $\sqrt{1-\bar\alpha_t}\approx 0$ or smaller. This is how §2 and Ho et al.
+#   can call *large* $t$ the difficult tasks: small $t$ is hard in $\epsilon$-MSE but unimportant, while large $t$ is
+#   easy in $\epsilon$-MSE but decides the structure that $x_0$ will have.
 # - **large $t$** ($x_t\approx\epsilon$): the noise is essentially the observation itself, so it is easy to predict and the error goes to 0.
 # - **in between**, the curve is not monotone. It first drops: once the noise is wider than a blob but narrower than the
 #   gaps between blobs, $x_t$ pins down its blob and the noise inside it becomes identifiable. It then rises to a bump where
@@ -627,7 +687,8 @@ print(f"average over t: model {err_main.mean():.4f}, oracle {err_oracle.mean():.
 # Algorithm 2 of Ho et al. starts from $x_T\sim\mathcal N(0,I)$ and applies the learned reverse step $T$ times:
 # $$x_{t-1} = \frac{1}{\sqrt{\alpha_t}}\Big(x_t-\frac{\beta_t}{\sqrt{1-\bar\alpha_t}}\,\epsilon_\theta(x_t,t)\Big) + \sigma_t z,\qquad z\sim\mathcal N(0,I),$$
 # with no noise on the very last step. Along the way we record $x_t$ and the model's current guess of the final answer,
-# $\hat x_0(x_t,t)$. That guess is the posterior mean $\mathbb E[x_0\mid x_t]$: what a Bayesian observer of $x_t$ would report.
+# $\hat x_0(x_t,t)$. That guess is the model's estimate of the posterior mean $\mathbb E[x_0\mid x_t]$ (exactly that, for the
+# oracle): what a Bayesian observer of $x_t$ would report.
 #
 # > **Gotcha:** `dm.ddpm_sample` computes the same mean through $\hat x_0$ and the posterior coefficients of §1. That form allows
 # > clipping $\hat x_0$ to the data range (`clip_x0`, standard for images in $[-1,1]$). The $\epsilon$-form above cannot clip.
@@ -635,11 +696,18 @@ print(f"average over t: model {err_main.mean():.4f}, oracle {err_oracle.mean():.
 
 # %%
 @torch.no_grad()
-def ancestral_sample(model, schedule, n, pred="eps", var="beta_tilde", generator=None, record_every=0):
-    """DDPM ancestral sampling (Ho et al. 2020, Alg. 2). var: 'beta_tilde' (posterior variance) or 'beta'."""
-    x = torch.randn((n, 2), generator=generator, device=device)                 # x_T ~ N(0, I)
+def ancestral_sample(model, schedule, n, pred="eps", var="beta_tilde", generator=None, record_every=0,
+                     x_start=None, t_start=None):
+    """DDPM ancestral sampling (Ho et al. 2020, Alg. 2). var: 'beta_tilde' (posterior variance) or 'beta'.
+
+    By default starts from x_T ~ N(0, I); x_start (shape (2,) or (n, 2)) at index t_start starts mid-chain instead.
+    """
+    if x_start is None:
+        x, t_start = torch.randn((n, 2), generator=generator, device=device), schedule.T - 1   # x_T ~ N(0, I)
+    else:
+        x = x_start.to(device).expand(n, 2).clone()
     traj = []
-    for t in reversed(range(schedule.T)):
+    for t in range(t_start, -1, -1):
         tt = torch.full((n,), t, device=device, dtype=torch.long)
         eps_hat, x0_hat = eps_x0_from_output(model(x, tt), x, tt, schedule, pred)
         if record_every and (t % record_every == 0 or t == schedule.T - 1):
@@ -671,7 +739,7 @@ final_mode = gmm.responsibilities(samples_main.cpu()).argmax(1)   # colour every
 colors = plt.cm.tab10(final_mode.numpy() % 10)
 snap_ts = [999, 500, 300, 150, 50, 0]
 snaps = {t: (x, x0) for t, x, x0 in traj}
-n_show = min(1000, N_SAMPLE)                                       # fewer points keep the figure light
+n_show = min(700, N_SAMPLE)                                        # fewer points keep the figure light
 fig, axes = plt.subplots(2, len(snap_ts), figsize=(2.2 * len(snap_ts), 5.0))
 for j, t in enumerate(snap_ts):
     x_t, x0_hat = snaps[t]
@@ -698,8 +766,11 @@ plt.show()
 
 # %%
 path_t = np.array([t for t, _, _ in traj])
-idx = torch.arange(min(12, N_SAMPLE))                    # follow a dozen particles
-path_x = torch.stack([x for _, x, _ in traj])[:, idx]    # (snapshots, 12, 2), from t = T-1 down to 0
+first_in_blob = {}                                       # follow 5 particles that end in 5 different blobs
+for i, k in enumerate(final_mode.tolist()):
+    first_in_blob.setdefault(k, i)
+idx = torch.tensor(sorted(first_in_blob.values())[:5])
+path_x = torch.stack([x for _, x, _ in traj])[:, idx]    # (snapshots, 5, 2), from t = T-1 down to 0
 path_x0 = torch.stack([x0 for _, _, x0 in traj])[:, idx]
 g1 = torch.linspace(-3, 3, 200)
 X, Y = torch.meshgrid(g1, g1, indexing="xy")
@@ -707,15 +778,15 @@ dens = gmm.log_prob(torch.stack([X.flatten(), Y.flatten()], 1)).exp().view(200, 
 fig, axes = plt.subplots(1, 3, figsize=(13, 3.9), gridspec_kw={"width_ratios": [1, 1.25, 1.25]})
 axes[0].contour(X, Y, dens, levels=6, colors="0.75", linewidths=0.7)
 for i in range(len(idx)):
-    axes[0].plot(path_x[:, i, 0], path_x[:, i, 1], color=colors[idx[i]], lw=0.7, alpha=0.8)
-    axes[0].plot(path_x[-1, i, 0], path_x[-1, i, 1], "o", color=colors[idx[i]], ms=4)
-axes[0].plot(path_x[0, :, 0], path_x[0, :, 1], "k.", ms=4, label="start (t = T−1)")
-axes[0].set(xlim=(-3, 3), ylim=(-3, 3), aspect="equal", title="2-D paths of $x_t$ (o = final sample)")
-axes[0].legend(loc="lower right")
+    axes[0].plot(path_x[:, i, 0], path_x[:, i, 1], color=colors[idx[i]], lw=0.8, alpha=0.8)
+for i in range(len(idx)):                                # markers last, so the paths do not hide them
+    axes[0].plot(path_x[0, i, 0], path_x[0, i, 1], "s", color=colors[idx[i]], ms=5, mec="k", mew=0.8, zorder=5)
+    axes[0].plot(path_x[-1, i, 0], path_x[-1, i, 1], "o", color=colors[idx[i]], ms=7, mec="w", mew=1.2, zorder=5)
+axes[0].set(xlim=(-3, 3), ylim=(-3, 3), aspect="equal", title="2-D paths of $x_t$ (■ start, ● final sample)")
 for ax, d in zip(axes[1:], (0, 1)):
     for i in range(len(idx)):
         ax.plot(path_t, path_x[:, i, d], color=colors[idx[i]], lw=0.7, alpha=0.5)
-        ax.plot(path_t, path_x0[:, i, d], color=colors[idx[i]], lw=1.5)
+        ax.plot(path_t, path_x0[:, i, d], color=colors[idx[i]], lw=1.8)
     ax.set(xlim=(T, 0), ylim=(-3, 3), xlabel="t (sampling runs left to right)", ylabel=f"coordinate {d + 1}",
            title=f"coordinate {d + 1}: state $x_t$ (thin) and guess $\\hat x_0$ (thick)")
 plt.tight_layout()
@@ -723,10 +794,62 @@ plt.show()
 
 # %% [markdown]
 # Individual particles (left) take noisy, wandering routes. Each reverse step injects fresh noise $\sigma_t z$, so
-# DDPM sampling is a *stochastic* process, a discretised reverse-time SDE (notebook 03). The time courses (middle,
+# DDPM sampling is a *stochastic* process, a discretised reverse-time SDE (notebook 04 derives it). The time courses (middle,
 # right) separate state from belief. The state $x_t$ (thin) wanders with the injected noise almost to the end. The guess
 # $\hat x_0$ (thick) fluctuates much less. Apart from the high-noise artefact at the very start, it hovers near the data
 # mean while $t$ is large, drifts towards one blob over a stretch of intermediate $t$, and then changes little.
+#
+# **The belief is a martingale.** There is an exact statement behind "a Bayesian observer accumulating evidence". Under
+# the true reverse process, the posterior mean $\hat x_0(x_t)=\mathbb E[x_0\mid x_t]$ satisfies, for any $s<t$,
+# $$\mathbb E\big[\hat x_0(x_s)\,\big|\,x_t\big] = \mathbb E\big[\mathbb E[x_0\mid x_s, x_t]\,\big|\,x_t\big] = \mathbb E[x_0\mid x_t] = \hat x_0(x_t).$$
+# The first step holds because $x_t$ depends on $x_0$ only through $x_s$ (the forward chain is Markov), and the second is the
+# tower property. Later beliefs can move, but *on average* they equal today's belief. With $s=0$: the average final sample
+# reached from $x_t$ is the current guess $\hat x_0(x_t)$. More than that, continuing the true reverse process from $x_t$
+# draws $x_0$ from the posterior $q(x_0\mid x_t)$. We check both with the oracle: take one ambiguous state from the run
+# above, restart the sampler from it many times, and compare where the copies end up with what the observer believes.
+
+# %%
+t_c = 300                                                    # restart from the state at this step
+x_t_all = snaps[t_c][0]
+post_blob = gmm.noised(float(sched.alpha_bars[t_c])).responsibilities(x_t_all)   # exact p(blob | x_t)
+torn = post_blob.sort(1, descending=True).values[:, 1]       # probability of the runner-up blob
+torn[x_t_all.norm(dim=1) > 2.0] = 0                          # skip outliers (keep the plot readable)
+i_c = torn.argmax().item()                                   # the particle most torn between two blobs
+x_c, tt_c = x_t_all[i_c].to(device), torch.full((1,), t_c, device=device)
+belief = eps_x0_from_output(oracle(x_c[None], tt_c), x_c[None], tt_c, sched)[1][0].cpu()   # oracle E[x0 | x_t]
+n_c = 500 if FAST else 4000
+completions = ancestral_sample(oracle, sched, n_c, generator=gen(7), x_start=x_c, t_start=t_c).cpu()
+comp_blob = gmm.responsibilities(completions).argmax(1)
+frac = torch.bincount(comp_blob, minlength=gmm.K).float() / n_c
+se = completions.std(0) / math.sqrt(n_c)                     # Monte-Carlo standard error of the mean
+print(f"x_t = {x_c.cpu().numpy().round(3)} at t={t_c}")
+print(f"belief x0_hat(x_t): oracle {belief.numpy().round(3)}, trained net {snaps[t_c][1][i_c].numpy().round(3)}")
+print(f"mean of {n_c} completions: {completions.mean(0).numpy().round(3)} (± {se.max().item():.3f} s.e.)")
+print(f"TV(fraction of completions per blob, exact p(blob | x_t)) = {0.5 * (frac - post_blob[i_c]).abs().sum().item():.3f}")
+assert (completions.mean(0) - belief).abs().max() < 4 * se.max() + 0.02, "martingale check failed"
+
+fig, axes = plt.subplots(1, 2, figsize=(9, 3.6), gridspec_kw={"width_ratios": [1, 1.3]})
+dm.scatter2d(gmm.sample(2000, generator=torch.Generator().manual_seed(3)), ax=axes[0], c="0.85", lim=3)  # data
+dm.scatter2d(completions[:2000], ax=axes[0], c=plt.cm.tab10(comp_blob[:2000].numpy() % 10), s=3, alpha=0.6,
+             title=f"Completions of one $x_t$ (t={t_c})")
+axes[0].plot(*x_c.cpu(), "k*", ms=12, label="restart state $x_t$")
+axes[0].plot(*belief, "o", mfc="none", mec="k", ms=11, mew=2, label=r"belief $\hat x_0(x_t)$")
+axes[0].plot(*completions.mean(0), "x", color=C["oracle"], ms=10, mew=2, label="mean of completions")
+axes[0].legend(loc="lower right", fontsize=7)
+kk = np.arange(gmm.K)
+axes[1].bar(kk - 0.2, post_blob[i_c].numpy(), 0.4, color=plt.cm.tab10(kk), alpha=0.45, label="exact $p$(blob | $x_t$)")
+axes[1].bar(kk + 0.2, frac.numpy(), 0.4, color=plt.cm.tab10(kk), label="fraction of completions")
+axes[1].set(xlabel="blob (mixture component)", ylabel="probability", title="Where the copies end up", xticks=kk)
+axes[1].legend()
+plt.tight_layout()
+plt.show()
+
+# %% [markdown]
+# The copies (left) split between the blobs this $x_t$ could have come from, in the proportions of the exact posterior
+# $p(\text{blob}\mid x_t)$ (right). Their average lands on the observer's current belief (circle), which can sit in a gap
+# between blobs where no sample ever ends up. So $\hat x_0$ summarises where the sampler *might* go; it is not itself a
+# plausible sample. The trained network's belief at this state (printed) is close to the oracle's. "Noise partway, then
+# run the sampler again" is the move behind SDEdit-style editing (Meng et al. 2022).
 #
 # ## 7 · How good are the samples? MMD and sliced Wasserstein
 #
@@ -743,7 +866,9 @@ plt.show()
 #   diffuse) and *higher* means mass piled onto the modes (too concentrated, missing the spread).
 #
 # Both distances are noisy at $n\approx 2000$, so we always report the **floor**: the same metric between independent data
-# samples, as mean ± sd over several draws. A useful bad baseline is the best-fitting single Gaussian.
+# samples, as mean ± sd over several draws. A useful bad baseline is the best-fitting single Gaussian. A useful good
+# reference is the **oracle** plugged into the same sampler with the same noise: it has no network error, so any gap
+# between it and the trained model is the network's fault, and any gap between it and the floor is the sampler's.
 
 # %%
 ref = gmm.sample(N_SAMPLE, generator=torch.Generator().manual_seed(1000))       # the fixed reference sample
@@ -768,32 +893,39 @@ floor_runs = [evaluate(gmm.sample(N_SAMPLE, generator=torch.Generator().manual_s
 floor = {k: (np.mean([r[k] for r in floor_runs]), np.std([r[k] for r in floor_runs])) for k in floor_runs[0]}
 mu_d, cov_d = train_data.mean(0).cpu().double(), torch.cov(train_data.T).cpu().double()
 gauss_fit = torch.distributions.MultivariateNormal(mu_d, cov_d).sample((N_SAMPLE,)).float()
-results = {"data vs data (floor)": None, "fitted Gaussian": evaluate(gauss_fit), "DDPM (EMA weights)": evaluate(samples_main)}
+samples_oracle = ancestral_sample(oracle, sched, N_SAMPLE, generator=gen(5))     # same sampler noise as samples_main
+results = {"fitted Gaussian": evaluate(gauss_fit), "oracle denoiser": evaluate(samples_oracle),
+           "DDPM (EMA weights)": evaluate(samples_main)}
 print(f"{'':24s} {'MMD':>17s} {'sliced W1':>15s} {'mean log q(x)':>17s}")
 print(f"{'data vs data (floor)':24s} {floor['mmd'][0]:9.4f} ± {floor['mmd'][1]:.4f} {floor['sw'][0]:8.3f} ± {floor['sw'][1]:.3f}"
       f" {floor['logq'][0]:9.2f} ± {floor['logq'][1]:.2f}")
-for name in ("fitted Gaussian", "DDPM (EMA weights)"):
-    m = results[name]
+for name, m in results.items():
     print(f"{name:24s} {m['mmd']:9.4f}         {m['sw']:8.3f}         {m['logq']:9.2f}")
 
-fig, axes = plt.subplots(1, 3, figsize=(10, 3.5))
+fig, axes = plt.subplots(1, 4, figsize=(13, 3.6))
 dm.scatter2d(gmm.sample(N_SAMPLE, generator=torch.Generator().manual_seed(3)), ax=axes[0], c=C["data"],
              title="fresh data")
 dm.scatter2d(gauss_fit, ax=axes[1], c=C["gauss"], title="fitted Gaussian\n" + fmt(results["fitted Gaussian"]))
-dm.scatter2d(samples_main, ax=axes[2], c=C["eps"], title="DDPM (EMA)\n" + fmt(results["DDPM (EMA weights)"]))
+dm.scatter2d(samples_oracle, ax=axes[2], c=C["oracle"], title="oracle denoiser, T=1000\n" + fmt(results["oracle denoiser"]))
+dm.scatter2d(samples_main, ax=axes[3], c=C["eps"], title="DDPM (EMA)\n" + fmt(results["DDPM (EMA weights)"]))
 plt.tight_layout()
 plt.show()
 
 # %% [markdown]
-# The single Gaussian scores far worse than the floor on every metric. The DDPM samples come close to the floor. The mean
-# log-density is the most sensitive of the three here, because it uses the true density. Compare the model's value with
-# the data's to see whether the samples err on the diffuse side (lower) or the concentrated side (higher), even when MMD and
-# SW can barely tell the samples from data.
+# The single Gaussian scores far worse than the floor on every metric. The oracle row sits at, or very near, the floor:
+# with 1000 small steps, the sampler itself costs little. By MMD and SW, the DDPM samples also come close to the
+# floor. The mean log-density sees more, because it uses the true density. Compare the model's value with the data's and
+# the oracle's. A value below both means the samples are slightly too diffuse, and since the oracle shares the sampler,
+# that is network error. The excess error at small $t$ (§5), where the last steps sharpen each blob, is the natural suspect.
+#
+# Use the mean log-density only as a *dispersion* diagnostic. It is not a distance between distributions: it cannot see
+# misallocated mode mass or displaced blobs (§8), and it rewards piling samples onto the modes (§9a). A sampler that
+# put every point exactly on a blob centre would beat real data.
 #
 # ## 8 · EMA: the weights you should sample with
 #
-# With a constant learning rate, Adam's iterates never settle. They jitter around a good solution with a spread of
-# order the learning rate times the gradient noise. Averaging the iterates (Polyak–Ruppert averaging) cancels much of that
+# With a constant learning rate, Adam's iterates never settle. Driven by minibatch noise, they jitter around a good
+# solution with a per-step amplitude of order the learning rate (Adam normalises away the scale of the gradient). Averaging the iterates (Polyak–Ruppert averaging) cancels much of that
 # jitter. An exponential moving average with decay $d$ averages over roughly the last $1/(1-d)$ steps. With the warm-up rule
 # of §4, $d\approx 0.998$ at the end of our 4000-step run, so the window is a few hundred steps.
 # For diffusion models this matters more than for a classifier: the sampler calls the network $T$ times and the errors
@@ -806,25 +938,30 @@ plt.show()
 
 # %%
 def blob_report(x):
-    """Ground-truth diagnostics: TV error of the blob masses, mean distance of blob sample means from true centres."""
+    """Ground-truth diagnostics: TV error of the blob masses, mean distance of blob sample means from true centres,
+    and the per-blob displacement vectors (sample mean - true centre; zero for an empty blob)."""
     x = x.detach().float().cpu()
     k = gmm.responsibilities(x).argmax(1)                 # assign every point to its most likely blob
     freq = torch.bincount(k, minlength=gmm.K).double() / len(k)
     tv = 0.5 * (freq - gmm.weights).abs().sum().item()
-    shift = np.mean([(x[k == c].double().mean(0) - gmm.means[c]).norm().item() for c in range(gmm.K) if (k == c).any()])
-    return tv, shift
+    disp = torch.stack([x[k == c].double().mean(0) - gmm.means[c] if (k == c).any() else torch.zeros(2, dtype=torch.float64)
+                        for c in range(gmm.K)])
+    shift = disp[freq > 0].norm(dim=1).mean().item()
+    return tv, shift, disp
 
 
 samples_raw = ancestral_sample(main["model"], sched, N_SAMPLE, generator=gen(5))
 results["DDPM (raw weights)"] = evaluate(samples_raw)
 print(f"{'':12s} {'MMD':>7s} {'SW':>6s} {'log q':>6s} {'blob-mass TV':>13s} {'blob shift':>11s}")
+displacements = {}
 for name, x in (("fresh data", gmm.sample(N_SAMPLE, generator=torch.Generator().manual_seed(3))),
                 ("raw weights", samples_raw), ("EMA weights", samples_main)):
-    m, (tv, shift) = evaluate(x), blob_report(x)
+    m, (tv, shift, displacements[name]) = evaluate(x), blob_report(x)
     print(f"{name:12s} {m['mmd']:7.4f} {m['sw']:6.3f} {m['logq']:6.2f} {tv:13.3f} {shift:11.3f}")
 
 ev = main["evals"]
-fig, axes = plt.subplots(1, 3, figsize=(12, 3.5), gridspec_kw={"width_ratios": [1.3, 1, 1]})
+MAG = 10                                                  # blob shifts are a few pixels: magnify the arrows
+fig, axes = plt.subplots(1, 3, figsize=(12, 3.7), gridspec_kw={"width_ratios": [1.3, 1, 1]})
 axes[0].plot(ev[:, 0], ev[:, 1], color=C["raw"], label="raw weights")
 axes[0].plot(ev[:, 0], ev[:, 2], color=C["eps"], label="EMA weights")
 axes[0].axhline(bayes_floor, color=C["oracle"], ls="--", label="Bayes floor")
@@ -832,10 +969,12 @@ lo = bayes_floor - 0.01
 axes[0].set(xlabel="training step", ylabel="held-out loss", title="Held-out loss during training",
             ylim=(lo, lo + max(0.08, 3 * (ev[-1, 1] - lo))))
 axes[0].legend()
-dm.scatter2d(samples_raw, ax=axes[1], c=C["raw"], title="raw weights\n" + fmt(results["DDPM (raw weights)"]))
-dm.scatter2d(samples_main, ax=axes[2], c=C["eps"], title="EMA weights\n" + fmt(results["DDPM (EMA weights)"]))
-for ax in axes[1:]:
-    ax.plot(gmm.means[:, 0], gmm.means[:, 1], "k+", ms=9, mew=1.5, label="true blob centres")
+for ax, (name, x, c) in zip(axes[1:], (("raw weights", samples_raw, C["raw"]), ("EMA weights", samples_main, C["eps"]))):
+    dm.scatter2d(x, ax=ax, c=c, alpha=0.25, title=f"{name}\n" + fmt(results[f"DDPM ({name})"]))
+    d = displacements[name]
+    ax.quiver(gmm.means[:, 0], gmm.means[:, 1], MAG * d[:, 0], MAG * d[:, 1], angles="xy", scale_units="xy",
+              scale=1, color="k", width=0.012, label=f"blob-mean shift ×{MAG}")
+    ax.plot(gmm.means[:, 0], gmm.means[:, 1], "k.", ms=4)
 axes[2].legend(loc="lower right")
 plt.tight_layout()
 plt.show()
@@ -843,9 +982,11 @@ plt.show()
 # %% [markdown]
 # The held-out loss of the raw weights keeps fluctuating, while the EMA curve is smooth and sits lower, close to the floor.
 # The gap in loss looks small, yet the samples differ clearly (see the table). The raw-weight samples are *not* more
-# diffuse (their log-density is about the same). Instead, whole blobs are displaced from their true centres (black +)
-# and the blob masses are off. The last few hundred minibatches leave a small *systematic* bias in $\epsilon_\theta$, and the
-# sampler integrates it over $T=1000$ steps. **Always sample (and evaluate) with the EMA weights.** The
+# diffuse (their log-density is about the same). Instead, whole blobs are displaced from their true centres (the arrows,
+# magnified ten-fold, point from each true centre to the mean of the samples assigned to it) and the blob masses are off.
+# The last few hundred minibatches leave a small *systematic* bias in $\epsilon_\theta$, and the
+# sampler integrates it over $T=1000$ steps. (The raw weights are a single snapshot, at the last step; another step would
+# displace the blobs differently.) **Always sample (and evaluate) with the EMA weights.** The
 # averaging window must also be short compared with the training run. Large-scale runs use decays like 0.9999, which only
 # make sense over hundreds of thousands of steps.
 #
@@ -856,10 +997,10 @@ plt.show()
 
 # %%
 def run_variant(label, schedule=sched, pred="eps", data=train_data, density=gmm, reference=ref, seed=0,
-                model_kw=None, **train_kw):
-    """Train a ResMLPDenoiser(**model_kw) variant; return its EMA model, samples and metrics."""
+                model_cls=ResMLPDenoiser, model_kw=None, **train_kw):
+    """Train a model_cls(**model_kw) variant with train_ddpm(**train_kw); return its EMA model, samples and metrics."""
     dm.seed_everything(seed)
-    out = train_ddpm(ResMLPDenoiser(**(model_kw or {})), data, schedule, pred=pred, seed=seed, **train_kw)
+    out = train_ddpm(model_cls(**(model_kw or {})), data, schedule, pred=pred, seed=seed, **train_kw)
     x = ancestral_sample(out["ema"], schedule, N_SAMPLE, pred=pred, generator=gen(5))
     m = evaluate(x, reference, density)
     print(f"{label:28s} trained in {out['seconds']:4.0f} s | {fmt(m)}")
@@ -882,8 +1023,10 @@ def run_variant(label, schedule=sched, pred="eps", data=train_data, density=gmm,
 #    $x_0$-error becomes an $\epsilon$-error multiplied by $a/b$, which explodes as $t\to 0$. For $v$ the factors are $a\le 1$ and
 #    $b\le 1$, so it never amplifies. This is why $v$ (Salimans & Ho 2022) is popular for distillation, few-step sampling and
 #    high-resolution or zero-terminal-SNR schedules.
-#    $\epsilon$-prediction became the DDPM default because it falls straight out of the ELBO (§2), its target has unit scale
-#    at every $t$, and it produced the best samples in Ho et al.
+#    Every parameterisation of $\mu_\theta$ falls out of the ELBO, each with its own weight. $\epsilon$-prediction became the
+#    DDPM default because its weight is simple and dropping it gives an unweighted MSE with a unit-scale target at every
+#    $t$, because it links directly to denoising score matching ($\epsilon^*\propto$ the score, §4), and because it gave the
+#    best samples in Ho et al.
 #
 # First a check: our conversions agree with `dm.model_predictions` for every parameterisation.
 
@@ -945,12 +1088,14 @@ plt.show()
 # %%
 step_counts = (10, 50, 1000)
 oracle_runs, trained_runs = {}, {}
-for T_ in step_counts:
+for T_ in step_counts[:-1]:
     s_T = make_schedule(T_)
-    oracle_T = oracle if T_ == T else OracleDenoiser(gmm, s_T)
+    oracle_T = OracleDenoiser(gmm, s_T)
     x = ancestral_sample(oracle_T, s_T, N_SAMPLE, generator=gen(5))
     oracle_runs[T_] = dict(model=oracle_T, samples=x, metrics=evaluate(x), schedule=s_T)
     print(f"oracle, T={T_:4d}: {fmt(oracle_runs[T_]['metrics'])}")
+oracle_runs[T] = dict(model=oracle, samples=samples_oracle, metrics=results["oracle denoiser"], schedule=sched)  # §7
+print(f"oracle, T={T:4d}: {fmt(oracle_runs[T]['metrics'])}   (sampled in §7)")
 for T_ in step_counts[:-1]:
     trained_runs[T_] = run_variant(f"trained, T = {T_}", schedule=make_schedule(T_))
 trained_runs[T] = dict(model=main["ema"], samples=samples_main, metrics=results["DDPM (EMA weights)"], schedule=sched)
@@ -966,19 +1111,30 @@ plt.show()
 
 # %% [markdown]
 # Even the *perfect* denoiser produces poor samples with $T=10$: mass is smeared between and around the blobs, and the
-# log-density drops far below the data's. The network trained for $T=10$ fails in the same way. At $T=50$ the
-# oracle's blobs come out somewhat too *tight* (log-density above the data's), which points at the reverse variance (§9c). The culprit is the
-# sampler's Gaussian reverse step (the four-mode kernel in §1), not the learning. At $T=1000$ the oracle sits at the floor
-# and the trained network close to it. Reducing the number of network evaluations without this failure is the subject of
+# log-density drops far below the data's. The network trained for $T=10$ fails in the same way. The culprit is the
+# sampler's Gaussian reverse step (the four-mode kernel in §1), not the learning. At $T=50$ the damage is much milder,
+# but the oracle's blobs come out somewhat too *tight* (log-density above the data's), which points at the reverse
+# variance (§9c). At $T=1000$ the oracle sits at the floor and the trained network close to it. Reducing the number of network evaluations without this failure is the subject of
 # notebook 04 (DDIM and ODE solvers take larger *deterministic* steps) and of distillation / consistency methods.
 #
 # ### 9c · The sampler variance: $\sigma_t^2=\beta_t$ or $\tilde\beta_t$?
 #
-# Ho et al. used both and found similar results. They are the two extremes of the right answer.
-# $\tilde\beta_t$ is the reverse variance when $x_0$ is *known* (a point mass), and $\beta_t$ is optimal when
-# $x_0\sim\mathcal N(0,I)$. The true reverse step adds the uncertainty about $x_0$ to $\tilde\beta_t$, so for real data the ideal
-# variance lies in between. Nichol & Dhariwal (2021) therefore *learn* an interpolation. Swapping the variance is free:
-# no retraining, just a sampler argument.
+# Ho et al. used both and found similar results. To see what each choice assumes, split the variance of the true reverse
+# step by conditioning on $x_0$ (law of total variance). Given $x_0$, the step is $q(x_{t-1}\mid x_t,x_0)$ of §1, with
+# variance $\tilde\beta_t$ and a mean that depends on $x_0$ through the coefficient $c_t=\sqrt{\bar\alpha_{t-1}}\,\beta_t/(1-\bar\alpha_t)$:
+# $$\mathrm{Cov}[x_{t-1}\mid x_t] = \underbrace{\tilde\beta_t\, I}_{\text{noise of the step, given }x_0}
+# \;+\; c_t^2\,\underbrace{\mathrm{Cov}[x_0\mid x_t]}_{\text{uncertainty about }x_0} .$$
+# - $\tilde\beta_t$ is exact when $x_0$ is *known* (a point mass): the second term vanishes.
+# - $\beta_t$ is exact when $x_0\sim\mathcal N(0,I)$. For data with unit variance per coordinate, Ho et al. note that the two
+#   are the extremes, lower and upper bounds on the reverse-process entropy. The best *single* variance, the same for every
+#   $x_t$ and averaged over $x_t$, lies (approximately) between them. Bao et al. (2022, Analytic-DPM) give it in closed form, and Nichol &
+#   Dhariwal (2021) *learn* an $x_t$-dependent interpolation.
+# - **Pointwise**, though, the second term can be far larger. At an ambiguous $x_t$ between modes, $\mathrm{Cov}[x_0\mid x_t]$
+#   is big, and the true reverse step is much wider than $\beta_t$: this is the $T=50$ and $T=10$ panels of §1 (variances
+#   printed there). With small steps $c_t\to 0$ and the term is negligible. With large steps, no fixed isotropic variance
+#   can be right everywhere.
+#
+# Swapping the variance is free: no retraining, just a sampler argument.
 
 # %%
 var_table = {}
@@ -1011,17 +1167,19 @@ plt.show()
 
 # %% [markdown]
 # At $T=1000$ the two variances are indistinguishable, which reproduces Ho et al.'s observation. With few, large steps the
-# choice matters, and the larger $\beta_t$ wins: the posterior variance $\tilde\beta_t$ ignores the uncertainty about
-# $x_0$. The printed log-densities show the theory at work. For the oracle at $T=50$ the two choices bracket the data:
-# $\tilde\beta_t$ gives samples that are too concentrated (log-density above the data's) and $\beta_t$ samples that are
-# slightly too diffuse (below it). Even so, no variance rescues $T=10$: a Gaussian with the right mean and a better
-# variance is still a Gaussian.
+# choice matters, and by MMD the larger $\beta_t$ wins: $\tilde\beta_t$ ignores the uncertainty about $x_0$. The printed
+# log-densities tell a more nuanced story. $\beta_t$ always gives the lower log-density: it spreads mass more, which helps
+# coverage (MMD) but also puts more samples in low-density regions. For the oracle at $T=50$ the two choices bracket the
+# data: $\tilde\beta_t$ gives samples that are too concentrated (log-density above the data's) and $\beta_t$ samples that
+# are slightly too diffuse (below it), as the averaged theory above predicts. For the trained network the metrics can
+# disagree about which choice is better. And no variance rescues $T=10$: a Gaussian with the right mean and a better
+# variance is still a unimodal Gaussian, while the true step is multimodal.
 #
 # ## 10 · The same pipeline on other toy datasets
 #
 # Nothing above was specific to Gaussian mixtures. Here is the unchanged recipe (same network, steps, optimiser and
-# sampler) on four classic 2-D datasets. These have no closed-form density, so we report MMD and sliced Wasserstein with
-# a data-vs-data floor.
+# sampler) on four classic 2-D datasets. We have not coded up their densities (eight_gaussians *is* a mixture; turning it
+# into a `dm.GaussianMixture` is a nice extension), so we report MMD and sliced Wasserstein with a data-vs-data floor.
 
 # %%
 toy_names = ["moons", "eight_gaussians", "checkerboard", "swiss_roll"]
@@ -1045,12 +1203,49 @@ plt.show()
 
 # %% [markdown]
 # The same ~20 lines of training code learn disconnected modes (eight Gaussians) and thin curved manifolds (moons, swiss
-# roll), up to a faint haze of points between modes. The **checkerboard** is the exception at this budget. Its sharp-edged
-# squares come out as blurred blobs with mass leaking between them. A small, smooth MLP needs many more updates to carve
-# out sharp edges. In our tests, doubling the steps or the batch size, or annealing the learning rate, sharpened them
-# only slowly (try `run_variant("checkerboard", data=..., density=None, reference=..., steps=4 * STEPS)`). Note also that
-# the checkerboard's MMD is clearly above the floor, but by much less than the picture suggests. A summary metric can
-# understate a defect that is obvious to the eye.
+# roll), up to a faint haze of points between modes. The **checkerboard** is the exception. Its sharp-edged squares come
+# out as blurred blobs, with mass leaking into the empty squares. Note that its MMD is clearly above the floor, but by much
+# less than the picture suggests: a summary metric can understate a defect that is obvious to the eye.
+#
+# ### Fixing the checkerboard: Fourier features of the input
+# Why does the checkerboard fail? At small $t$ the ideal denoiser must change abruptly across every edge of every square:
+# $\epsilon^*(x_t,t)$ varies over distances of the order of the noise level. An MLP fed raw coordinates is biased towards smooth,
+# low-frequency functions of its input (the "spectral bias" of neural networks), so it learns such edges slowly. More
+# steps, bigger batches or a learning-rate schedule help only a little. The remedy is the one §3a used for $t$: hand the
+# network a ready-made multi-scale basis of its input, $\big[x,\ \sin(2^k\pi x),\ \cos(2^k\pi x)\big]_{k=0}^{K-1}$ (Tancik et al. 2020).
+# With $K=4$ octaves the fastest feature has a period of a quarter of a square. Everything else (loss, optimiser, number
+# of steps, sampler) stays the same.
+
+# %%
+data_cb = dm.make_toy("checkerboard", 20_000, seed=0).to(device)
+cb_plain = toy_runs["checkerboard"]
+cb_fourier = run_variant("checkerboard + Fourier(x)", data=data_cb, density=None, reference=cb_plain["data"],
+                         model_kw=dict(fourier_octaves=4))
+print(f"{'':28s} floor (data vs data)  | {fmt(cb_plain['floor'])}")
+
+
+def draw_checkerboard(ax):
+    """Outline the 8 occupied unit squares of dm.make_toy('checkerboard')."""
+    for col in range(-2, 2):                       # column [col, col+1); squares start at height off and off - 2
+        off = col % 2
+        for low in (off, off - 2):
+            ax.add_patch(plt.Rectangle((col, low), 1, 1, fill=False, ec="k", lw=0.8))
+
+
+fig, axes = plt.subplots(1, 2, figsize=(8, 4.1))
+for ax, (r, title) in zip(axes, ((cb_plain, "plain residual MLP"), (cb_fourier, "+ Fourier features of $x$ (4 octaves)"))):
+    dm.scatter2d(r["samples"], ax=ax, c=C["eps"], lim=2.6, s=3, title=f"{title}\n{fmt(r['metrics'])}")
+    draw_checkerboard(ax)
+plt.suptitle(f"Checkerboard samples, same budget (black: the true squares; floor: {fmt(cb_plain['floor'])})", y=1.0)
+plt.tight_layout()
+plt.show()
+
+# %% [markdown]
+# With Fourier features the squares come back with sharp edges and the empty squares stay nearly empty, at the same budget
+# and with about two thousand extra parameters. Both metrics move towards the floor. The lesson generalises:
+# when a network struggles with fine structure in a low-dimensional input, look at the input *representation* before
+# buying more compute. Fourier/positional features are standard wherever networks read coordinates, from neural fields to
+# the time embedding that every diffusion model uses.
 #
 # ## Exercises
 #
@@ -1084,18 +1279,25 @@ plt.show()
 # **Exercise 3 (the weighting).** Modify `train_ddpm` to weight each example's loss by the true-ELBO weight $\lambda_t$ of §2
 # (normalised to mean 1). Predict how the per-$t$ error curve and the samples change.
 # <details><summary>Hint / solution</summary>
-# Replace the loss with `(lam[t] * ((model(x_t, t) - target) ** 2).mean(1)).mean()`, where `lam` is a tensor of the normalised
-# `lam_beta` (set `lam[0]` to its neighbour). The error at small $t$ goes down and the error at mid/large $t$ goes up. The
-# gradient noise also grows, because a few examples dominate each batch. Samples typically get slightly worse. This is the
+# Build the weights once, on the compute device (indexing a NumPy array with the device tensor `t` fails on a GPU):
+# `lam = torch.tensor(lam_beta / lam_beta.mean(), dtype=torch.float32, device=device)`. Then replace the loss with
+# `(lam[t] * ((model(x_t, t) - target) ** 2).mean(1)).mean()`. `lam_beta[0]` is finite (it is exactly the $L_0$ weight
+# of a Gaussian decoder with $\sigma_1^2=\beta_1$); only the $\tilde\beta_t$ version is infinite at $t=0$ and needs that entry
+# patched. The error at the lowest-noise steps goes down slightly, and the error at most other $t$ goes up. The
+# gradient noise also grows, because a few examples dominate each batch. The samples get somewhat worse (more diffuse). This is the
 # likelihood vs sample-quality trade-off of Ho et al., Table 2.
 # </details>
 #
-# **Exercise 4 (EMA horizon).** Retrain the main model with `ema_decay=0.99` and with `ema_decay=0.9999`. Which is closer to the
-# raw weights, and why is 0.9999 *less* harmful here than its nominal 10,000-step horizon suggests?
+# **Exercise 4 (EMA horizon).** Retrain the main model (`run_variant("ema", ema_decay=...)`) with `ema_decay=0.99`, with
+# `ema_decay=0.9999`, and with `ema_decay=0.9999, ema_warmup=False`. Predict each result before you run it: which is
+# closest to the raw weights, which is identical to the main model, and which is ruined?
 # <details><summary>Hint / solution</summary>
-# 0.99 averages over ~100 steps and is much closer to the raw weights. For 0.9999, the warm-up rule
-# $d=\min(\text{decay}, \frac{1+n}{10+n})$ caps the decay at about 0.998 after 4000 steps, so the effective horizon is still
-# only a few hundred steps. Without warm-up, the EMA would still carry about $e^{-0.4}\approx 67\%$ of the random initial weights.
+# 0.99 averages over ~100 steps and lands between the raw and the default EMA weights. 0.9999 gives *exactly* the main
+# model's EMA: the warm-up rule $d=\min(\text{decay}, \frac{1+n}{10+n})$ stays below 0.999 for the first ~9000 steps, so
+# the `decay` argument has no effect in a 4000-step run (the effective decay reaches only about 0.998, a window of a
+# few hundred steps). Without warm-up, 0.9999 is a disaster: after 4000 steps the average still carries
+# $0.9999^{4000}\approx e^{-0.4}\approx 67\%$ of the *random initial* weights, and the samples show it. Large-scale runs can
+# use 0.9999 only because they train for hundreds of thousands of steps.
 # </details>
 #
 # **Exercise 5 (memorisation).** Train on only `train_data[:32]` for 4000 steps and sample. Measure the distance from each
@@ -1109,11 +1311,22 @@ plt.show()
 # training set).
 # </details>
 #
-# **Exercise 6 (capacity).** Shrink the network (`ResMLPDenoiser(hidden=32, n_blocks=1)`) and plot its excess per-$t$ error
-# next to the main model's. Predict at which $t$ a small network loses most.
+# **Exercise 6 (architecture knobs).** Two predictions to test with `run_variant`. (a) The gotcha of §3a: feed the
+# embedding $t/T$ instead of $t$. Does it hurt *here*? (b) Shrink the network to `hidden=32, n_blocks=1`. At which $t$
+# does a small network lose most, relative to the oracle?
 # <details><summary>Hint / solution</summary>
-# `small = run_variant("small net", model_kw=dict(hidden=32, n_blocks=1))`, then plot
-# `per_t_errors(small["model"], sched)[1] - err_oracle`. Expect the gap to grow where the optimal $\epsilon^*(x_t,t)$ varies most sharply with
+#
+# ```python
+# class TimeRescaled(ResMLPDenoiser):
+#     def forward(self, x, t, y=None): return super().forward(x, t / T)     # float t/T in [0, 1)
+# rescaled = run_variant("t/T embedding", model_cls=TimeRescaled)
+# small = run_variant("small net", model_kw=dict(hidden=32, n_blocks=1))
+# plt.plot(ts_eval, per_t_errors(small["model"], sched)[1] - err_oracle)
+# ```
+# (a) Indistinguishable from the main model, within run-to-run noise. Here $\epsilon^*$ varies smoothly with $t$, so the
+# few smooth features that survive (§3a, right panel) carry all the $t$-information this problem needs. The gotcha bites
+# when the ideal denoiser must change sharply with $t$.
+# (b) Expect the gap to grow where the optimal $\epsilon^*(x_t,t)$ varies most sharply with
 # $x_t$, at small and intermediate $t$ (the edges of the blobs, and the boundaries between blobs). At large $t$ the
 # target is almost linear ($\epsilon^*\approx x_t$), which any network can represent.
 # </details>
@@ -1121,8 +1334,9 @@ plt.show()
 # %% [markdown]
 # ## Key takeaways
 #
-# - DDPM's reverse step $p_\theta(x_{t-1}\mid x_t)$ is Gaussian. That is accurate only for **small steps**. The *mean*
-#   of the true reverse step is exact for any step (Tweedie); its *shape* is not.
+# - DDPM's reverse step $p_\theta(x_{t-1}\mid x_t)$ is Gaussian. That is accurate only for **small steps**. With a perfect
+#   noise predictor, the *mean* of DDPM's step equals the true reverse mean for any step size (Tweedie); its *shape* and
+#   *variance* are only right for small steps.
 # - The ELBO is a sum of KLs between Gaussians. With $\mu_\theta$ written in terms of a noise predictor, each term becomes a
 #   weighted $\|\epsilon-\epsilon_\theta\|^2$. Dropping the weights gives $L_\text{simple}$, a reweighting that changes how capacity is
 #   spent across $t$ but not the optimum, $\mathbb E[\epsilon\mid x_t]$.
@@ -1130,10 +1344,16 @@ plt.show()
 #   held-out batch, not against zero and not from single minibatches.
 # - The whole method is small: sinusoidal $t$-embedding + residual MLP + a 20-line loop + a 15-line sampler. Implementation
 #   bugs hide in indexing conventions and broadcasting, so check against a reference.
-# - Sample with **EMA weights**. Score samples with MMD / sliced Wasserstein *relative to a data-vs-data floor*.
+# - The model's $\hat x_0$ is a posterior *mean*, a belief, not a sample. It is a martingale along the reverse process, and
+#   continuing the sampler from $x_t$ draws from the posterior over $x_0$.
+# - Sample with **EMA weights**. Score samples with MMD / sliced Wasserstein *relative to a data-vs-data floor*, and, where
+#   you can, against an oracle that shares the sampler, to separate network error from sampler error.
 # - $\epsilon$-, $x_0$- and $v$-prediction are the same model with different implicit weightings and error amplification. $x_0$
 #   neglects low noise levels, while $v$ never amplifies errors.
-# - Few steps fail even with a perfect denoiser. The variance choice $\beta_t$ vs $\tilde\beta_t$ only matters when steps are large.
+# - Few steps fail even with a perfect denoiser. The variance choice $\beta_t$ vs $\tilde\beta_t$ only matters when steps are
+#   large, and then no fixed variance is right everywhere.
+# - When an MLP misses sharp structure in a low-dimensional input, change its input representation (Fourier features)
+#   before buying more compute.
 #
 # ## Further reading
 #
@@ -1143,6 +1363,9 @@ plt.show()
 # - T. Salimans, J. Ho (2022). *Progressive Distillation for Fast Sampling of Diffusion Models.* arXiv:2202.00512. $v$-prediction.
 # - D. Kingma, T. Salimans, B. Poole, J. Ho (2021). *Variational Diffusion Models.* arXiv:2107.00630. The SNR view of the ELBO and its weightings.
 # - T. Karras, M. Aittala, T. Aila, S. Laine (2022). *Elucidating the Design Space of Diffusion-Based Generative Models.* arXiv:2206.00364. Parameterisation, preconditioning and loss weighting as explicit design choices.
+# - F. Bao, C. Li, J. Zhu, B. Zhang (2022). *Analytic-DPM: an Analytic Estimate of the Optimal Reverse Variance in Diffusion Probabilistic Models.* arXiv:2201.06503. The best fixed reverse variance of §9c in closed form.
 # - B. Efron (2011). *Tweedie's Formula and Selection Bias.* Journal of the American Statistical Association. The posterior-mean identity behind the oracle.
+# - M. Tancik, P. Srinivasan, B. Mildenhall, S. Fridovich-Keil, N. Raghavan, U. Singhal, R. Ramamoorthi, J. Barron, R. Ng (2020). *Fourier Features Let Networks Learn High Frequency Functions in Low Dimensional Domains.* arXiv:2006.10739. Spectral bias and the input features of §10.
+# - C. Meng, Y. He, Y. Song, J. Song, J. Wu, J.-Y. Zhu, S. Ermon (2022). *SDEdit: Guided Image Synthesis and Editing with Stochastic Differential Equations.* arXiv:2108.01073. Noise partway, then resample (§6).
 # - Z. Kadkhodaie, F. Guth, E. P. Simoncelli, S. Mallat (2024). *Generalization in diffusion models arises from geometry-adaptive harmonic representations.* arXiv:2310.02557. Memorisation vs generalisation (Exercise 5).
 # - L. Weng (2021). *What are Diffusion Models?* lilianweng.github.io. A careful walk-through of the same derivation.

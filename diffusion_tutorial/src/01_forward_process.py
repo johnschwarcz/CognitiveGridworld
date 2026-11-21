@@ -26,7 +26,7 @@
 # - noise schedules (linear vs cosine), and why the **signal-to-noise ratio** curve is what really matters;
 # - the exact noised data distribution $q_t(x)$, and *what* information is destroyed *when* (coarse structure survives longest);
 # - the reverse posterior $q(x_{t-1}\mid x_t, x_0)$, derived by Gaussian conjugacy. It is the training target of every DDPM;
-# - why the reverse step is only (nearly) Gaussian when steps are small, and how the "variance-exploding" formulation relates.
+# - why the true reverse step is only (nearly) Gaussian when steps are small *relative to the structure left in the data*, and how the "variance-exploding" formulation relates.
 #
 # **Prerequisites:** none, this is the first notebook. It assumes you are comfortable with Gaussians, Bayes' rule and PyTorch.
 #
@@ -56,9 +56,10 @@ dm.seed_everything(0)
 
 plt.rcParams.update({"figure.dpi": 100, "font.size": 9, "axes.titlesize": 10, "axes.labelsize": 9,
                      "legend.fontsize": 8, "xtick.labelsize": 8, "ytick.labelsize": 8})
-# one colour per concept, used consistently in every figure
+# fixed colours for the concepts that recur across figures
 C_LIN, C_COS = "tab:blue", "tab:orange"        # linear vs cosine schedule
 C_VP, C_VE = "tab:blue", "tab:red"             # variance preserving vs "just add noise" / variance exploding
+C_ONESHOT = "tab:olive"                        # one-shot samples from q(x_t | x_0) (vs the step-by-step chain)
 C_THEORY = "k"                                 # closed-form predictions
 CMAP_DENSITY = plt.get_cmap("magma", 64)       # 64 levels: indistinguishable, but keeps the PNGs small
 
@@ -81,7 +82,8 @@ print(f"FAST mode: {FAST}, N = {N}")
 #
 # **Why many small steps?** Because each step is then *easy*. Going from $x_t$ to $x_{t-1}$ removes only
 # a sliver of noise, so the answer is always close to $x_t$. Section 8 shows that the distribution of
-# $x_{t-1}$ given $x_t$ becomes a simple, nearly Gaussian bump as the step size shrinks. One hard
+# $x_{t-1}$ given $x_t$ becomes a simple, nearly Gaussian bump once the step is small compared with the
+# structure still present in the data at that noise level. One hard
 # density-estimation problem becomes a long chain of easy denoising (regression) problems.
 #
 # **Where diffusion sits.** Like a VAE, a diffusion model is a latent-variable model trained with a
@@ -89,10 +91,11 @@ print(f"FAST mode: {FAST}, N = {N}")
 # parameters, and its latents $x_1,\dots,x_T$ have the same dimension as the data. Unlike a GAN, it is
 # trained by a stable regression loss with no adversary and tends to cover all modes; the price is many
 # network evaluations per sample. Its deterministic sampler (notebooks 04 and 08) is a continuous
-# normalizing flow, but one trained by simple regression rather than by maximum likelihood through an
-# invertible architecture. And where autoregressive models factorize $p(x)$ over *dimensions* (one
-# token or pixel at a time), diffusion factorizes it over *noise levels*, roughly from coarse structure
-# to fine detail (section 6).
+# normalizing flow (an ODE), but its vector field is learned by simple regression, with no ODE solves or
+# Jacobian traces during training. Maximum-likelihood flows need one or the other: discrete flows use
+# invertible layers with tractable Jacobians, and continuous flows are trained through the ODE. And
+# where autoregressive models factorize $p(x)$ over *dimensions* (one token or pixel at a time),
+# diffusion factorizes it over *noise levels*, roughly from coarse structure to fine detail (section 6).
 #
 # The whole forward process fits in a few lines. We fix a sequence of per-step noise variances
 # $\beta_1,\dots,\beta_T$, the **noise schedule**. For now we use the "linear" schedule of Ho et al. (2020),
@@ -194,6 +197,17 @@ plt.show()
 # $\mathbb E[x_t]=\sqrt{\bar\alpha_t}\,\mathbb E[x_0]$. The process is therefore **variance preserving (VP)**:
 # $x_t$ stays at unit scale and ends up at $\mathcal N(0,I)$ *whatever the data were*.
 #
+# **The continuous-time view.** Write $\beta_t=\beta(\tau)/T$ with $\tau=t/T$ and $d\tau=1/T$. Since
+# $\sqrt{1-\beta_t}\approx1-\beta_t/2$, one step is $x_t-x_{t-1}\approx-\tfrac12\beta(\tau)\,x_{t-1}\,d\tau+\sqrt{\beta(\tau)\,d\tau}\;\varepsilon_t$,
+# the Euler–Maruyama step of the **VP stochastic differential equation** (Song et al. 2021)
+#
+# $$dx=-\tfrac12\beta(\tau)\,x\,d\tau+\sqrt{\beta(\tau)}\,dW_\tau .$$
+#
+# This is a time-inhomogeneous Ornstein–Uhlenbeck process. Its solution has mean $e^{-\frac12\int_0^\tau\beta}\,x_0$
+# and variance $1-e^{-\int_0^\tau\beta}$, so $\bar\alpha(\tau)=\exp\!\big(-\int_0^\tau\beta(s)\,ds\big)\approx\exp(-\sum_{s\le t}\beta_s)$. The DDPM
+# linear schedule is $\beta(\tau)\approx0.1+19.9\,\tau$. $T$ only sets how finely this one continuous process is discretised
+# (section 4). Running it backwards in time (the reverse-time SDE) is the topic of notebook 04.
+#
 # Without the shrink factor ($x_t = x_{t-1}+\sqrt{\beta_t}\varepsilon_t$), the variances simply add:
 # $\operatorname{Var}[x_t]=\operatorname{Var}[x_0]+\sum_{s\le t}\beta_s$. The variance grows without bound and the data
 # are never actually removed, only drowned. A useful summary is the **signal fraction**: the share of
@@ -236,6 +250,9 @@ plt.show()
 print(f"data variance v0 = {v0:.3f}")
 print(f"at t = T:  VP variance = {var_vp[-1]:.3f}, signal fraction = {signal_vp[-1]:.1e}")
 print(f"           no-shrink variance = {var_ns[-1]:.2f}, signal fraction = {signal_ns[-1]:.3f}")
+# continuous-time check: the VP-SDE gives abar(1) = exp(-integral of beta(tau)), with beta(tau) = 0.1 + 19.9 tau
+print(f"abar_T: discrete prod(1 - beta_t) = {abar_lin[-1]:.2e},  VP-SDE exp(-integral beta) = {math.exp(-(0.1 + 19.9 / 2)):.2e}"
+      f"  (they differ by the O(beta^2) terms that the Euler step drops)")
 
 # %% [markdown]
 # **Left:** with the shrink factor, the variance relaxes to exactly 1 (simulation dots on the theory
@@ -307,23 +324,44 @@ theirs = dm_sched.q_sample(x0_b, t_b - 1, noise_b)    # dmtools index = maths t 
 assert torch.allclose(ours, theirs, atol=1e-6)
 # the classic bug: passing maths t straight to dmtools (clamped, since t = T would even be out of range)
 wrong = (dm_sched.q_sample(x0_b, t_b.clamp(max=T - 1), noise_b) - ours).abs().max()
+# the same bug on a coarse 10-step schedule (as in few-step samplers), at every maths t = 1..10
+dm_coarse = dm.NoiseSchedule(10, "cosine", device=device)
+t_c = torch.arange(1, 11, device=device)
+right_c = dm_coarse.q_sample(x0_b[:10], t_c - 1, noise_b[:10])
+wrong_c = (dm_coarse.q_sample(x0_b[:10], t_c.clamp(max=9), noise_b[:10]) - right_c).abs().max()
 print("schedule + q_sample match dmtools (with dmtools' t = our t - 1)")
-print(f"forgetting the shift silently changes x_t by up to {wrong.item():.4f} (no error is raised)")
+print(f"forgetting the shift silently changes x_t by up to {wrong.item():.4f} at T = 1000, "
+      f"but by up to {wrong_c.item():.2f} on a 10-step schedule (no error is raised in either case)")
 
 # %% [markdown]
+# At $T=1000$ the off-by-one is tiny because neighbouring noise levels are almost identical, which is
+# exactly why it goes unnoticed. On a coarse schedule, as used by few-step samplers, the same mistake
+# moves $x_t$ to a visibly different noise level. In a sampler it also decides whether the last step
+# adds noise: the reverse posterior variance must be exactly 0 at maths $t=1$ (section 7).
+#
 # Now the real test: run the chain step by step up to $t$, sample $x_t$ in one shot from the same
 # $x_0$'s, and compare the two distributions. We compare means and covariances with the closed form
 # $\mathbb E[x_t]=\sqrt{\bar\alpha_t}\,\mathbb E[x_0]$ and
 # $\operatorname{Cov}[x_t]=\bar\alpha_t\operatorname{Cov}[x_0]+(1-\bar\alpha_t)I$, and we use the kernel two-sample statistic
-# `dm.mmd_rbf` (0 means identical distributions). Its finite-sample noise floor is estimated by comparing two
-# *independent* one-shot draws.
+# `dm.mmd_rbf` (0 means identical distributions). Even for identical distributions a finite-sample MMD is
+# positive, so we need its **noise floor**: the MMD between two *independent* one-shot draws. A single
+# MMD value is itself noisy, so we average both statistics over several disjoint blocks of samples and
+# report mean ± standard error.
 
 # %%
+def mmd_blocks(x, y, n_blocks, block):
+    """dm.mmd_rbf on n_blocks disjoint blocks of `block` samples: (mean, standard error over blocks)."""
+    vals = [dm.mmd_rbf(x[i * block:(i + 1) * block].cpu(), y[i * block:(i + 1) * block].cpu(), max_n=block)
+            for i in range(n_blocks)]
+    return float(np.mean(vals)), float(np.std(vals, ddof=1) / math.sqrt(n_blocks))
+
+
 check_t = [50, 200, 500]
 chain = forward_chain(x_roll, betas_lin, record=check_t)
-n_mmd = 1000 if FAST else 2000      # MMD needs an (2n x 2n) kernel matrix, keep it moderate
+# MMD builds a (2n x 2n) kernel matrix, so we use several moderate blocks rather than one huge one
+mmd_cfg = dict(n_blocks=3, block=500) if FAST else dict(n_blocks=5, block=1000)
 print(f"{'t':>4} {'abar_t':>7} | {'mean: chain / one-shot / theory':^42} | "
-      f"{'Var[x1]: chain / one-shot / theory':^34} | {'MMD chain-vs-1shot':>18} {'MMD floor':>10}")
+      f"{'Var[x1]: chain / one-shot / theory':^34} | {'MMD chain vs one-shot':>22} | {'MMD floor':>20}")
 one_shot = {}
 for t in check_t:
     t_vec = torch.full((N,), t, device=device, dtype=torch.long)
@@ -333,16 +371,17 @@ for t in check_t:
     m_th = math.sqrt(a) * x_roll.mean(0)
     v_th = a * x_roll[:, 0].var() + (1 - a)
     ch, os_ = chain[t], one_shot[t]
-    mmd = dm.mmd_rbf(ch.cpu(), os_.cpu(), max_n=n_mmd)
-    mmd0 = dm.mmd_rbf(one_shot_b.cpu(), os_.cpu(), max_n=n_mmd)
+    mmd, mmd_se = mmd_blocks(ch, os_, **mmd_cfg)
+    mmd0, mmd0_se = mmd_blocks(one_shot_b, os_, **mmd_cfg)
     fmt = lambda v: f"({v[0]:+.3f},{v[1]:+.3f})"
     print(f"{t:4d} {a:7.3f} | {fmt(ch.mean(0))} {fmt(os_.mean(0))} {fmt(m_th)} | "
-          f"{ch[:, 0].var():.3f} / {os_[:, 0].var():.3f} / {v_th:.3f}        | {mmd:18.2e} {mmd0:10.2e}")
+          f"{ch[:, 0].var():.3f} / {os_[:, 0].var():.3f} / {v_th:.3f}        | "
+          f"{mmd:.2e} +- {mmd_se:.1e} | {mmd0:.2e} +- {mmd0_se:.1e}")
 
 fig, axes = plt.subplots(1, len(check_t), figsize=(3.2 * len(check_t), 3.3))
 for ax, t in zip(axes, check_t):
     dm.scatter2d(chain[t][:2000], ax=ax, s=2, alpha=0.4, c=C_VP, lim=3.2, label=f"{t} chain steps")
-    dm.scatter2d(one_shot[t][:2000], ax=ax, s=2, alpha=0.4, c=C_COS, lim=3.2, label="one-shot $q(x_t|x_0)$",
+    dm.scatter2d(one_shot[t][:2000], ax=ax, s=2, alpha=0.4, c=C_ONESHOT, lim=3.2, label="one-shot $q(x_t|x_0)$",
                  title=rf"t = {t}, $\bar\alpha_t$ = {abar_lin[t]:.3f}")
     ax.legend(loc="lower right", markerscale=4)
 plt.tight_layout()
@@ -350,8 +389,10 @@ plt.show()
 
 # %% [markdown]
 # The two clouds overlap at every $t$. Means and variances agree with the closed form up to Monte
-# Carlo error, and the MMD between "chain" and "one shot" is of the same order as the MMD between two
-# independent one-shot draws, i.e. at the noise floor. From now on we never need to run the chain.
+# Carlo error, and the MMD between "chain" and "one shot" should match the floor between two
+# independent one-shot draws to within a couple of standard errors (compare the last two columns): the
+# step-by-step chain and the closed form are statistically indistinguishable. From now on we never need
+# to run the chain.
 
 # %% [markdown]
 # ## 4 · Noise schedules: what really matters is the SNR curve
@@ -373,10 +414,12 @@ plt.show()
 # **how the $T$ steps are spread over noise levels**. That spread decides where training effort and
 # sampling steps go. (Kingma et al. 2021 show that, in continuous time, even the ELBO depends on the
 # schedule only through its endpoints $\lambda_{\max}$ and $\lambda_{\min}$.) It also means $T$ is just a
-# discretisation of a continuous curve $\lambda(\tau)$, $\tau=t/T\in[0,1]$. `dm.NoiseSchedule` keeps the linear
-# schedule's continuous curve fixed when you change $T$ by rescaling $\beta_t\to\beta_t\cdot 1000/T$, so that
-# $\bar\alpha(\tau)\approx\exp(-\sum_s\beta_s)$ stays put. **Respacing** is more robust: keep a subset of the
-# noise levels $\bar\alpha_{\tau_0}>\bar\alpha_{\tau_1}>\dots$ of a fine schedule and recompute $\beta_j = 1-\bar\alpha_{\tau_j}/\bar\alpha_{\tau_{j-1}}$.
+# discretisation of a continuous curve $\lambda(\tau)$, $\tau=t/T\in[0,1]$. In the VP-SDE picture of section 2,
+# $\beta_t=\beta(\tau)/T$: keeping the continuous process $\beta(\tau)$ fixed while changing $T$ means scaling the per-step
+# $\beta_t$ by $1/T$. That is exactly what `dm.NoiseSchedule` does for the linear schedule ($\beta_t\to\beta_t\cdot 1000/T$), so
+# that $\bar\alpha(\tau)\approx\exp(-\int_0^\tau\beta)$ stays put. The approximation degrades as the steps grow, so
+# **respacing** is more robust: keep a subset of the noise levels $\bar\alpha_{\tau_0}>\bar\alpha_{\tau_1}>\dots$ of a fine schedule
+# and recompute $\beta_j = 1-\bar\alpha_{\tau_j}/\bar\alpha_{\tau_{j-1}}$.
 
 # %%
 def make_schedule(kind="linear", T=1000, beta_start=1e-4, beta_end=0.02, s=0.008):
@@ -396,7 +439,10 @@ def make_schedule(kind="linear", T=1000, beta_start=1e-4, beta_end=0.02, s=0.008
 
 
 def respace(abar, n_steps):
-    """Keep n_steps+1 evenly spaced noise levels (incl. t=0 and t=T) of a fine schedule; recompute betas."""
+    """Keep the noise levels of a fine schedule at n_steps+1 evenly spaced t (incl. t=0 and t=T); recompute betas.
+
+    Evenly spaced in t, not in noise level: the kept log-SNRs follow the fine schedule's curve.
+    """
     idx = torch.linspace(0, len(abar) - 1, n_steps + 1, dtype=torch.float64).round().long()
     ab = abar[idx]
     betas = torch.cat([torch.zeros(1, dtype=ab.dtype), 1 - ab[1:] / ab[:-1]])
@@ -451,9 +497,9 @@ plt.show()
 # %% [markdown]
 # - **$\beta_t$ (log scale):** the cosine schedule starts with smaller steps and ends with much larger ones (the
 #   last step is clipped at 0.999).
-# - **$\bar\alpha_t$:** under the linear schedule the signal is essentially gone by $t/T\approx 0.6$. The last
-#   third of the steps therefore operate on almost pure noise, which is wasted effort both in training
-#   and in sampling. The cosine curve decays smoothly all the way to $T$.
+# - **$\bar\alpha_t$:** under the linear schedule the per-pixel signal is essentially gone by $t/T\approx 0.6$. The last
+#   third of the steps therefore operate on what is, coordinate by coordinate, almost pure noise. That is
+#   mostly wasted effort, both in training and in sampling. The cosine curve decays smoothly all the way to $T$.
 # - **log-SNR:** both curves drop steeply at first and then fall roughly linearly, but the cosine curve sits higher
 #   (it only plunges below the linear one in the last few percent of steps). It therefore spends more of its steps
 #   in the middle range ($|\lambda|<5$, see the printout), where the data are actually being transformed
@@ -485,10 +531,16 @@ plt.show()
 # %% [markdown]
 # Under the linear schedule (top) the digit is barely readable by $t/T\approx 0.4$ and gone by $0.5$. Every
 # later column is pure noise to the eye, yet half of the 1000 steps live there. The cosine schedule
-# (bottom) keeps the digit recognisable for much longer and destroys it evenly. The linear schedule is
+# (bottom) keeps the digit recognisable for much longer and destroys it more gradually. The linear schedule is
 # nonetheless what DDPM and our MNIST models (notebooks 05–07) use: it works, it just wastes steps.
 # For small $28\times28$ images this "destroys too early" effect is strongest, which was a main motivation
 # for the cosine schedule.
+#
+# "To the eye" matters. Hundreds of pixels carry the *same* faint global signal (overall brightness, rough
+# layout), so an ideal observer who knows the data distribution can still detect that coarse information
+# well after the image looks like noise. Section 6 measures this kind of retained information exactly on a
+# toy problem. It is also why higher-resolution images, with more redundant pixels, need schedules shifted
+# towards more noise (Exercise 2; Esser et al. 2024).
 #
 # > **Gotchas.** (i) Report and compare schedules by their **log-SNR curve**, not by $\beta$. (ii) Neither schedule
 # > reaches $\bar\alpha_T=0$ exactly (see the printout above). A tiny bit of signal survives in $x_T$ at
@@ -531,20 +583,24 @@ for a in [0.9, 0.3, 0.01]:
 print("noised_gmm matches dm.GaussianMixture.noised")
 
 # --- CHECK 2: Monte Carlo noised samples vs the analytic marginal -------------------------------
-# Average log-density E[log q_t(x)] under (a) noised data samples and (b) samples drawn from the
-# analytic q_t. If the two distributions agree, these averages agree within Monte Carlo error.
+# (a) The two-sample MMD of section 3: noised data vs samples drawn from the analytic q_t, next to the
+#     noise floor of two independent analytic draws (mean +- s.e. over disjoint blocks).
+# (b) A second statistic: the average log-density E[log q_t(x)] under both sample sets (mean +- 2 s.e.).
 show_t2 = [0, 50, 100, 150, 250, 1000]
 x0_gmm = gmm2d.sample(N).to(device)
 mc_samples = {}
-print(f"{'t':>5} {'abar':>6} | {'E log q_t: noised data':>24} | {'E log q_t: analytic samples':>28}")
+print(f"{'t':>5} {'abar':>6} | {'MMD noised vs analytic':>22} | {'MMD floor':>20} | "
+      f"{'E log q_t: noised (+-2se)':>25} | {'analytic (+-2se)':>17}")
 for t in show_t2:
     q_t = noised_gmm(gmm2d, abar_lin[t].item())
     mc_samples[t] = q_sample(x0_gmm, torch.full((N,), t, device=device), abar_lin).cpu()
-    lp_mc = q_t.log_prob(mc_samples[t])
-    lp_an = q_t.log_prob(q_t.sample(N))
-    se = lambda v: 2 * v.std().item() / math.sqrt(len(v))
-    print(f"{t:5d} {abar_lin[t]:6.3f} | {lp_mc.mean():10.3f} +- {se(lp_mc):.3f}       "
-          f"| {lp_an.mean():12.3f} +- {se(lp_an):.3f}")
+    analytic, analytic_b = q_t.sample(N), q_t.sample(N)
+    mmd, mmd_se = mmd_blocks(mc_samples[t], analytic, **mmd_cfg)
+    mmd0, mmd0_se = mmd_blocks(analytic_b, analytic, **mmd_cfg)
+    lp_mc, lp_an = q_t.log_prob(mc_samples[t]), q_t.log_prob(analytic)
+    two_se = lambda v: 2 * v.std().item() / math.sqrt(len(v))
+    print(f"{t:5d} {abar_lin[t]:6.3f} | {mmd:.2e} +- {mmd_se:.1e} | {mmd0:.2e} +- {mmd0_se:.1e} | "
+          f"{lp_mc.mean():15.3f} +- {two_se(lp_mc):.3f} | {lp_an.mean():9.3f} +- {two_se(lp_an):.3f}")
 
 # %%
 lim = 3.0
@@ -566,7 +622,8 @@ plt.show()
 
 # %% [markdown]
 # Top: the exact density $q_t$ (square-root colour scale, normalised per panel). Bottom: data points
-# noised with `q_sample`. They match. The thin elongated components blur first, then neighbouring
+# noised with `q_sample`. They match: in the printout the MMD sits at its noise floor and the average
+# log-densities agree, up to Monte Carlo fluctuations of a couple of standard errors. The thin elongated components blur first, then neighbouring
 # modes merge into a ring, and finally the ring fills in and contracts into a single isotropic Gaussian.
 #
 # The same story in 1-D gives the most useful single picture of diffusion. We build a 1-D mixture with
@@ -592,7 +649,7 @@ def density_map(abars):
 
 maps = {"linear": density_map(abar_lin[t_cols]), "cosine": density_map(abar_cos[t_cols]),
         "log-SNR": density_map(torch.sigmoid(lam_cols))}
-# a few forward trajectories (the same 8 starting points under each schedule)
+# a few forward trajectories (the same 4 starting points under each schedule)
 x0_paths = gmm1d.sample(4, generator=torch.Generator().manual_seed(3))
 paths = {}
 for name, b in [("linear", betas_lin), ("cosine", betas_cos)]:
@@ -620,12 +677,12 @@ plt.show()
 # %% [markdown]
 # The data distribution (left edge of each panel) "melts" smoothly into $\mathcal N(0,1)$. It does so
 # **hierarchically**: the narrow modes inside each family merge first, and the two families merge into
-# one bump only later. Under the linear schedule all the interesting structure is gone within roughly the
-# first quarter of the steps. The cosine schedule stretches the same events over about twice as much of the
-# time axis. Plotted against
-# log-SNR (right), both schedules give exactly this one picture. The white lines are individual forward
-# trajectories: jittery random walks pulled towards 0 (an Ornstein–Uhlenbeck process), which forget where
-# they started.
+# one bump only later. Under the linear schedule the density has become a single bump within roughly the
+# first quarter of the steps; the cosine schedule stretches the same events over about twice as much of the
+# time axis. (A single bump does not mean the information is gone: section 6 shows that an observer can still
+# tell the two families apart for a while.) Plotted against log-SNR (right), both schedules give exactly this
+# one picture. The white lines are individual forward trajectories: jittery random walks pulled towards 0 (the
+# Ornstein–Uhlenbeck process of section 2), which forget where they started.
 
 # %% [markdown]
 # ## 6 · What is destroyed, and when
@@ -642,14 +699,20 @@ plt.show()
 #
 # We track three levels of detail:
 # 1. **side** (coarse): left vs right family, using $p(\text{side}\mid x_t)=\sum_{k\in\text{side}}p(k\mid x_t)$;
-# 2. **mode**: which of the 5 components;
+# 2. **mode within its side**: which of the components of that family. The side is a function of $K$, so by the
+#    chain rule $H(K\mid X_t)=H(\text{side}\mid X_t)+H(K\mid \text{side},X_t)$: the within-side uncertainty is
+#    $H(K\mid X_t)-H(\text{side}\mid X_t)$, and its prior value is $H(K)-H(\text{side})$. (Plotting $I(K;X_t)/H(K)$ instead
+#    would mix in the side information and blur the two levels together.)
 # 3. **fine detail**: the exact position of $x_0$ *within* its component. Given $x_t$ and $k$, the posterior
 #    over $x_0$ is Gaussian (conjugacy again: the likelihood $x_t\mid x_0$ has precision $\bar\alpha_t/(1-\bar\alpha_t)=\mathrm{SNR}$),
 #    with variance $1/(\sigma_k^{-2}+\mathrm{SNR})$. The fraction of within-component variance explained is
 #    $R^2=\mathrm{SNR}\,\sigma_k^2/(1+\mathrm{SNR}\,\sigma_k^2)$.
 #
-# We report each level as the *fraction of information retained*: $I(\cdot\,;X_t)/H(\cdot)$ for the discrete
-# levels and $R^2$ for fine detail.
+# We report each level as the *fraction retained*: $I/H$ for the two discrete levels and $R^2$ for fine detail.
+# Information and explained variance are different measures, so as a control we also score the two discrete
+# levels by a variance fraction. Split $x_0=\mu_{\text{side}(k)}+(\mu_k-\mu_{\text{side}(k)})+(x_0-\mu_k)$ (law of total
+# variance) and compute, for each part $f$, the share of its variance captured by the Bayes-optimal estimate:
+# $\operatorname{Var}\big(\mathbb E[f\mid x_t]\big)/\operatorname{Var}(f)$, with $\mathbb E[f\mid x_t]=\sum_k p(k\mid x_t)\,f(k)$.
 
 # %%
 def entropy_bits(p):
@@ -664,10 +727,14 @@ def posterior_over_components(gmm, abar_t, x_t):
 n_lam = 41 if FAST else 121
 lams = torch.linspace(10, -10, n_lam, dtype=torch.float64)
 x0_1d, k0_1d = gmm1d.sample(N, return_labels=True)
-w, var_k = gmm1d.weights, gmm1d.covs[:, 0, 0]
+w, var_k, mu_k = gmm1d.weights, gmm1d.covs[:, 0, 0], gmm1d.means[:, 0]
 side_onehot = torch.nn.functional.one_hot(SIDE, 2).double()       # (K, 2)
-H_k, H_side = entropy_bits(w).item(), entropy_bits(w @ side_onehot).item()
-Hk_t, Hside_t, r2_fine = [], [], []
+w_side = w @ side_onehot
+H_k, H_side = entropy_bits(w).item(), entropy_bits(w_side).item()
+# the law-of-total-variance parts of x_0, as functions of the component k
+mu_side_k = ((side_onehot.T @ (w * mu_k)) / w_side)[SIDE]         # mean of k's family, shape (K,)
+f_side, f_within = mu_side_k, mu_k - mu_side_k
+Hk_t, Hside_t, r2_fine, ve_side, ve_within = [], [], [], [], []
 for lam in lams:
     a = torch.sigmoid(lam).item()
     x_t = math.sqrt(a) * x0_1d.double() + math.sqrt(1 - a) * torch.randn(N, 1, dtype=torch.float64)
@@ -676,7 +743,11 @@ for lam in lams:
     Hside_t.append(entropy_bits(post @ side_onehot).mean().item())
     snr = math.exp(lam.item())
     r2_fine.append((w * snr * var_k / (1 + snr * var_k)).sum().item() / w.sum().item())
-Hk_t, Hside_t, r2_fine = map(np.array, (Hk_t, Hside_t, r2_fine))
+    ve_side.append((post @ f_side).var().item() / f_side[k0_1d].var().item())
+    ve_within.append((post @ f_within).var().item() / f_within[k0_1d].var().item())
+Hk_t, Hside_t, r2_fine, ve_side, ve_within = map(np.array, (Hk_t, Hside_t, r2_fine, ve_side, ve_within))
+kept_side = 1 - Hside_t / H_side                                   # I(side; X_t) / H(side)
+kept_within = 1 - (Hk_t - Hside_t) / (H_k - H_side)               # I(K; X_t | side) / H(K | side)
 
 # sanity check of the responsibilities: at high SNR the observer recovers the true component
 a_hi = torch.sigmoid(torch.tensor(10.0)).item()
@@ -684,12 +755,27 @@ x_t_hi = math.sqrt(a_hi) * x0_1d.double() + math.sqrt(1 - a_hi) * torch.randn(N,
 acc = (posterior_over_components(gmm1d, a_hi, x_t_hi).argmax(1) == k0_1d).double().mean()
 print(f"MAP component accuracy at log-SNR = 10: {acc:.3f};  H(K) = {H_k:.2f} bits, H(side) = {H_side:.2f} bit")
 
-# %%
 lam_np = lams.numpy()
 lam_lin = log_snr(abar_lin[1:]).numpy()
+
+
+def half_point(kept):
+    """log-SNR at which a 'fraction retained' curve (sampled from high to low SNR) first drops below 0.5."""
+    i = int(np.argmax(kept < 0.5))
+    return float(np.interp(0.5, [kept[i], kept[i - 1]], [lam_np[i], lam_np[i - 1]]))
+
+
+print("log-SNR at which half is lost  (t/T under the linear schedule in brackets):")
+for name, info, ve in [("fine detail", r2_fine, r2_fine), ("mode within side", kept_within, ve_within),
+                       ("side", kept_side, ve_side)]:
+    l_i, l_v = half_point(info), half_point(ve)
+    t_i, t_v = (np.interp(-l, -lam_lin, np.arange(1, T + 1) / T) for l in (l_i, l_v))
+    print(f"  {name:>16}: information {l_i:+5.2f} ({t_i:.2f})   variance explained {l_v:+5.2f} ({t_v:.2f})")
+
+# %%
 fig, axes = plt.subplots(1, 2, figsize=(11, 3.6))
 ax = axes[0]
-ax.plot(lam_np, Hk_t, color="tab:purple", label=r"$\mathbb{E}\,H[p(k\mid x_t)]$  (which mode)")
+ax.plot(lam_np, Hk_t, color="tab:purple", label=r"$\mathbb{E}\,H[p(k\mid x_t)]$  (which component)")
 ax.plot(lam_np, Hside_t, color="tab:green", label=r"$\mathbb{E}\,H[p(\mathrm{side}\mid x_t)]$")
 ax.axhline(H_k, color="tab:purple", ls="--", lw=0.8)
 ax.axhline(H_side, color="tab:green", ls="--", lw=0.8)
@@ -699,29 +785,38 @@ ax.set(xlabel=r"log-SNR $\lambda$   (more noise $\rightarrow$)", ylabel="bits",
        title="Bayesian observer's uncertainty about the latent cause")
 ax.legend(loc="upper left", bbox_to_anchor=(0.0, 0.9))
 ax = axes[1]
-ax.plot(lam_np, 1 - Hside_t / H_side, color="tab:green", label="side (coarsest)")
-ax.plot(lam_np, 1 - Hk_t / H_k, color="tab:purple", label="mode")
+ax.plot(lam_np, kept_side, color="tab:green", label="side (coarsest)")
+ax.plot(lam_np, kept_within, color="tab:purple", label="mode within its side")
 ax.plot(lam_np, r2_fine, color="tab:brown", label=r"fine detail ($R^2$)")
+ax.plot(lam_np, ve_side, "--", color="tab:green", lw=1)
+ax.plot(lam_np, ve_within, "--", color="tab:purple", lw=1)
+ax.plot([], [], "k-", label=r"solid: information, $I/H$")
+ax.plot([], [], "k--", lw=1, label="dashed: variance explained")
 ax.set(xlabel=r"log-SNR $\lambda$   (more noise $\rightarrow$)", ylabel="fraction retained",
        title="What is destroyed when")
-ax.legend(loc="upper right")
+ax.legend(loc="upper right", fontsize=7)
 for ax in axes:
     ax.set_xlim(10, -10)          # noise increases to the right, like t
     # secondary axis: the t/T at which the *linear* schedule reaches this log-SNR
     sec = ax.secondary_xaxis("top", functions=(lambda l: np.interp(-l, -lam_lin, np.arange(1, T + 1) / T),
                                                lambda f: np.interp(f, np.arange(1, T + 1) / T, lam_lin)))
-    sec.set_xticks([0.02, 0.1, 0.2, 0.3, 0.5, 0.7])
+    sec.set_xticks([0.02, 0.1, 0.3, 0.5, 0.7])
     sec.set_xlabel("t/T under the linear schedule", fontsize=8)
 plt.tight_layout()
 plt.show()
 
 # %% [markdown]
 # Reading the right panel from left to right (increasing noise): the **fine detail** (where exactly inside a mode
-# the point was) is lost first, at high SNR. **Which mode** goes next. **Which side** survives until the SNR
-# drops to about 1. Noise destroys information from fine to coarse, so the reverse process must
-# *create* it **from coarse to fine**: early (high-noise) denoising steps decide the global layout (which
-# side, which mode), and late (low-noise) steps fill in detail. Look for this order whenever you watch a
-# sampling trajectory in later notebooks.
+# the point was) is lost first, at high SNR. **Which mode within the family** goes next. **Which side** survives
+# longest, until the SNR drops to about 1 ($\lambda\approx0$). The dashed variance-explained curves give the same
+# order (see the printed half-way points), so the ordering is a property of the data, not of the measure. Note
+# also that the side is still half-known around the point where the 1-D density of section 5 has merged into
+# a single bump: information outlives visible structure.
+#
+# Noise destroys information from fine to coarse, so the reverse process must *create* it **from coarse to
+# fine**: early (high-noise) denoising steps decide the global layout (which side, which mode), and late
+# (low-noise) steps fill in detail. Look for this order whenever you watch a sampling trajectory in later
+# notebooks.
 #
 # Natural images have the same structure, with spatial frequencies playing the role of the hierarchy.
 # Their power spectrum falls steeply with frequency, while Gaussian noise is *white* (flat spectrum). With an
@@ -807,8 +902,15 @@ plt.show()
 # \tilde\beta_t=\frac{1-\bar\alpha_{t-1}}{1-\bar\alpha_t}\,\beta_t,\quad
 # \tilde\mu_t=\frac{\sqrt{\bar\alpha_{t-1}}\,\beta_t}{1-\bar\alpha_t}\,x_0+\frac{\sqrt{\alpha_t}\,(1-\bar\alpha_{t-1})}{1-\bar\alpha_t}\,x_t\;}$$
 #
-# This is a precision-weighted average of what the prior says ($x_0$) and what the observation says ($x_t$), the
-# same structure as a Kalman-filter update. Substituting $x_0=(x_t-\sqrt{1-\bar\alpha_t}\,\varepsilon)/\sqrt{\bar\alpha_t}$ (the closed form of
+# This is a **Kalman-filter measurement update**. The prior predicts $x_{t-1}$ to be near $\sqrt{\bar\alpha_{t-1}}\,x_0$ (variance
+# $1-\bar\alpha_{t-1}$). The observation $x_t$, divided by its gain $\sqrt{\alpha_t}$, says $x_{t-1}$ is near $x_t/\sqrt{\alpha_t}$ (variance
+# $\beta_t/\alpha_t$). The posterior mean is the precision-weighted average of these two guesses,
+#
+# $$\tilde\mu_t=w_1\,\sqrt{\bar\alpha_{t-1}}\,x_0+w_2\,\frac{x_t}{\sqrt{\alpha_t}},\qquad
+# w_1=\frac{\tilde\beta_t}{1-\bar\alpha_{t-1}}=\frac{\beta_t}{1-\bar\alpha_t},\quad
+# w_2=\frac{\tilde\beta_t\,\alpha_t}{\beta_t}=\frac{\alpha_t(1-\bar\alpha_{t-1})}{1-\bar\alpha_t},\quad w_1+w_2=1,$$
+#
+# which reproduces the boxed coefficients. (The coefficients of $x_0$ and $x_t$ themselves do *not* sum to 1.) Substituting $x_0=(x_t-\sqrt{1-\bar\alpha_t}\,\varepsilon)/\sqrt{\bar\alpha_t}$ (the closed form of
 # section 3) gives the form used by DDPM samplers:
 #
 # $$\tilde\mu_t=\frac{1}{\sqrt{\alpha_t}}\Big(x_t-\frac{\beta_t}{\sqrt{1-\bar\alpha_t}}\,\varepsilon\Big).$$
@@ -844,8 +946,16 @@ assert torch.allclose(c_x0[1:].float(), dm_sched.posterior_coef_x0.cpu(), rtol=1
 assert torch.allclose(c_xt[1:].float(), dm_sched.posterior_coef_xt.cpu(), rtol=1e-4, atol=1e-7)
 assert torch.allclose(post_var[1:].float(), dm_sched.posterior_variance.cpu(), rtol=1e-4, atol=1e-9)
 print("posterior coefficients match dm.NoiseSchedule.posterior_*")
+# the Kalman reading: precision weights w1 + w2 = 1 reproduce the coefficients
+alphas_lin = 1 - betas_lin
+w1 = betas_lin[1:] / (1 - abar_lin[1:])
+w2 = alphas_lin[1:] * (1 - abar_lin[:-1]) / (1 - abar_lin[1:])
+assert torch.allclose(w1 + w2, torch.ones_like(w1))
+assert torch.allclose(w1 * abar_lin[:-1].sqrt(), c_x0[1:]) and torch.allclose(w2 / alphas_lin[1:].sqrt(), c_xt[1:])
+print("precision weights w1 + w2 = 1 and reproduce c_x0, c_xt")
 print(f"at t = 1: c_x0 = {c_x0[1]:.3f}, c_xt = {c_xt[1]:.3f}, variance = {post_var[1]:.1e} "
-      "(x_0 is known exactly, so the last reverse step must add no noise)")
+      "(given x_0, the value of x_{t-1} = x_0 is fixed at t = 1, so beta_tilde_1 = 0;\n"
+      "          a sampler that uses sigma_t^2 = beta_tilde_t therefore adds no noise at its last step)")
 
 # --- CHECK 2: the two forms of the posterior mean agree ----------------------------------------
 t_ = 400
@@ -927,25 +1037,42 @@ plt.show()
 # likelihood (from $x_t$), and is narrower than both, as in any conjugate Gaussian update.
 
 # %% [markdown]
-# ## 8 · Why small steps matter: the reverse step is (nearly) Gaussian only when $\beta_t$ is small
+# ## 8 · Why small steps matter: when is the true reverse step Gaussian?
 #
 # The reverse model in notebook 02 is a Gaussian $p_\theta(x_{t-1}\mid x_t)=\mathcal N(\mu_\theta,\sigma_t^2I)$. Is that
 # justified? The true reverse step, **without** $x_0$, is again "prior × likelihood":
 #
-# $$q(x_{t-1}\mid x_t)\;\propto\;\underbrace{q(x_t\mid x_{t-1})}_{\mathcal N(x_t;\sqrt{\alpha_t}x_{t-1},\,\beta_t):\ \text{width}\ \sim\sqrt{\beta_t}}\;\;\underbrace{q_{t-1}(x_{t-1})}_{\text{noised data: anything}} .$$
+# $$q(x_{t-1}\mid x_t)\;\propto\;\underbrace{q(x_t\mid x_{t-1})}_{\mathcal N(x_t;\sqrt{\alpha_t}x_{t-1},\,\beta_t)}\;\;\underbrace{q_{t-1}(x_{t-1})}_{\text{noised data: anything}} .$$
 #
-# If $\beta_t$ is **small**, the likelihood is a narrow window, and over that window $\log q_{t-1}$ is almost linear.
-# A Gaussian times $e^{\text{linear}}$ is a Gaussian, so the posterior is nearly Gaussian. Expanding $\log q_{t-1}$
-# to third order, the leading non-Gaussian term is a skewness of order $\beta_t^{3/2}$, so the KL to the best
-# Gaussian should vanish like $\beta_t^3$. If $\beta_t$ is **large**, the window is wide and the posterior inherits
-# the multimodality of $q_{t-1}$; no Gaussian can represent it.
+# As a function of $u=x_{t-1}$, the likelihood is a Gaussian window $\mathcal N\big(u;\,x_t/\sqrt{\alpha_t},\,s^2\big)$ of width
+# $s=\sqrt{\beta_t/\alpha_t}$. Expand the log-prior $f=\log q_{t-1}$ around the window's centre, with $z=u-x_t/\sqrt{\alpha_t}$:
 #
-# We can compute this *exactly* in 1-D: $q_{t-1}$ is the noised GMM, so we evaluate prior × likelihood on a fine
-# grid and normalise. We fix the noise level of $x_t$ ($t/T=0.3$ on the linear schedule) and vary how far back
-# the previous level is: one step back corresponds to $T=1000$, 200 steps back to a coarse $T=5$ schedule.
-# The "best Gaussian" is the moment-matched one. It minimises $\mathrm{KL}(q\,\|\,\mathcal N)$, and it is what a
-# Gaussian reverse model trained on the variational bound would converge to if both its mean and its variance
-# are learned.
+# $$\log q(x_{t-1}\mid x_t)=-\frac{z^2}{2s^2}+f'z+\frac{f''}{2}z^2+\frac{f'''}{6}z^3+\frac{f''''}{24}z^4+\dots+\text{const}.$$
+#
+# - The linear and quadratic terms only shift and rescale the Gaussian, to variance $\sigma^2=(s^{-2}-f'')^{-1}\approx s^2$.
+#   In particular, if $q_{t-1}$ were exactly Gaussian, the reverse step would be exactly Gaussian *for any step size*.
+# - The cubic term is the leading non-Gaussian correction. To first order in $f'''$ it adds a third cumulant
+#   $\kappa_3=f'''\sigma^6$, i.e. a standardised skewness $\gamma=f'''\sigma^3\propto f'''\beta_t^{3/2}$. The quartic term adds an
+#   excess kurtosis $\kappa\approx f''''\sigma^4$, of order $\beta_t^2$.
+# - The KL from any density to its moment-matched Gaussian is its *negentropy*, and the Edgeworth (Gram–Charlier)
+#   expansion gives, to leading order,
+#
+# $$\mathrm{KL}\big(q\,\|\,\mathcal N_{\text{moment-matched}}\big)\;\approx\;\frac{\gamma^2}{12}+\frac{\kappa^2}{48}\;\approx\;\frac{(f''')^2\,\sigma^6}{12}\;=\;O(\beta_t^3).$$
+#
+# Two lessons follow. **At a fixed noise level, the KL vanishes like $\beta^3$.** Summed over a schedule of $T$ steps
+# of size $\beta\sim1/T$, the total non-Gaussianity falls like $T\cdot T^{-3}=T^{-2}$. But the **prefactor**
+# $(f''')^2=(\partial^3\log q_{t-1})^2$ depends enormously on the noise level. At low noise, $q_{t-1}$ still has sharp
+# modes and $f'''$ is large; at high noise, $q_{t-1}$ is itself nearly Gaussian and $f'''\approx0$. So "small" means
+# *small compared with the structure still present in $q_{t-1}$*: a huge step at high noise can be almost perfectly
+# Gaussian, while a modest step at low noise is not.
+#
+# We can check all of this *exactly* in 1-D: $q_{t-1}$ is the noised GMM, so we evaluate prior × likelihood on a fine
+# grid and normalise. We fix the noise level of $x_t$ (`t_target` on the linear schedule) and vary how far back the
+# previous level is: one step back corresponds to $T=1000$, 200 steps back to a coarse $T\approx5$ schedule. We do
+# this at a low, a medium and a high noise level. The "best Gaussian" is the moment-matched one. It minimises
+# $\mathrm{KL}(q\,\|\,\mathcal N)$, and it is what a Gaussian reverse model trained on the variational bound would converge
+# to if both its mean and its variance are learned. As a CHECK of the derivation, we also evaluate
+# $\gamma^2/12+\kappa^2/48$ from the skewness and kurtosis of the same grid densities.
 
 # %%
 def log_density64(gmm, x):
@@ -964,91 +1091,127 @@ def reverse_conditional(abar_prev, abar_t, x_t, grid):
 
 
 def gaussian_fit_and_kl(logp, grid):
-    """Moment-matched Gaussian (mean, var) of each row, and KL(q || that Gaussian) in nats."""
+    """Per row: moment-matched Gaussian (mean, var), KL(q || that Gaussian) in nats, skewness, excess kurtosis."""
     dx = (grid[1] - grid[0]).item()
     p = logp.exp()
     m = (p * grid).sum(1) * dx
-    v = (p * (grid - m[:, None]) ** 2).sum(1) * dx
+    c = grid[None] - m[:, None]
+    v = (p * c ** 2).sum(1) * dx
+    skew = (p * c ** 3).sum(1) * dx / v ** 1.5
+    exkurt = (p * c ** 4).sum(1) * dx / v ** 2 - 3
     neg_entropy = (p * logp).sum(1) * dx
-    return m, v, neg_entropy + 0.5 * torch.log(2 * math.pi * math.e * v)
+    return m, v, neg_entropy + 0.5 * torch.log(2 * math.pi * math.e * v), skew, exkurt
 
 
-grid_r = torch.linspace(-5, 5, 4001 if FAST else 20001, dtype=torch.float64)
-t_target = 300
+# a wide grid: after a big step at high noise, x_{t-1} ~ x_t / sqrt(alpha) can lie far out
+grid_r = torch.linspace(-8, 8, 6401 if FAST else 32001, dtype=torch.float64)
+QUAD_FLOOR = 1e-11          # below ~1e-11 nats the float64 grid quadrature is no longer reliable
+t_targets = [100, 300, 600]                  # low, medium and high noise (linear schedule)
+t_show = 300                                 # the noise level drawn in the left-hand panels
 x_t_show = torch.tensor([-0.7, 0.2, 1.0], dtype=torch.float64)
 cases = [("coarse: 200 steps back (T≈5)", 200), ("fine: 1 step back (T=1000)", 1)]
 cond = {}
 for label, back in cases:
-    a_prev, a_t = abar_lin[t_target - back].item(), abar_lin[t_target].item()
+    assert back <= t_show, "t - back must stay >= 0 (a negative index would silently wrap around!)"
+    a_prev, a_t = abar_lin[t_show - back].item(), abar_lin[t_show].item()
     lp = reverse_conditional(a_prev, a_t, x_t_show, grid_r)
-    cond[back] = (lp, *gaussian_fit_and_kl(lp, grid_r), 1 - a_t / a_prev)
+    m, v, kl, _, _ = gaussian_fit_and_kl(lp, grid_r)
+    cond[back] = dict(logp=lp, mean=m, var=v, kl=kl, beta=1 - a_t / a_prev)
 
-# KL averaged over x_t ~ q_t, as a function of the step size
-backs = [200, 20, 1] if FAST else [300, 200, 100, 50, 20, 10, 5, 2, 1]
-n_xt = 50 if FAST else 300
-x_t_samples = gmm1d.noised(abar_lin[t_target].item()).sample(n_xt).double()[:, 0]
-kl_mean, beta_step = [], []
-for back in backs:
-    a_prev, a_t = abar_lin[t_target - back].item(), abar_lin[t_target].item()
-    _, _, kl = gaussian_fit_and_kl(reverse_conditional(a_prev, a_t, x_t_samples, grid_r), grid_r)
-    kl_mean.append(kl.mean().item())
-    beta_step.append(1 - a_t / a_prev)
-kl_mean, beta_step = np.array(kl_mean), np.array(beta_step)
-for back, b, k in zip(backs, beta_step, kl_mean):
-    print(f"step from t={t_target - back:3d} to t={t_target} (equiv. T≈{1000 / back:6.1f}): beta = {b:.4f}, "
-          f"mean KL(q || best Gaussian) = {k:.2e} nats")
-small = beta_step < 0.15
-slope = np.polyfit(np.log(beta_step[small]), np.log(kl_mean[small]), 1)[0]
-print(f"log-log slope of KL vs beta for small steps: {slope:.2f} (theory: 3)")
+# mean KL over x_t ~ q_t as a function of the step size, at each noise level
+backs_all = [300, 200, 100, 50, 20, 10, 5, 2, 1]
+n_xt = 50 if FAST else 200
+kl_curves = {}
+for t_target in t_targets:
+    backs = [b for b in backs_all if b <= t_target]      # never index abar_lin with a negative number
+    x_t_samples = gmm1d.noised(abar_lin[t_target].item()).sample(n_xt).double()[:, 0]
+    rows = []
+    for back in backs:
+        a_prev, a_t = abar_lin[t_target - back].item(), abar_lin[t_target].item()
+        _, _, kl, skew, exkurt = gaussian_fit_and_kl(reverse_conditional(a_prev, a_t, x_t_samples, grid_r), grid_r)
+        rows.append((back, 1 - a_t / a_prev, kl.mean().item(), (skew ** 2 / 12 + exkurt ** 2 / 48).mean().item()))
+    kl_curves[t_target] = np.array(rows)      # columns: back, beta, exact KL, Edgeworth prediction
+
+for t_target, rows in kl_curves.items():
+    back, beta, kl, edge = rows.T
+    print(f"t_target = {t_target} (log-SNR = {log_snr(abar_lin[t_target]).item():+.2f})")
+    print(f"    {'steps back':>10} {'equiv. T':>9} {'beta':>7} {'mean KL':>10} {'Edgeworth':>10}")
+    for row in rows:
+        print(f"    {int(row[0]):10d} {1000 / row[0]:9.1f} {row[1]:7.4f} {row[2]:10.2e} {row[3]:10.2e}")
+    # the perturbative regime the derivation is about: small non-Gaussianity, above the quadrature floor
+    pert = (kl < 1e-3) & (kl > QUAD_FLOOR)
+    ratio = kl[pert] / edge[pert]
+    # beta^3 law: fit the (up to) 4 smallest resolved steps with beta < 0.15
+    small = np.where(pert & (beta < 0.15))[0][-4:]
+    slope = np.polyfit(np.log(beta[small]), np.log(kl[small]), 1)[0] if len(small) >= 2 else float("nan")
+    print(f"    -> log-log slope for the smallest steps: {slope:.2f} (theory: 3);  "
+          f"exact / Edgeworth where KL < 1e-3: {ratio.min():.2f} .. {ratio.max():.2f}")
+    if not FAST:
+        assert 2.7 < slope < 3.5 and np.all(np.abs(ratio - 1) < 0.25), (t_target, slope, ratio)
 
 # %%
 fig = plt.figure(figsize=(14, 5.2))
 gs = fig.add_gridspec(2, 4, width_ratios=[1, 1, 1, 1.25])
 for row, (label, back) in enumerate(cases):
-    lp, m, v, kl, b = cond[back]
+    c = cond[back]
     for j, xt in enumerate(x_t_show.tolist()):
         ax = fig.add_subplot(gs[row, j])
-        sd_ = math.sqrt(v[j].item())
-        lo, hi = (-3.0, 3.0) if back > 1 else (m[j].item() - 5 * sd_, m[j].item() + 5 * sd_)
+        sd_ = math.sqrt(c["var"][j].item())
+        lo, hi = (-3.0, 3.0) if back > 1 else (c["mean"][j].item() - 5 * sd_, c["mean"][j].item() + 5 * sd_)
         sel = (grid_r >= lo) & (grid_r <= hi)
         gx = grid_r[sel].numpy()
-        ax.plot(gx, lp[j, sel].exp().numpy(), color="k", lw=1.8, label=r"exact $q(x_{t-1}\mid x_t)$")
-        ax.plot(gx, gauss(gx, m[j].item(), sd_), "--", color="tab:red", lw=1.5, label="best Gaussian")
+        ax.plot(gx, c["logp"][j, sel].exp().numpy(), color="k", lw=1.8, label=r"exact $q(x_{t-1}\mid x_t)$")
+        ax.plot(gx, gauss(gx, c["mean"][j].item(), sd_), "--", color="tab:red", lw=1.5, label="best Gaussian")
         if back > 1:   # show where the modes come from: the prior q_{t-1}
-            prior = log_density64(gmm1d.noised(abar_lin[t_target - back].item()), grid_r[sel][:, None]).exp()
+            prior = log_density64(gmm1d.noised(abar_lin[t_show - back].item()), grid_r[sel][:, None]).exp()
             ax.fill_between(gx, prior.numpy() * 0.5, color="tab:green", alpha=0.15, label=r"prior $q_{t-1}$ (scaled)")
-        ax.set_title(f"$x_t$ = {xt:+.1f},  KL = {kl[j]:.1e}", fontsize=9)
+        ax.set_title(f"$x_t$ = {xt:+.1f},  KL = {c['kl'][j]:.1e}", fontsize=9)
         ax.set_yticks([])
         if j == 0:
-            ax.set_ylabel(f"{label}\n" + rf"$\beta$ = {b:.3f}", fontsize=9)
+            ax.set_ylabel(f"{label}\n" + rf"$\beta$ = {c['beta']:.3f}", fontsize=9)
         if row == 1:
             ax.set_xlabel("$x_{t-1}$")
         if row == 0 and j == 0:
             ax.legend(fontsize=7, loc="upper right")
 ax = fig.add_subplot(gs[:, 3])
-ax.loglog(beta_step, kl_mean, "o-", color="k", label="exact (mean over $x_t\\sim q_t$)")
-ref_b = np.array([beta_step.min(), 0.2])
-ax.loglog(ref_b, kl_mean[-1] * (ref_b / beta_step[-1]) ** 3, ":", color="tab:red", label=r"$\propto\beta^3$")
-for back, b, k in zip(backs, beta_step, kl_mean):
-    ax.annotate(f"T≈{1000 / back:.0f}", (b, k), textcoords="offset points", xytext=(4, -9), fontsize=7)
-ax.set(xlabel=r"step size $\beta$ of the reverse step", ylabel="KL(q || best Gaussian)  [nats]",
+level_colours = [plt.get_cmap("viridis")(v) for v in (0.0, 0.45, 0.8)]
+for (t_target, rows), col in zip(kl_curves.items(), level_colours):
+    back, beta, kl, edge = rows.T
+    ok = kl > QUAD_FLOOR                      # do not draw values below the quadrature floor
+    lam_t = log_snr(abar_lin[t_target]).item()
+    ax.loglog(beta[ok], kl[ok], "o-", ms=4, color=col, label=rf"$t$ = {t_target} ($\lambda$ = {lam_t:+.1f})")
+    ax.loglog(beta[ok], edge[ok], "x", ms=6, color=col)
+    # a beta^3 guide line through the smallest resolved step, shifted down 5x so it does not hide the data
+    b0, k0 = beta[ok][-1], kl[ok][-1]
+    ref_b = np.array([b0, 8 * b0])
+    ax.loglog(ref_b, k0 * (ref_b / b0) ** 3 / 5, ":", color=col, lw=1.5)
+ax.plot([], [], "kx", label=r"Edgeworth $\gamma^2/12+\kappa^2/48$")
+ax.plot([], [], "k:", lw=1.5, label=r"slope 3 ($\propto\beta^3$, shifted down)")
+ax.set(xlabel=r"step size $\beta$ of the reverse step", ylabel="mean KL(q || best Gaussian)  [nats]",
        title="Non-Gaussianity of the true reverse step")
-ax.legend(loc="upper left")
+ax.legend(loc="upper left", fontsize=7)
 plt.tight_layout()
 plt.show()
 
 # %% [markdown]
-# **Top row (one big step, $T\approx5$):** the exact reverse conditional is clearly non-Gaussian. It is
-# multimodal or skewed, because it inherits the modes of the prior $q_{t-1}$ (green), and the
-# moment-matched Gaussian (red dashed) puts mass where the true distribution has none. A Gaussian reverse
-# model would generate samples *between* the modes. **Bottom row (one small step, $T=1000$):** for the same $x_t$
-# the conditional is a narrow bump that a Gaussian matches almost perfectly. **Right:** the KL to the best
-# Gaussian falls by many orders of magnitude as the step shrinks. For small steps it follows the predicted
-# $\beta^3$ slope (see the fitted slope printed above); for large steps it rises even faster.
+# **Left (noise level $t=300$). Top row, one big step ($T\approx5$):** the exact reverse conditional is clearly
+# non-Gaussian. It is multimodal or skewed, because it inherits the modes of the prior $q_{t-1}$ (green), and the
+# moment-matched Gaussian (red dashed) puts mass where the true distribution has none. A Gaussian reverse model would
+# generate samples *between* the modes. **Bottom row, one small step ($T=1000$):** for the same $x_t$ the conditional
+# is a narrow bump that a Gaussian matches almost perfectly.
 #
-# This is the theoretical licence for DDPM's Gaussian reverse steps, and the reason diffusion models need
-# many steps. Fast samplers (notebook 04), distillation and consistency models are all ways around this
-# constraint.
+# **Right:** at every noise level the KL falls like $\beta^3$ for small steps (dotted slope-3 guides; fitted slopes printed
+# above). The fitted slopes come out at or slightly above 3 because, at fixed $x_t$, a bigger step also reaches back to a
+# less noisy and more structured $q_{t-1}$, so $f'''$ grows with the step too. The Edgeworth prediction (crosses) sits
+# on the exact values wherever the non-Gaussianity is small, which confirms the derivation. The three curves are separated by many orders of magnitude: a step of a given
+# $\beta$ is far less Gaussian at low noise ($t=100$) than at high noise ($t=600$), where even steps with $\beta$ close
+# to 1 give a nearly Gaussian reverse step.
+#
+# This is the theoretical licence for DDPM's Gaussian reverse steps, and it says *where* the steps must be small: at
+# low noise, where $q_{t-1}$ still has sharp structure. It is why $\beta_1$ is tiny ($10^{-4}$), why sampler
+# discretisations such as EDM's concentrate their steps at low noise, and why few-step samplers can afford large
+# steps at high noise (Exercise 5 asks you to place 10 steps). Fast samplers (notebook 04), distillation and
+# consistency models are all ways around the remaining constraint.
 
 # %% [markdown]
 # ## 9 · The "variance exploding" alternative
@@ -1058,7 +1221,8 @@ plt.show()
 #
 # $$x_\sigma = x_0+\sigma\,\varepsilon,\qquad \sigma\in[\sigma_{\min},\sigma_{\max}],$$
 #
-# i.e. the "no shrink" chain of section 2. Its variance explodes ($\approx\sigma^2$), and generation starts from
+# i.e. the "no shrink" chain of section 2. In SDE form it is $dx=\sqrt{d[\sigma^2(\tau)]/d\tau}\;dW_\tau$: Brownian motion with a
+# time-varying rate and no drift (Song et al. 2021). Its variance explodes ($\approx\sigma^2$), and generation starts from
 # $\mathcal N(0,\sigma_{\max}^2 I)$, which is a good approximation of $q_{\sigma_{\max}}$ only when $\sigma_{\max}$ is much
 # larger than the data's diameter (EDM uses $\sigma_{\max}=80$).
 #
@@ -1078,17 +1242,17 @@ sigmas = [0.0, 0.3, 1.0, 3.0, 10.0]
 x0_ve = gmm2d.sample(N)
 eps_ve = torch.randn_like(x0_ve)
 pts = torch.randn(500, 2, dtype=torch.float64) * 2
+# (For samples the identity VP / sqrt(abar) == VE with the same eps holds by construction, so it is no test.)
+# --- CHECK: exact densities obey the change of variables (dm.noised vs dm.noised_ve) at matched SNR ---
 for s in sigmas[1:]:
     a = 1 / (1 + s ** 2)                                  # abar with the same SNR as sigma
-    # --- CHECK 1: pointwise, VP sample / sqrt(abar) == VE sample (same eps) ---
-    vp = math.sqrt(a) * x0_ve + math.sqrt(1 - a) * eps_ve
-    ve = x0_ve + s * eps_ve
-    assert torch.allclose(vp / math.sqrt(a), ve, rtol=1e-5, atol=1e-4)
-    # --- CHECK 2: exact densities related by the change of variables (dm.noised vs dm.noised_ve) ---
     lp_vp = log_density64(gmm2d.noised(a), pts)
     lp_ve = log_density64(gmm2d.noised_ve(s), pts / math.sqrt(a)) - (gmm2d.d / 2) * math.log(a)
     assert torch.allclose(lp_vp, lp_ve, atol=1e-8)
-print("VP and VE agree up to the rescaling x -> x / sqrt(abar) (samples and exact densities)")
+    # a mismatched noise level must fail the same test (guards against a vacuous check)
+    lp_wrong = log_density64(gmm2d.noised_ve(1.1 * s), pts / math.sqrt(a)) - (gmm2d.d / 2) * math.log(a)
+    assert not torch.allclose(lp_vp, lp_wrong, atol=1e-3)
+print("exact VP and VE densities agree under x -> x / sqrt(abar) when sigma = exp(-lambda / 2)")
 
 fig, axes = plt.subplots(2, len(sigmas), figsize=(2.2 * len(sigmas), 4.6))
 for j, s in enumerate(sigmas):
@@ -1141,8 +1305,10 @@ plt.show()
 # </details>
 #
 # **Exercise 3 (design a schedule by its log-SNR).** Define a schedule with $\lambda(\tau)$ *linear* in $\tau=t/T$, from $+10$ to $-10$.
-# Hint: $\bar\alpha=\operatorname{sigmoid}(\lambda)$, then $\beta_t = 1-\bar\alpha_t/\bar\alpha_{t-1}$. Plot it next to the linear and cosine schedules in
-# the figure of section 4 and redo the digit strip. Which of the two existing schedules does it resemble more?
+# Hint: $\bar\alpha=\operatorname{sigmoid}(\lambda)$, then $\beta_t = 1-\bar\alpha_t/\bar\alpha_{t-1}$. Before plotting, predict: which spends the
+# larger share of its steps in the informative range $|\lambda|<5$, this schedule, the linear one or the cosine one? Add it to the
+# figure of section 4, print the section-4 statistics for it, and redo the digit strip. Then narrow the endpoints to $\pm4$:
+# what improves, and what breaks?
 #
 # <details><summary>Hint / solution</summary>
 #
@@ -1150,9 +1316,17 @@ plt.show()
 # lam = torch.linspace(10, -10, T + 1, dtype=torch.float64)
 # abar_ls = torch.sigmoid(lam); abar_ls[0] = 1.0       # t = 0 is the clean data
 # betas_ls = torch.cat([torch.zeros(1, dtype=torch.float64), 1 - abar_ls[1:] / abar_ls[:-1]])
+# print((log_snr(abar_ls[1:]).abs() < 5).double().mean(), (abar_ls[1:] < 0.01).double().mean())
 # ```
-# It resembles the cosine schedule, which is close to linear in $\lambda$ over its middle range
-# ($\lambda_{\cos}(\tau)\approx-2\log\tan(\pi\tau/2)$). The linear-$\beta$ schedule instead drops quickly through the informative range.
+# Like cosine, it is symmetric about $\tau=0.5$, but it is *not* cosine-like. Cosine is only roughly linear in $\lambda$ near the
+# middle, $\lambda_{\cos}(\tau)\approx-2\log\tan(\pi\tau/2)$, with slope $-2\pi/\sin(\pi\tau)\approx-6.3$ at $\tau=0.5$. The new schedule falls at a
+# constant $-20$ per unit $\tau$, about three times faster (linear-$\beta$ falls at about $-11$ there). It spends a quarter of its steps
+# at $\lambda>5$, where the digit is visually untouched ($\bar\alpha\ge0.98$ until $\tau=0.3$), and a quarter at $\lambda<-5$ (almost pure
+# noise). Only about half of its steps have $|\lambda|<5$, fewer than for linear (about 2/3) or cosine (about 90%), so it is the least
+# efficient of the three. With endpoints $\pm4$, every step lies in $|\lambda|<5$ and the middle slope ($-8$) is close to cosine's, but
+# now $\bar\alpha_T=\operatorname{sigmoid}(-4)\approx0.018$: about 13% of the signal amplitude survives in $x_T$, the terminal-SNR problem of
+# Exercise 1. Cosine gets both a gentle middle and extreme endpoints because its tails are steep. The endpoints
+# $\lambda_{\max},\lambda_{\min}$ and the shape in between are separate design choices (compare the VDM remark in section 4).
 # </details>
 #
 # **Exercise 4 (jumping between noise levels).** Show that for $s<t$,
@@ -1168,16 +1342,35 @@ plt.show()
 # reverse conditionals differ (section 8).
 # </details>
 #
-# **Exercise 5 (where do big steps hurt most?).** In section 8, keep a large step (`back = 100`) and move the target noise
-# level `t_target` through 100, 200, 400, 700. Predict first: at which noise levels does a coarse reverse step
-# deviate most from a Gaussian?
+# **Exercise 5 (where should a 10-step sampler put its steps?).** A sampler with only 10 reverse steps must pick 11
+# noise levels $0=t_0<t_1<\dots<t_{10}=T$ on the fine schedule. Each step is a reverse step from $t_j$ to $t_{j-1}$, and section 8
+# tells you how non-Gaussian it is. Compare even spacing, $t_j=T\,j/10$ (what `respace` does), with spacings that crowd
+# the steps at low noise, $t_j=T\,(j/10)^\rho$ with $\rho=2$ and $3$. Before computing, predict: under even spacing, which
+# step is the worst? Which spacing has the smallest total and the smallest worst-step KL?
 #
 # <details><summary>Hint / solution</summary>
 #
-# The KL is largest at **low** noise (small `t_target`), where $q_{t-1}$ still has sharp, well-separated modes inside the
-# likelihood window. It becomes negligible at high noise, where $q_{t-1}$ is itself nearly Gaussian. This is why
-# few-step samplers struggle mostly with fine detail, and why step-size schedules for samplers (e.g. EDM's)
-# concentrate steps at low noise.
+# ```python
+# def per_step_kl(ts, n_xt=200):
+#     """Mean KL(q(x_{t_{j-1}} | x_{t_j}) || best Gaussian) for each step of the coarse schedule ts."""
+#     out = []
+#     for t_prev, t_cur in zip(ts[:-1], ts[1:]):
+#         a_prev, a_t = abar_lin[t_prev].item(), abar_lin[t_cur].item()
+#         x_t = gmm1d.noised(a_t).sample(n_xt).double()[:, 0]
+#         out.append(gaussian_fit_and_kl(reverse_conditional(a_prev, a_t, x_t, grid_r), grid_r)[2].mean().item())
+#     return np.array(out)
+#
+# for rho in [1, 2, 3]:
+#     ts = np.round(T * np.linspace(0, 1, 11) ** rho).astype(int)
+#     kl = per_step_kl(ts)
+#     print(rho, ts, np.array2string(kl, precision=1), f"total {kl.sum():.3f}, worst {kl.max():.3f}")
+# ```
+# Under even spacing the worst step is the **last** one ($t=100\to0$), at about half a nat: it must jump from a blurred
+# density straight onto the sharp data modes. The steps above $t\approx500$ have KLs below $10^{-5}$, so they are wasted
+# precision. Crowding the steps at low noise ($\rho=2$ or $3$) cuts the total roughly threefold and the worst step by a
+# factor of about 5–10. The non-Gaussianity is then spread over the middle steps rather than piled onto the last one. This is
+# the reasoning behind sampler discretisations such as EDM's $\rho=7$ spacing in $\sigma$ (notebook 04). (Spacing the steps
+# evenly in $\lambda$ from $+10$ to $-10$ overshoots: it wastes steps at $\lambda>5$ and puts large steps in the middle.)
 # </details>
 
 # %% [markdown]
@@ -1187,12 +1380,16 @@ plt.show()
 #   keeps the variance at 1 (VP) and guarantees $x_T\approx\mathcal N(0,I)$ for any data of roughly unit scale.
 # - Closed form: $x_t=\sqrt{\bar\alpha_t}\,x_0+\sqrt{1-\bar\alpha_t}\,\varepsilon$. Training samples any $t$ directly and knows the exact noise $\varepsilon$ it added.
 # - A schedule is best described by its **log-SNR curve** $\lambda_t=\log\frac{\bar\alpha_t}{1-\bar\alpha_t}$. The marginals depend on $t$ only through $\lambda_t$;
-#   the schedule decides how steps are spread over noise levels. Linear wastes steps on pure noise; cosine spreads them evenly.
+#   the schedule decides how steps are spread over noise levels. Linear wastes many steps on near-pure noise; cosine spends most of its
+#   steps at intermediate SNR. $T$ is just the discretisation of one continuous process, the VP-SDE $dx=-\tfrac12\beta x\,d\tau+\sqrt\beta\,dW$.
 # - For a GMM the noised marginal $q_t$ is an exact GMM. This gives a ground-truth laboratory used in the rest of the tutorial.
 # - Noise destroys **fine detail first and coarse structure last** (GMM hierarchy; image frequencies), so generation runs coarse to fine.
-# - $q(x_{t-1}\mid x_t,x_0)=\mathcal N(\tilde\mu_t,\tilde\beta_t I)$ follows from Gaussian conjugacy. $\tilde\mu_t$ is linear in $x_0$ (or $\varepsilon$), which is why
-#   networks predict the noise. It is the training target of notebook 02.
-# - The true reverse step $q(x_{t-1}\mid x_t)$ is Gaussian only for **small** $\beta_t$ (KL $\propto\beta^3$). That is why diffusion uses many steps.
+#   Information about coarse structure outlives what the eye (or a single pixel) can see.
+# - $q(x_{t-1}\mid x_t,x_0)=\mathcal N(\tilde\mu_t,\tilde\beta_t I)$ follows from Gaussian conjugacy (a Kalman update) and is the training target of
+#   notebook 02. $\tilde\mu_t$ is linear in $x_0$ (or $\varepsilon$), so a network may predict $x_0$, $\varepsilon$ or $v$ instead of the mean. These give
+#   the same bound up to a per-$t$ weighting; DDPM's $\varepsilon$-prediction with an unweighted loss is an empirical choice (notebook 02).
+# - The true reverse step $q(x_{t-1}\mid x_t)$ is nearly Gaussian when each step is small **relative to the structure remaining in
+#   $q_{t-1}$** (at a fixed noise level, KL $\propto\beta^3$). That is why diffusion uses many small steps, especially at low noise.
 # - Implementation gotchas: maths $t$ vs 0-based array index (dmtools `t` = maths $t-1$), broadcasting `(B,)` coefficients
 #   over data dimensions, clipping the cosine $\beta_T$, nonzero terminal SNR, and data scale.
 # - VE ($x_0+\sigma\varepsilon$) and VP are the same process up to rescaling $x$ by $\sqrt{\bar\alpha}$, with $\sigma=e^{-\lambda/2}$.

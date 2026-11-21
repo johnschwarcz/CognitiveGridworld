@@ -31,8 +31,9 @@
 # **Prerequisites:** 01 (forward process, schedules), 02 (DDPM loss and ancestral sampling),
 # 03 (scores, Tweedie's formula), 04 (DDIM).
 #
-# **Runtime:** CPU ≈ 15–20 min (more than half of it is the in-notebook training run); CUDA GPU ≈ 10 min with
-# the GPU default of 20 000 training steps (a few minutes if you lower `TRAIN_STEPS`).
+# **Runtime:** CPU ≈ 15–20 min on an otherwise idle 4-core machine, about half of it the in-notebook training run
+# (bfloat16 autocast; much slower on a busy machine). CUDA GPU ≈ 10 min with the GPU default of 20 000 training
+# steps (a few minutes if you lower `TRAIN_STEPS`).
 
 # %%
 import contextlib
@@ -90,7 +91,7 @@ print(f"FAST={FAST}  USE_AMP={USE_AMP}  TRAIN_STEPS={TRAIN_STEPS}  N_EVAL={N_EVA
 #
 # $$\hat x_0(x_t,t)=\mathbb{E}[x_0\mid x_t]=\frac{x_t-\sqrt{1-\bar\alpha_t}\;\epsilon_\theta(x_t,t)}{\sqrt{\bar\alpha_t}},$$
 #
-# so $\epsilon_\theta$ must be a Bayes-optimal **denoiser for images at every noise level**, a map
+# so the ideal $\epsilon_\theta$ is a Bayes-optimal **denoiser for images at every noise level**, a map
 # $\mathbb{R}^{784}\to\mathbb{R}^{784}$. Images have structure that a generic MLP would have to learn from scratch:
 #
 # 1. **Locality and translation equivariance.** A stroke is a stroke wherever it appears. If the data distribution
@@ -139,7 +140,8 @@ with torch.no_grad():
 # %% [markdown]
 # The convolution is exactly shift-equivariant (up to float rounding) with 10 parameters. The dense layer is not,
 # even with 600k parameters. The real U-Net is only *approximately* equivariant: it uses zero padding (borders
-# break the symmetry) and stride-2 down-sampling, which is equivariant only to shifts by multiples of the stride.
+# break the symmetry) and stride-2 down-sampling, which is equivariant only to shifts by multiples of the total
+# stride (4 pixels here).
 # Inductive biases are soft constraints, which is usually what you want.
 #
 # ## 2 · Building the U-Net, one component at a time
@@ -226,10 +228,11 @@ with torch.no_grad():
     ref_block = dm.ResBlock(32, 64, emb_dim)
     ref_block.load_state_dict(block.state_dict())           # same parameter names -> same function
     print(f"max |MyResBlock - dm.ResBlock| = {(block(h_in, e_t) - ref_block(h_in, e_t)).abs().max():.1e}")
-    # FiLM at work: the same input image gives different features at different t
+    # FiLM at work: the same input gives different outputs at different t
     same_x = h_in[:1].expand(4, -1, -1, -1)
     out_t = block(same_x, e_t)
-    print("same input, t = 0/250/500/999 -> feature std per t:", [f"{v:.3f}" for v in out_t.std(dim=(1, 2, 3))])
+    rel = [((out_t[i] - out_t[0]).norm() / out_t[0].norm()).item() for i in range(1, 4)]
+    print("same input: relative change of the output vs t=0, for t = 250/500/999:", [f"{r:.1%}" for r in rel])
 
     # GroupNorm vs BatchNorm: does sample 0's output depend on the *other* samples in the batch?
     gn, bn = nn.GroupNorm(8, 32), nn.BatchNorm2d(32)        # bn in training mode = batch statistics
@@ -242,7 +245,8 @@ with torch.no_grad():
 
 # %% [markdown]
 # All three checks pass. The fresh block is exactly its skip path. Our block and `dm.ResBlock` compute the same
-# function. FiLM makes the same input produce different features at different $t$. And GroupNorm, unlike
+# function. FiLM makes the same input produce different outputs at different $t$ (only mildly at random
+# initialisation, since the embedding weights are small; training decides how strongly to modulate). And GroupNorm, unlike
 # BatchNorm, treats every sample independently. We will rely on that last property in section 6, where we
 # evaluate many copies of one image in a single batch.
 #
@@ -303,8 +307,9 @@ for hw in (28, 14, 7):
 # %% [markdown]
 # Our explicit softmax attention agrees with PyTorch's fused kernel. A 3×3 conv sees 9 positions. One attention
 # layer draws a substantial part of its output from the whole 7×7 map. (Strictly, GroupNorm alone already couples
-# all positions a little, through the shared mean and variance, which is why we measure influence *mass*.) The cost explains why attention is used only at the lowest resolution: the attention
-# matrix at 28×28 is 256 times larger than at 7×7. Large image models (Stable Diffusion, DiT) use attention more
+# all positions a little, through the shared mean and variance, which is why we measure influence *mass*.) The cost
+# explains why attention is used only at the lowest resolution: the attention matrix at 28×28 is 256 times larger
+# than at 7×7. Large image models (Stable Diffusion, DiT) use attention more
 # widely, but always on down-sampled feature maps or patch tokens, for the same reason.
 #
 # ### 2.3 Down- and up-sampling
@@ -435,7 +440,7 @@ for name, x in scalings.items():
 ts_show = [0, 50, 100, 200, 300, 500, 700, 999]
 x0_show = x_train[:5].to(device)
 eps_show = torch.randn_like(x0_show)              # the same noise at every t, so each row is one trajectory
-fig, axes = plt.subplots(len(x0_show), len(ts_show), figsize=(8, 5.2))
+fig, axes = plt.subplots(len(x0_show), len(ts_show), figsize=(7.2, 4.8))
 for j, t in enumerate(ts_show):
     xt = schedule.q_sample(x0_show, torch.full((len(x0_show),), t, device=device), eps_show).cpu()
     for i in range(len(x0_show)):
@@ -485,7 +490,8 @@ plt.show()
 #
 # $$\theta^{\mathrm{EMA}}_n=d\,\theta^{\mathrm{EMA}}_{n-1}+(1-d)\,\theta_n=(1-d)\sum_{k\le n}d^{\,n-k}\theta_k+d^{\,n}\theta_0$$
 #
-# averages the last $\approx 1/(1-d)$ iterates (Polyak–Ruppert averaging), which cancels much of that jitter.
+# averages the last $\approx 1/(1-d)$ iterates (an exponentially weighted cousin of Polyak–Ruppert averaging),
+# which cancels much of that jitter.
 # Diffusion sampling applies the network hundreds of times, so small weight noise compounds into visible artefacts.
 # EMA weights are therefore what everyone samples with, while the raw weights are what the optimiser keeps
 # training. **Gotcha:** the $d^{\,n}\theta_0$ term means that early on a plain EMA is dominated by the random
@@ -571,11 +577,12 @@ plt.tight_layout()
 plt.show()
 
 # %% [markdown]
-# The loss starts at 1 (the zero-initialised output, as predicted), drops steeply within the first few hundred
-# steps, and then declines slowly. That long slow tail is where sample quality is made. The per-step loss stays
-# noisy forever. The noise is not a sign of a bad learning rate: each minibatch has a different mix of $t$, and the
-# loss depends strongly on $t$ (we will measure this below). The gradient-norm panel shows how often clipping is
-# active. It is mostly a guard against early or rare spikes.
+# The loss starts at 1 (the zero-initialised output, as predicted). It barely moves while the warm-up learning rate
+# is tiny, then plunges, and then declines slowly. That long slow tail is where sample quality is made. The
+# per-step loss stays noisy forever. The noise is not a sign of a bad learning rate: each minibatch has a different
+# mix of $t$, and the loss depends strongly on $t$ (we will measure this below). The gradient norm is large during the
+# initial plunge, so clipping is active then. Afterwards it sits below the threshold, and clipping only catches
+# occasional spikes.
 #
 # **Samples from the model we just trained.** We use DDIM with 50 steps (notebook 04) and the same starting noise
 # for the raw and the EMA weights. On a CPU budget of 1500 steps, expect rough results: digit-like strokes and
@@ -613,9 +620,9 @@ plt.show()
 
 # %% [markdown]
 # Compare the two grids position by position: the starting noise is the same. In a short run the EMA horizon is
-# only a few hundred steps (see the warm-up formula), so the difference is modest. We will quantify it with
-# Fréchet distances in section 7. In long runs, where the EMA averages over thousands of steps, the EMA weights are
-# clearly better.
+# only a few hundred steps (see the warm-up formula), so the two grids often look alike at first glance. Look at
+# the backgrounds and stroke edges. Section 7 measures the difference with Fréchet distances, which detect it more
+# reliably than the eye.
 #
 # **From here on we use a longer-trained reference model:** the same recipe, the same code, 12 000 steps at batch
 # 64 (8× our budget). `dm.load_or_train_mnist_model` loads it from `checkpoints/`, or trains and caches it if it is
@@ -631,7 +638,8 @@ if hasattr(torch.serialization, "add_safe_globals"):
 ref_model, ref_schedule = dm.load_or_train_mnist_model(conditional=False, device=device, batch_size=BATCH,
                                                        amp=USE_AMP)
 assert torch.allclose(ref_schedule.alpha_bars, schedule.alpha_bars)  # same noise schedule as ours
-print(f"reference model: {dm.count_params(ref_model):,} parameters, config {ref_model.config}")
+n_ref_params = sum(p.numel() for p in ref_model.parameters())  # (dm.count_params skips frozen EMA copies)
+print(f"reference model: {n_ref_params:,} parameters, config {ref_model.config}")
 
 
 @torch.no_grad()
@@ -649,19 +657,20 @@ ts_loss = np.unique(np.r_[0, np.geomspace(1, 999, 12 if FAST else 20).astype(int
 x_eval = x_test[: (32 if FAST else 128)].to(device)
 snr_t = (schedule.alpha_bars / (1 - schedule.alpha_bars)).cpu().numpy()[ts_loss]
 curves = {"in-notebook (EMA)": (loss_per_t(ema.model, x_eval, ts_loss), C_MINE),
-          "reference (12k steps)": (loss_per_t(ref_model, x_eval, ts_loss), C_DDPM)}
+          "reference": (loss_per_t(ref_model, x_eval, ts_loss), C_DDPM)}
 prior_var = x_train.var(dim=0).mean().item()   # MSE of the best *constant* guess, E[x0], per pixel
 
 fig, axes = plt.subplots(1, 2, figsize=(10, 3.4))
 for name, (eps_mse, c) in curves.items():
     axes[0].plot(ts_loss, eps_mse, "o-", ms=3, color=c, label=name)
     axes[1].plot(ts_loss, eps_mse / snr_t, "o-", ms=3, color=c, label=name)   # x0-MSE = eps-MSE / SNR(t)
-axes[0].set(xscale="symlog", yscale="log", xlabel="t", ylabel="MSE on ε  (what we train)",
-            title="Loss per noise level")
+axes[0].set(yscale="log", xlabel="t", ylabel="MSE on ε  (what we train)", title="Loss per noise level")
 axes[1].axhline(prior_var, color=C_REAL, ls="--", lw=1, label="predict the mean image (prior variance)")
-axes[1].set(xscale="symlog", yscale="log", xlabel="t", ylabel="implied MSE on x̂0 per pixel",
+axes[1].set(yscale="log", xlabel="t", ylabel="implied MSE on x̂0 per pixel",
             title="Same errors, measured on the clean image")
 for ax in axes:
+    ax.set_xscale("symlog", linthresh=1)   # log-like axis that still shows t = 0
+    ax.set_xlim(-0.3, 1300)
     ax.legend()
 plt.tight_layout()
 plt.show()
@@ -676,11 +685,16 @@ for name, (eps_mse, _) in curves.items():
 #   hard, and almost zero at large $t$, where $x_t\approx\epsilon$. So uniform-$t$ training spends most of its
 #   gradient signal on low and intermediate noise levels. This **loss weighting** is a design choice, and
 #   later work tunes it (Kingma et al. 2021; Karras et al. 2022).
-# * **Right:** in image space the error grows with $t$ and saturates at the **prior variance**, the error of guessing
-#   the average digit. That is the Bayesian answer: once $x_t$ carries no information, the posterior mean is the
-#   prior mean. The printout checks this numerically.
-# * The two models differ mostly at small and intermediate $t$, where the details are made. That is where the
-#   extra training of the reference model went.
+# * **Right:** in image space the error grows with $t$. The Bayes-optimal denoiser's error would saturate at the
+#   dashed line, the **prior variance**: once $x_t$ carries no information, the posterior mean is the prior mean,
+#   "the average digit". A trained $\epsilon$-network can do *worse* than that at the largest $t$, and the printout
+#   compares the two at $t=999$. The reason is the weighting. An $x_0$-error there costs the $\epsilon$-loss only
+#   $\mathrm{SNR}(999)\approx4\cdot10^{-5}$ times as much, so the network is barely trained to get $\hat x_0$ right
+#   at those noise levels. Sampling hardly suffers, because $\hat x_0$ enters the early updates with a tiny weight.
+#   But it is one reason for **x0-clipping** (next section) and for alternative parameterisations such as
+#   $v$-prediction (Salimans & Ho 2022).
+# * Compare the two models: the gap between the curves shows at which noise levels the reference's 8× longer
+#   training paid off.
 #
 # ## 5 · Sampling images: DDPM vs DDIM, the denoising chain, x0-clipping
 #
@@ -709,9 +723,12 @@ plt.tight_layout()
 plt.show()
 
 # %% [markdown]
-# Both grids should look like handwritten digits of similar quality, with DDIM at 1/20 of the cost.
-# Section 7 compares them quantitatively. Most samples should be recognisable. Expect a few malformed
-# ones from a 1.2M-parameter model trained for 12k steps on a CPU.
+# Both grids look like handwriting, and DDIM costs 1/20 of the network calls. (Its measured speed-up is a bit
+# smaller because of fixed per-call overheads.) Expect a share of malformed digits from a 1.2M-parameter model
+# trained for 12k steps on a CPU. Look closely at the backgrounds. If DDIM's samples keep some residual speckle that
+# DDPM's do not, that is a known difference. The deterministic ODE sampler carries every error of the network along
+# its path, while DDPM injects fresh noise at every step, which lets later steps correct earlier mistakes (Karras et
+# al. 2022 analyse this trade-off). Section 7 compares the two samplers quantitatively.
 #
 # **Numerical precision.** We sampled under bfloat16 autocast. The schedule coefficients and the sampler arithmetic
 # stay in float32. This matters, because $\hat x_0=(x_t-\sqrt{1-\bar\alpha_t}\,\hat\epsilon)/\sqrt{\bar\alpha_t}$
@@ -760,7 +777,7 @@ def x0_hat_fp32(net, x, t, bs=256):
 ddpm_traj = [(t, xt, x0_hat_fp32(ref_model, xt, t)) for t, xt, _ in ddpm_traj]
 traj_t = [t for t, _, _ in ddpm_traj]
 cols = [999, 800, 600, 500, 400, 300, 200, 100, 50, 0]
-fig, axes = plt.subplots(6, len(cols), figsize=(10, 6.6))
+fig, axes = plt.subplots(6, len(cols), figsize=(9, 6))
 for r in range(3):
     for j, tc in enumerate(cols):
         _, xt, x0h = ddpm_traj[traj_t.index(tc)]
@@ -777,10 +794,12 @@ plt.tight_layout()
 plt.show()
 
 # %% [markdown]
-# Read the $\hat x_0$ rows from left to right. At $t=999$ the guess is a blurry "average digit", the prior mean.
-# Through the middle of the chain a blurry but recognisable digit appears: the **global shape is decided early**.
-# The last few hundred steps only sharpen strokes. We can measure when the identity of the digit is fixed by
-# classifying $\hat x_0$ at each step and checking agreement with the class of the final sample:
+# Read the $\hat x_0$ rows from left to right. At the very largest $t$ the "guess" is not meaningful: as we saw in
+# section 4, the $\epsilon$-network's $\hat x_0$ is poor there, and clipping turns it into a saturated blob. Then a
+# blurry digit-like shape appears, which may still change identity for a while. By the middle of the chain the
+# **global shape is decided**, while $x_t$ itself still looks like noise to the eye. The last few hundred steps
+# only sharpen strokes. We can measure when the identity of the digit is fixed by classifying $\hat x_0$ at each
+# step and checking agreement with the class of the final sample:
 
 # %%
 clf = dm.load_or_train_classifier(device=device)
@@ -807,10 +826,11 @@ t_half = next((t for t, a in zip(traj_t, agree) if a >= 0.5), None)
 print(f"class of x0_hat agrees with the final class for >= 50% of samples from t = {t_half} on")
 
 # %% [markdown]
-# The curve rises from near chance to almost 1 well before the end of the chain. The class is settled around the
-# middle of the chain. The remaining steps change details, not identity. One caveat: the classifier was trained on
-# sharp digits, so on very blurry $\hat x_0$ its answer is only a rough proxy for "what the model has committed to".
-# Section 6 explains *why* generation is coarse-to-fine.
+# The curve stays near chance for the first part of the chain, then rises steeply and approaches 1 well before
+# the end. The class is settled around the middle of the chain (see the printed $t$), and the remaining steps change
+# details, not identity. One caveat: the classifier was trained on sharp digits, so on very blurry $\hat x_0$ its
+# answer is only a rough proxy for "what the model has committed to". Section 6 explains *why* generation is
+# coarse-to-fine.
 #
 # ### x0-clipping
 #
@@ -826,13 +846,32 @@ n_clip = 16 if FAST else 64
 x_T = torch.randn(n_clip, 1, 28, 28, generator=torch.Generator().manual_seed(4)).to(device)
 _, traj_nc = dm.ddim_sample(ref_model, schedule, x_T.shape, n_steps=50, x_T=x_T, return_traj=True)  # float32
 t_nc = [t for t, _, _ in traj_nc]
-frac_out = [(x0h.abs() > 1).float().mean().item() for _, _, x0h in traj_nc]
+frac_out = [(x0h.abs() > 1.1).float().mean().item() for _, _, x0h in traj_nc]
 max_abs = [x0h.abs().amax(dim=(1, 2, 3)).median().item() for _, _, x0h in traj_nc]
 
 few = {}
 for net_name, net in [("reference", ref_model), ("in-notebook", ema.model)]:
     for clip in (None, 1.0):
         few[(net_name, clip)] = sample_ddim(net, n_clip, steps=10, seed=5, clip=clip)
+
+
+@torch.no_grad()
+def nearest_train(x, k=3, chunk=256):
+    """L2 (pixel-space) k nearest neighbours of each image in the training set. Returns (dists, indices)."""
+    xtr = x_train.flatten(1).to(device)
+    dists, idxs = [], []
+    for i in range(0, len(x), chunk):
+        d = torch.cdist(x[i:i + chunk].flatten(1).to(device), xtr)
+        v, j = d.topk(k, dim=1, largest=False)
+        dists.append(v.cpu())
+        idxs.append(j.cpu())
+    return torch.cat(dists), torch.cat(idxs)
+
+
+# A simple failure detector (used again in section 7): a sample is "off-manifold" if it is farther from every
+# training image than 99% of held-out test digits are.
+nn_d_test, _ = nearest_train(x_test[:N_EVAL])
+far = torch.quantile(nn_d_test[:, 0], 0.99).item()
 
 fig = plt.figure(figsize=(11, 5.6))
 gs = fig.add_gridspec(2, 3, width_ratios=[1.1, 1, 1])
@@ -844,7 +883,7 @@ ax.invert_xaxis()
 ax.legend()
 ax = fig.add_subplot(gs[1, 0])
 ax.plot(t_nc, frac_out, "o-", ms=2, color=C_DDIM)
-ax.set(xlabel="t", ylabel="fraction of pixels outside [-1, 1]", ylim=(0, None))
+ax.set(xlabel="t", ylabel="fraction of pixels with |x̂0| > 1.1", ylim=(0, None))
 ax.invert_xaxis()
 for i, net_name in enumerate(["reference", "in-notebook"]):
     for j, clip in enumerate((None, 1.0)):
@@ -855,17 +894,17 @@ plt.tight_layout()
 plt.show()
 
 for (net_name, clip), xs in few.items():
-    p = classify(xs)
-    print(f"{net_name:11s} DDIM-10 {'clip   ' if clip else 'no clip'}: mean classifier confidence "
-          f"{p.max(1).values.mean():.3f} | mean |x| of background-ish pixels "
-          f"{xs[xs < 0].abs().mean():.3f} (ideal 1.0)")
+    off = (nearest_train(xs, k=1)[0][:, 0] > far).float().mean().item()
+    print(f"{net_name:11s} DDIM-10, {'clipped  ' if clip else 'unclipped'}: {off:5.1%} of samples off-manifold "
+          f"(farther from the training set than 99% of test digits)")
 
 # %% [markdown]
-# Early in the chain the unclipped $\hat x_0$ has values far outside $[-1,1]$ and many pixels out of range. As
-# $t\to0$ it settles inside the data range. With only 10 sampling steps, every step jumps across a large range of
-# noise levels and relies heavily on $\hat x_0$, so these errors leak into the samples. Compare the two columns,
-# and the printed confidences and background values, for the reference model and for the under-trained one.
-# Clipping is a cheap fix that is on by default in most DDPM code.
+# Early in the chain the unclipped $\hat x_0$ has values far outside $[-1,1]$, often by an order of magnitude. Only
+# as $t\to0$ does it settle near the data range. With only 10 sampling steps, every step jumps across a large range
+# of noise levels and leans heavily on $\hat x_0$, so these errors can leak into the samples. Some unclipped samples
+# may blow up into noise or speckle instead of a digit. Compare the columns and the printed off-manifold fractions
+# for the reference model and for the under-trained one. Clipping is a cheap fix that is on by default in most DDPM
+# code.
 #
 # **Dynamic thresholding** (Imagen, Saharia et al. 2022) is a refinement. Per sample, let $s$ be the 99.5th
 # percentile of $|\hat x_0|$. If $s>1$, clip to $[-s,s]$ and divide by $s$. Static clipping saturates many pixels
@@ -884,8 +923,9 @@ for (net_name, clip), xs in few.items():
 # survive longest. Run backwards, the reverse process must therefore produce low frequencies (global shape) first
 # and high frequencies (stroke edges) last. It is an approximate autoregression from coarse to fine.
 #
-# The link to Bayesian denoising is direct. For a *Gaussian* image prior, the posterior mean is the **Wiener
-# filter**, which shrinks every frequency by $\mathrm{SNR}/(1+\mathrm{SNR})$. Its relative error at frequency $f$ is
+# The link to Bayesian denoising is direct. For a stationary *Gaussian* image prior, the posterior mean is the
+# **Wiener filter**, which (after undoing the $\sqrt{\bar\alpha_t}$ scaling) shrinks every frequency by
+# $\mathrm{SNR}/(1+\mathrm{SNR})$. Its relative error at frequency $f$ is
 #
 # $$\frac{\mathbb{E}\,|\mathcal{F}(\hat x_0-x_0)(f)|^2}{P_{x_0}(f)}=\frac{1}{1+\mathrm{SNR}(f,t)},$$
 #
@@ -956,15 +996,19 @@ plt.show()
 # follows it until it hits its noise floor (dotted), then goes flat. As $t$ grows the floor rises and the
 # crossing moves to lower frequencies. (b) In the Wiener picture, the region where a frequency is still
 # undetermined (bright) sweeps from high to low frequencies as $t$ grows. The cyan line is $\mathrm{SNR}(f,t)=1$.
-# (c) The trained model's reverse chain shows the same structure: low frequencies of $\hat x_0$ settle at large $t$
-# (early in sampling), high frequencies only near the end, roughly along the same SNR = 1 line. MNIST is far from
-# Gaussian, so (b) is only a guide. Where (c) is darker than (b), the model uses non-Gaussian structure (for
-# example "strokes have sharp edges") to infer frequencies that a linear filter could not yet recover.
+# (c) The trained model's reverse chain shows the same ordering: the boundary between "still open" (bright) and
+# "settled" (dark) runs from low frequencies at large $t$ (early in sampling) to high frequencies near the end,
+# roughly along the SNR = 1 line. The match is not exact, and need not be. The Wiener filter is the optimal
+# *linear* denoiser under a *Gaussian* prior, and MNIST is far from Gaussian. Where (c) is darker than (b), the
+# model pins down a frequency band earlier than any linear filter could, because much of a digit's fine structure
+# (sharp stroke edges) is implied by its coarse shape. Where it is brighter, the network is simply imperfect.
+# The coarse-to-fine ordering, however, is unmistakable.
 #
 # This is the spectral explanation of the coarse-to-fine chain in section 5. It also explains several
 # practical facts: why noise schedules matter so much (they decide how many steps are spent on each frequency
-# band), why higher-resolution images need *shifted* schedules (more pixels add more high-frequency bands), and why
-# sampling with very few steps loses fine detail first.
+# band), why higher-resolution images need schedules shifted towards more noise (neighbouring pixels are redundant,
+# so the same per-pixel noise hides less of the image), and why sampling with very few steps loses fine detail
+# first.
 #
 # ### What does the denoiser look at? Its Jacobian
 #
@@ -1004,9 +1048,9 @@ def jacobian_rows(f, x, pixels, chunk=48):
 idx = int(torch.nonzero(x_test[:, 0, 14, 14] > 0.5)[0])   # a test digit with ink at the centre pixel
 x_clean = x_test[idx:idx + 1].to(device)
 p_centre = torch.tensor([14 * 28 + 14])
-t_jac = [20, 150, 350, 600, 850]
+t_jac = [20, 100, 250, 450, 650]
 noise = torch.randn(x_clean.shape, generator=torch.Generator().manual_seed(6)).to(device)
-fig, axes = plt.subplots(2, len(t_jac), figsize=(10, 4.4))
+fig, axes = plt.subplots(2, len(t_jac), figsize=(10, 4.9))
 for j, t in enumerate(t_jac):
     xt = schedule.q_sample(x_clean, torch.full((1,), t, device=device), noise)
     J_row = jacobian_rows(x0_hat_fn(ref_model, t), xt, p_centre)[0].view(28, 28).cpu()
@@ -1014,7 +1058,7 @@ for j, t in enumerate(t_jac):
     axes[0, j].imshow(xt[0, 0].cpu(), cmap="gray", vmin=-1, vmax=1)
     axes[0, j].set_title(f"$x_t$, t={t}")
     axes[1, j].imshow(J_row, cmap="RdBu_r", vmin=-lim, vmax=lim)
-    axes[1, j].set_title(f"∂x̂0[centre]/∂x_t  (max {lim:.2f})", fontsize=8)
+    axes[1, j].set_title(f"Jacobian row (max {lim:.2f})", fontsize=9)
     for r in range(2):
         axes[r, j].plot(14, 14, "+", color="gold", ms=8, mew=1.5)
         axes[r, j].set_axis_off()
@@ -1035,16 +1079,19 @@ print(f"eigenvalues of the symmetric part: {eig.min():.3f} ... {eig.max():.3f}; 
       f"negative mass {eig.clamp(max=0).abs().sum() / eig.abs().sum():.1%}")
 
 # %% [markdown]
-# At small $t$ the filter is a narrow spot around the pixel, so the model barely smooths. As $t$ grows it spreads
-# along the strokes and then over the whole digit, while its magnitude shrinks: the posterior relies less on the
-# observation and more on the prior. At large $t$ one output pixel depends on input pixels far away, which a few 3×3
-# convolutions could never do. This is the "global context" requirement from section 1, made visible.
+# At small $t$ the filter is a narrow spot around the pixel, so the model barely smooths. As $t$ grows it widens:
+# first along the stroke (an *adaptive*, orientation-dependent smoothing that no fixed linear filter performs),
+# then over a large part of the digit, often with negative side lobes. At large $t$ one output pixel depends on
+# input pixels far away, which a few 3×3 convolutions could never do. This is the "global context" requirement from
+# section 1, made visible. (At the very largest $t$ the filters of an $\epsilon$-network become erratic, for the
+# reason discussed in section 4, so we stop at $t=650$.)
 #
-# The symmetry check compares the Jacobian with its transpose. It is far more symmetric than a generic matrix,
-# and its symmetric part is (nearly) positive semi-definite. The network was never told that its output is
-# a posterior mean, i.e. that $\hat\epsilon$ is the gradient of a log-density (notebook 03), yet it learns
-# approximately that structure. Kadkhodaie et al. (2024) build an analysis of generalisation on exactly these
-# Jacobians.
+# The symmetry check compares the Jacobian with its transpose. Read the printed asymmetry against the
+# random-matrix baseline, and the negative eigenvalue mass against 0. The network was never told that its output is a
+# posterior mean, i.e. that $\hat\epsilon$ is proportional to the gradient of a log-density (notebook 03), and
+# nothing in the architecture forces a symmetric Jacobian. Yet training pushes it towards that structure, and the
+# remaining asymmetry measures how far the network still is from an exact posterior mean. Kadkhodaie et al. (2024)
+# build their analysis of generalisation on the eigen-decomposition of exactly these Jacobians.
 #
 # ## 7 · Evaluating image samples
 #
@@ -1059,24 +1106,10 @@ print(f"eigenvalues of the symmetric part: {eig.min():.3f} ... {eig.max():.3f}; 
 # do, the model memorises.
 
 # %%
-@torch.no_grad()
-def nearest_train(x, k=3, chunk=256):
-    """L2 (pixel-space) k nearest neighbours of each image in the training set. Returns (dists, indices)."""
-    xtr = x_train.flatten(1).to(device)
-    dists, idxs = [], []
-    for i in range(0, len(x), chunk):
-        d = torch.cdist(x[i:i + chunk].flatten(1).to(device), xtr)
-        v, j = d.topk(k, dim=1, largest=False)
-        dists.append(v.cpu())
-        idxs.append(j.cpu())
-    return torch.cat(dists), torch.cat(idxs)
-
-
-nn_d_gen, nn_i_gen = nearest_train(ddim_x)
-nn_d_test, _ = nearest_train(x_test[:N_EVAL])
+nn_d_gen, nn_i_gen = nearest_train(ddim_x)   # nearest_train and nn_d_test were defined in section 5
 n_rows = 6
-fig = plt.figure(figsize=(11, 4.6))
-gs = fig.add_gridspec(n_rows, 6, width_ratios=[1, 1, 1, 1, 0.3, 6])
+fig = plt.figure(figsize=(10, 4.6))
+gs = fig.add_gridspec(n_rows, 6, width_ratios=[1, 1, 1, 1, 0.5, 7.5])
 for r in range(n_rows):
     ims = [ddim_x[r, 0]] + [x_train[nn_i_gen[r, k], 0] for k in range(3)]
     for c, im in enumerate(ims):
@@ -1091,21 +1124,26 @@ for r in range(n_rows):
 ax = fig.add_subplot(gs[:, 5])
 bins = np.linspace(0, max(nn_d_gen[:, 0].max(), nn_d_test[:, 0].max()).item(), 30)
 ax.hist(nn_d_test[:, 0].numpy(), bins=bins, alpha=0.6, color=C_REAL, label="held-out test images")
-ax.hist(nn_d_gen[:, 0].numpy(), bins=bins, alpha=0.6, color=C_DDIM, label="generated (DDIM-50)")
+ax.hist(nn_d_gen[:, 0].numpy(), bins=bins, alpha=0.6, color=C_DDIM, label="generated (reference, DDIM-50)")
+ax.axvline(far, color="k", ls=":", lw=1, label="99% of test digits are closer")
 ax.set(xlabel="L2 distance to nearest training image", ylabel="count",
        title="Distance to the training set (copying would pile up at 0)")
 ax.legend()
 plt.tight_layout()
 plt.show()
 print(f"median NN distance: generated {nn_d_gen[:, 0].median():.2f} | held-out test {nn_d_test[:, 0].median():.2f}"
-      f" | min generated {nn_d_gen[:, 0].min():.2f}")
+      f" | smallest generated {nn_d_gen[:, 0].min():.2f} | smallest test {nn_d_test[:, 0].min():.2f}")
+print(f"off-manifold (beyond the dotted line): generated {(nn_d_gen[:, 0] > far).float().mean():.1%}, "
+      f"test 1% by construction")
 
 # %% [markdown]
-# The nearest neighbours (distances under each image) are similar digits written differently, not copies. The
-# two histograms overlap, and no generated sample sits at distance ≈ 0. With 60 000 training images and a small
-# model, this is the expected regime: the model *generalises*. Kadkhodaie et al. (2024) show the transition. With
-# few training images, the same architecture memorises (an exercise below). Two caveats. Pixel-space L2 misses
-# near-copies that are shifted by a pixel. And "no copies" is not the same as "good samples".
+# The nearest neighbours (distances under each image) are similar digits written differently, not copies, and
+# no generated sample piles up near distance 0. With 60 000 training images and a small model this is the expected
+# regime: the model *generalises*. Kadkhodaie et al. (2024) show the transition: with few training images the same
+# architecture memorises (an exercise below). The generated histogram also tends to sit to the *right* of the test
+# histogram. That is the opposite of memorisation: imperfect samples (residual speckle, malformed strokes) are far
+# from every real digit, and the samples beyond the dotted line are the model's failures. Two caveats. Pixel-space L2
+# misses near-copies that are shifted by a pixel. And "no copies" is not the same as "good samples".
 #
 # ### 7b · Mode coverage: which digits does the model generate?
 #
@@ -1133,11 +1171,12 @@ plt.tight_layout()
 plt.show()
 
 # %% [markdown]
-# All ten digits appear, at frequencies near the training proportions, with sampling noise on top. With a few
-# hundred samples, each bar has a standard error of about $\sqrt{0.1\cdot0.9/n}$, a few percentage points. The
-# printed confidences separate fidelity from coverage. Compare each model's fraction of confidently classified
-# samples with the test-image value: the gap measures ambiguous or malformed digits. The short-trained in-notebook
-# model should show the largest gap.
+# All ten digits appear, so no mode is missing, but the proportions are not perfect. Judge the deviations against
+# sampling noise: each bar has a standard error of about $\sqrt{0.1\cdot0.9/n}$, i.e. about 1.3 percentage points at
+# $n=512$ and 2.7 at $n=128$. Larger deviations mean either a real imbalance in the model, or classifier confusion
+# on malformed samples, which tend to land in a few "catch-all" classes. The printed confidences separate fidelity
+# from coverage. Compare each model's fraction of confidently classified samples with the test-image value: the gap
+# measures ambiguous or malformed digits.
 #
 # ### 7c · Fréchet distance in feature space (the idea behind FID)
 #
@@ -1241,11 +1280,16 @@ for k in names:
 # computed at different $n$ (or with different feature networks, image resizing, or libraries) are **not
 # comparable**. Published FIDs use 50 000 samples and a fixed Inception implementation for this reason.
 #
-# **Right**, everything at the same $n$: the real-data floor is lowest, the reference model comes next, and the
-# short-trained in-notebook model is clearly worse. Compare the DDPM-1000 and DDIM-50 bars against their error
-# bars to see whether 20× fewer steps cost measurable quality here, and the raw and EMA bars to see what averaging
-# bought in our short run. With only $n=$ `N_FD` samples per set, small differences are within noise. On a GPU,
-# raise `N_EVAL`/`N_DDPM` to make these comparisons sharp.
+# **Right**, everything at the same $n$. The real-data floor is lowest, and every model sits above it. Three
+# comparisons are worth reading off, each against its error bars:
+# * **reference vs in-notebook:** what 8× more training buys;
+# * **DDPM-1000 vs DDIM-50:** whether 20× fewer network calls cost measurable quality. This connects to the
+#   background speckle discussed in section 5;
+# * **EMA vs raw weights** of the in-notebook model: what weight averaging buys, even in a short run where the two
+#   sample grids looked alike by eye.
+#
+# With only $n=$ `N_FD` samples per set, small differences are within noise. On a GPU, raise `N_EVAL`/`N_DDPM` to
+# make these comparisons sharp.
 #
 # **Further pitfalls of FID** to keep in mind:
 # * **It is blind to memorisation.** Returning the training set verbatim gives a near-floor FD. Pair it with a
@@ -1346,14 +1390,16 @@ for k in names:
 #   (attention at low resolution).
 # * The noise level enters every residual block through **FiLM** (per-channel scale and shift after GroupNorm).
 #   **GroupNorm**, not BatchNorm, because the samples in a batch sit at different noise levels. **Zero-initialised**
-#   residual branches and outputs make the fresh network a well-behaved identity and zero map. The initial loss is
-#   therefore exactly 1.
+#   residual branches and outputs make the fresh network start out as identity blocks with a zero output, so the
+#   initial loss is 1.
 # * The training recipe: data scaled to $[-1,1]$, AdamW at 2e-4 with warm-up, gradient clipping, uniform random $t$,
 #   bf16 autocast, checkpoints that include optimiser and EMA state. **Sample with EMA weights.**
-# * The $\epsilon$-loss is an SNR-weighted $x_0$-loss. It is largest at small $t$ and noisy because of random $t$. The
-#   posterior-mean view explains its limits, for example that at $t\to T$ the $x_0$-error equals the prior variance.
-# * DDIM-50 gives samples comparable to DDPM-1000 at 1/20 of the cost. x0-clipping is a free projection onto the
-#   known data range that matters most for few-step or under-trained sampling.
+# * The $\epsilon$-loss is an SNR-weighted $x_0$-loss. It is largest at small $t$ and noisy because of random $t$.
+#   The weighting leaves the network's $\hat x_0$ at the largest $t$ barely trained, possibly worse than the
+#   Bayes-optimal "prior mean" answer.
+# * DDIM-50 gives usable samples at 1/20 of DDPM-1000's network calls. Stochastic sampling can still be cleaner
+#   with an imperfect model, because the injected noise lets later steps correct earlier errors. x0-clipping is a
+#   free projection onto the known data range that matters most for few-step or under-trained sampling.
 # * Sampling is **coarse-to-fine** because the noise floor swamps the weak high frequencies first. In the Wiener /
 #   posterior-mean picture, a frequency is decided once its SNR exceeds 1. The denoiser's Jacobian is an adaptive
 #   filter that widens with $t$, proportional to the posterior covariance.
@@ -1370,6 +1416,7 @@ for k in names:
 # * Dhariwal & Nichol (2021). *Diffusion Models Beat GANs on Image Synthesis.* arXiv:2105.05233 — architecture ablations (attention at several resolutions, adaptive GroupNorm).
 # * Song, Meng & Ermon (2021). *Denoising Diffusion Implicit Models.* arXiv:2010.02502.
 # * Kingma, Salimans, Poole & Ho (2021). *Variational Diffusion Models.* arXiv:2107.00630 — SNR view of loss weighting, low-discrepancy sampling of $t$.
+# * Salimans & Ho (2022). *Progressive Distillation for Fast Sampling of Diffusion Models.* arXiv:2202.00512 — introduces $v$-prediction.
 # * Karras et al. (2022). *Elucidating the Design Space of Diffusion-Based Generative Models (EDM).* arXiv:2206.00364.
 # * Karras et al. (2024). *Analyzing and Improving the Training Dynamics of Diffusion Models (EDM2).* arXiv:2312.02696 — post-hoc EMA.
 # * Saharia et al. (2022). *Photorealistic Text-to-Image Diffusion Models with Deep Language Understanding (Imagen).* arXiv:2205.11487 — dynamic thresholding.

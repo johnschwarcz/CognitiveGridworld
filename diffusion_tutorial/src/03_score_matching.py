@@ -27,12 +27,12 @@
 # - explicit vs **denoising score matching**: the one-line identity behind it, and why DDPM's $\epsilon$-loss *is* denoising score matching
 # - **Tweedie's formula** $\mathbb E[x_0\mid x_t]=(x_t+(1-\bar\alpha_t)\nabla\log q_t(x_t))/\sqrt{\bar\alpha_t}$: the posterior-mean denoiser
 # - where a learned score is accurate and where it is not; that a perfect score gives near-perfect DDPM samples
-# - why the *exact* score of a finite training set can only reproduce the training points, and how a trained network instead generalises
+# - why the *exact* score of a finite training set can only reproduce the training points (or blends of very close neighbours), and how a trained network instead generalises
 #
 # **Prerequisites:** 01 · The forward process ($q(x_t\mid x_0)$, noised marginals, VP vs VE); 02 · DDPM from scratch
 # (the $\epsilon$-prediction loss, ancestral sampling, MMD as a sample-quality metric).
 #
-# **Runtime:** about 4–7 min on a laptop CPU (three small MLPs of about 30 s each, plus many exact-score computations);
+# **Runtime:** about 3–6 min on a laptop CPU (three small MLPs of about 30 s each, plus many exact-score computations);
 # about 2–3 min on a GPU (the exact Gaussian-mixture computations stay on the CPU).
 
 # %% [markdown]
@@ -40,6 +40,12 @@
 #
 # Exact densities and scores of Gaussian mixtures are computed in float64 on the CPU (Apple's MPS backend has no float64).
 # The Langevin experiments use only exact scores, so they run entirely on the CPU. Neural networks run on `device`.
+#
+# > **Gotcha (MPS):** move a tensor to the CPU *before* converting it to float64: `x.cpu().double()` works everywhere,
+# > while `x.double().cpu()` raises an error on Apple GPUs.
+#
+# Every experiment cell creates its own seeded random-number generator, so you can re-run any single cell (for
+# example with a changed knob in the exercises) and get the same random numbers as in the printed run.
 
 # %%
 import math
@@ -49,6 +55,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import torch
 from matplotlib.colors import ListedColormap
+from matplotlib.patches import FancyArrowPatch
 
 import dmtools as dm
 
@@ -81,6 +88,11 @@ gmm = dm.default_gmm()   # the ground-truth data distribution for most of this n
 LIM = 3.0                # plotting window [-LIM, LIM]^2
 
 
+def rng(seed):
+    """A fresh, seeded CPU generator. One per experiment cell, so each cell can be re-run on its own."""
+    return torch.Generator().manual_seed(seed)
+
+
 def density_grid(dist, lim=LIM, n=200):
     """Density of a dm.GaussianMixture on an n x n grid over [-lim, lim]^2 (rows = y), as a numpy array."""
     g = torch.linspace(-lim, lim, n)
@@ -109,8 +121,10 @@ def show_density(ax, dist, lim=LIM, gamma=0.4, n=160):
 # $p(\theta\mid D)\propto p(D\mid\theta)p(\theta)$). Since $\log Z$ does not depend on $x$,
 # $$\nabla_x\log p(x) = -\nabla_x E(x) - \underbrace{\nabla_x\log Z}_{=\,0}.$$
 # So a network that outputs a score never has to compute $Z$, the quantity that makes likelihood-based training of
-# energy models hard. The price is that a score field only determines $p$ up to a constant on each connected region
-# of its support, a weakness we will meet in §3.
+# energy models hard. The price: the score knows $p$ only through *differences* of $\log p$,
+# $\log p(b)-\log p(a)=\int_a^b s\cdot d\ell$ along any path. The relative mass of two high-density regions is therefore
+# encoded only in the score's values on the paths *between* them. When those paths cross near-empty space, that
+# information is practically out of reach, a weakness we will meet in §3.
 #
 # **The score of a Gaussian mixture.** For one Gaussian, $\nabla_x\log\mathcal N(x;\mu,\Sigma) = -\Sigma^{-1}(x-\mu)$: a linear
 # pull towards the mean, stronger along narrow directions. For a mixture $p(x)=\sum_k w_k\,\mathcal N_k(x)$,
@@ -187,9 +201,10 @@ plt.show()
 # $$x_{k+1} = x_k + \frac{\delta}{2}\,s(x_k) + \sqrt{\delta}\,z_k,\qquad z_k\sim\mathcal N(0,I).$$
 # If you know MCMC: this is the proposal of the **Metropolis-adjusted Langevin algorithm (MALA)**. Without the accept/reject step
 # its stationary distribution is slightly wrong, with an $O(\delta)$ bias (for a Gaussian of variance $\sigma^2$ it is
-# inflated to $\sigma^2/(1-\delta/4\sigma^2)$; Exercise 1). With a Metropolis–Hastings correction it is exact, but MH needs
-# $p$ up to a constant, which a score model does not provide. Diffusion models therefore use ULA-type updates and keep $\delta$
-# small. (Hamiltonian Monte Carlo is the momentum-augmented cousin.)
+# inflated to $\sigma^2/\big(1-\delta/(4\sigma^2)\big)$; Exercise 1). With a Metropolis–Hastings correction it is exact, but MH needs
+# $p$ up to a constant, which a score model does not provide. Score-based samplers that take Langevin steps (NCSN in §4, and
+# the "corrector" steps of predictor–corrector samplers) therefore use plain ULA and keep $\delta$ small.
+# (Hamiltonian Monte Carlo is the momentum-augmented cousin.)
 #
 # > **Gotcha: the step size is limited by the narrowest direction.** For a Gaussian with variance $\sigma^2$ the update
 # > multiplies the deviation from the mean by $1-\delta/(2\sigma^2)$, which diverges once $\delta>4\sigma^2$. Our mixture has
@@ -214,12 +229,12 @@ def langevin(score_fn, x, step_size, n_steps, record_every=0, generator=None):
 
 DELTA = 1e-3
 REC = 10                                                            # record a snapshot every REC steps
-g_cpu = torch.Generator().manual_seed(0)
-x_uniform = (2 * torch.rand(N_PART, 2, dtype=torch.float64, generator=g_cpu) - 1) * LIM   # far from p
-x_stationary = gmm.sample(N_PART, generator=g_cpu).double()                              # exact samples of p
+g = rng(0)
+x_uniform = (2 * torch.rand(N_PART, 2, dtype=torch.float64, generator=g) - 1) * LIM   # far from p
+x_stationary = gmm.sample(N_PART, generator=g).double()                              # exact samples of p
 t0 = time.time()
-x_lan, traj_lan = langevin(lambda x: gmm_score(gmm, x), x_uniform, DELTA, LANGEVIN_STEPS, REC, g_cpu)
-_, traj_stat = langevin(lambda x: gmm_score(gmm, x), x_stationary, DELTA, LANGEVIN_STEPS, REC, g_cpu)
+x_lan, traj_lan = langevin(lambda x: gmm_score(gmm, x), x_uniform, DELTA, LANGEVIN_STEPS, REC, g)
+_, traj_stat = langevin(lambda x: gmm_score(gmm, x), x_stationary, DELTA, LANGEVIN_STEPS, REC, g)
 print(f"2 x {LANGEVIN_STEPS} Langevin steps on {N_PART} particles: {time.time() - t0:.1f} s")
 
 # %%
@@ -247,9 +262,10 @@ plt.show()
 
 # %%
 MMD_N = 1000                                                        # points per MMD evaluation (cost ~ MMD_N^2)
-x_ref = gmm.sample(N_PART, generator=g_cpu)                         # the reference set every curve is compared with
+g = rng(1)
+x_ref = gmm.sample(N_PART, generator=g)                             # the reference set every curve is compared with
 # floor: fresh exact samples vs the same reference set, repeated to see how much the metric fluctuates
-floor_runs = np.array([dm.mmd_rbf(gmm.sample(MMD_N, generator=g_cpu), x_ref, max_n=MMD_N) for _ in range(10)])
+floor_runs = np.array([dm.mmd_rbf(gmm.sample(MMD_N, generator=g), x_ref, max_n=MMD_N) for _ in range(30)])
 floor, floor_sd = floor_runs.mean(), floor_runs.std()
 idx = np.arange(0, len(traj_lan), 5)                                # every 5th snapshot = every 50 steps
 mmd_uniform = [dm.mmd_rbf(traj_lan[i], x_ref, max_n=MMD_N) for i in idx]
@@ -261,7 +277,7 @@ frac_lan = torch.bincount(comp_lan, minlength=gmm.K).double() / N_PART
 # Re-weight: resample particles so each component gets its true weight. If the MMD then drops to the floor,
 # the particles have the right shape *within* each component and only the proportions are wrong.
 particle_w = (gmm.weights / frac_lan.clamp(min=1e-12))[comp_lan]
-resampled = x_lan[torch.multinomial(particle_w, N_PART, replacement=True, generator=g_cpu)]
+resampled = x_lan[torch.multinomial(particle_w, N_PART, replacement=True, generator=g)]
 mmd_resampled = dm.mmd_rbf(resampled, x_ref, max_n=MMD_N)
 print(f"MMD floor (fresh true samples vs the reference set): {floor:.4f} ± {floor_sd:.4f}")
 print(f"final MMD, uniform start: {mmd_uniform[-1]:.4f} | stationary start: {mmd_stat[-1]:.4f} | "
@@ -278,8 +294,9 @@ plt.tight_layout()
 plt.show()
 
 # %% [markdown]
-# Two things are true at once. The chain started at $p$ begins at the floor (its first point *is* a set of exact samples) and
-# does not drift away, so $p$ is indeed (up to the small ULA bias) a fixed point of the dynamics. The chain started from the uniform square improves quickly and then **stalls** well above the
+# Two things are true at once. The chain started at $p$ begins at a value typical of exact samples (its first point *is* a set
+# of exact samples, so its distance from the dashed line is just the metric's sampling noise) and does not drift away, so $p$ is
+# indeed (up to the small ULA bias) a fixed point of the dynamics. The chain started from the uniform square improves quickly and then **stalls** well above the
 # floor. The printed re-weighting experiment locates the problem. Once we fix only the *proportions* of particles per
 # component, the MMD drops to about the floor. So Langevin got the shape of every component right, but put the wrong
 # number of particles into each. That is the first failure mode of plain Langevin.
@@ -290,9 +307,15 @@ plt.show()
 #
 # Suppose $p = \pi\,p_1 + (1-\pi)\,p_2$ with $p_1, p_2$ (essentially) disjoint. On the support of $p_1$,
 # $$\nabla\log p(x) = \nabla\log\big(\pi\,p_1(x)\big) = \nabla\log p_1(x),$$
-# because $\log\pi$ is a constant. **The score does not contain the mixture weight.** A Langevin chain can only learn
+# because $\log\pi$ is a constant. **Near the modes, the score does not contain the mixture weight.** A Langevin chain can only learn
 # about $\pi$ by travelling between the modes, and the time that takes grows exponentially with the depth of the low-density
 # valley. In practice the proportions are frozen at whatever the *initialisation* put into each basin of attraction.
+#
+# (Strictly, a mixture with full support, like ours, *does* encode its weights in the score, but only through the score's
+# values inside the valley, as §1 said. In the example below, the weights 0.8/0.2 move the density minimum between the
+# modes from $x_1=0$ to $x_1\approx0.025$, where the density is about $e^{-35}$ times its peak. Langevin essentially never
+# goes there, and a learned score is least accurate there (3b). So this is a mixing-time problem, not an information
+# problem, but in practice the information is lost either way.)
 #
 # The 8-component mixture above shows this mildly. Below is a stark version: two well-separated modes with weights
 # 0.8 and 0.2, and particles started uniformly on a square.
@@ -300,8 +323,9 @@ plt.show()
 # %%
 two = dm.GaussianMixture([0.8, 0.2], [[-2.5, 0.0], [2.5, 0.0]], [0.09, 0.09])   # std 0.3, 16 std apart
 LIM2 = 4.5
-x0_two = (2 * torch.rand(N_PART, 2, dtype=torch.float64, generator=g_cpu) - 1) * 4.0
-x_plain, traj_plain = langevin(lambda x: gmm_score(two, x), x0_two, 1e-2, LANGEVIN_STEPS, REC, g_cpu)
+g = rng(3)
+x0_two = (2 * torch.rand(N_PART, 2, dtype=torch.float64, generator=g) - 1) * 4.0   # uniform start, reused in §4
+x_plain, traj_plain = langevin(lambda x: gmm_score(two, x), x0_two, 1e-2, LANGEVIN_STEPS, REC, g)
 heavy_plain = (traj_plain[:, :, 0] < 0).double().mean(1)            # fraction in the heavy (left) mode
 print(f"fraction of particles in the heavy mode after {LANGEVIN_STEPS} steps: {heavy_plain[-1]:.3f} (truth 0.8)")
 
@@ -354,6 +378,11 @@ print(f"{N_TRAIN} training points, [-{LIM:.0f}, {LIM:.0f}]^2 split into 60 x 60 
 # - **the modes are connected**: $q_\sigma$ has no deep valleys, so Langevin mixes quickly and particles can redistribute;
 # - **there are no low-density holes**: noised training points fill the whole space, so a learned score is constrained everywhere.
 #
+# And for every $\sigma>0$:
+# - **the score exists everywhere**: real data such as images concentrate near low-dimensional manifolds, off which $p=0$
+#   and $\nabla\log p$ is undefined, so score matching on clean data is ill-posed. $q_\sigma$ has full support, so its score is
+#   always well defined (Song & Ermon 2019, §3.1; our 2-D mixtures have full support and never show this problem).
+#
 # For small $\sigma$, $q_\sigma\approx p$. **Annealed Langevin dynamics** (Song & Ermon 2019, Alg. 1) runs a few
 # Langevin steps at each of a decreasing sequence $\sigma_1>\sigma_2>\dots>\sigma_L$, each level starting from where the
 # previous one ended, with step size $\alpha_i = \eta\,\sigma_i^2$.
@@ -361,8 +390,10 @@ print(f"{N_TRAIN} training points, [-{LIM:.0f}, {LIM:.0f}]^2 split into 60 x 60 
 # **Why noise rather than temperature?** An MCMC practitioner's first instinct for a multimodal target is tempering:
 # sample $p^\beta$ with $\beta<1$. Tempering flattens the barriers but also changes the *weights*, since the mass ratio of two equal-shaped
 # modes becomes $(\pi/(1-\pi))^\beta\to1$. Convolution with noise flattens the barriers and **keeps each component's
-# mass**: $q_\sigma=\sum_k w_k\,(p_k\ast\mathcal N(0,\sigma^2 I))$, with every $w_k$ unchanged. Particles that equilibrate in $q_\sigma$
-# while the modes still overlap therefore get distributed in the right proportions, and they keep those proportions as $\sigma$ shrinks.
+# mass**: $q_\sigma=\sum_k w_k\,(p_k\ast\mathcal N(0,\sigma^2 I))$, with every $w_k$ unchanged. Particles that keep
+# equilibrating as $\sigma$ shrinks track the mass of $q_\sigma$ on each side of the valley. That mass approaches the true
+# weights as the components separate, and the split *freezes* at the last level where particles can still cross the valley
+# (here around $\sigma\approx1$; Exercise 2c). The noise ladder therefore needs levels in that range.
 
 # %%
 def x_marginal(g):
@@ -421,7 +452,7 @@ def annealed_langevin(score_fn, x, sigmas, n_per_level, eta, record_every=0, gen
 sigmas = np.geomspace(5.0, 0.05, N_LEVELS)          # sigma_max ~ distance between the modes (Song & Ermon 2020)
 noised_two = {s: two.noised_ve(s) for s in sigmas}  # exact noised mixtures, precomputed once
 x_ann, traj_ann, level_ends = annealed_langevin(lambda x, s: gmm_score(noised_two[s], x), x0_two, sigmas,
-                                                PER_LEVEL, eta=0.2, record_every=REC, generator=g_cpu)
+                                                PER_LEVEL, eta=0.2, record_every=REC, generator=rng(4))
 heavy_ann = (traj_ann[:, :, 0] < 0).double().mean(1)
 se = math.sqrt(0.8 * 0.2 / N_PART)                  # binomial standard error of a fraction estimated from N_PART particles
 print(f"fraction in heavy mode: annealed {heavy_ann[-1]:.3f}, plain {heavy_plain[-1]:.3f}, truth 0.8 "
@@ -453,20 +484,57 @@ plt.show()
 # %% [markdown]
 # At $\sigma=5$ the noised distribution is a single broad bump and the particles fill it. As $\sigma$ shrinks the bump splits,
 # and the particles split with it in proportion to the mass on each side. At every level the histogram follows the exact
-# $q_\sigma$ (black). The heavy-mode fraction (right) rises to about the true 0.8 during the first few, high-noise levels,
-# while the modes still overlap, and then stays fixed. The printed number is within a few Monte Carlo standard errors of 0.8.
+# $q_\sigma$ (black). The heavy-mode fraction (right) climbs during the first, high-noise levels, as the mass of $q_\sigma$ left of
+# the valley grows, and freezes once the modes separate. The printed number is within a few Monte Carlo standard errors of 0.8.
 #
-# **This is a diffusion model's reverse process.** Start from broad noise; follow the scores of progressively less noisy
-# versions of the data; end at the data. DDPM's ancestral sampler does the same with one carefully calibrated step per
-# noise level instead of many Langevin steps, and Song et al. (2021) unified both as discretisations of a single
-# reverse-time SDE. What remains is to *learn* the noised scores $\nabla\log q_\sigma$ from data.
+# **How this relates to a diffusion model's reverse process.** The coarse-to-fine path is the same: start from broad noise,
+# follow the scores of progressively less noisy versions of the data, end at the data. The mechanism differs.
+# - Annealed Langevin is **MCMC**: every step leaves the current $q_\sigma$ invariant, so samples only move to the next level
+#   by *re-equilibrating* (hence the many steps per level).
+# - DDPM's ancestral sampler (notebook 02) discretises a **reverse-time SDE** (Anderson 1982; Song et al. 2021) that carries
+#   samples of $q_t$ to samples of $q_{t-1}$ in *one* step, without equilibrating. Its score drift is twice that of a Langevin step
+#   with the same injected noise. Half of it *transports* mass (the deterministic probability-flow ODE of notebook 04), and the
+#   other half is a Langevin-type correction.
+#
+# In Song et al.'s predictor–corrector language, annealed Langevin is a "corrector-only" sampler and DDPM a "predictor-only" one,
+# and the two can be combined. (The noise processes differ too: NCSN's $x_0+\sigma\epsilon$ corresponds to the variance-exploding SDE,
+# DDPM to the variance-preserving one.) VE and VP noising are related by a rescaling (notebook 01, §9):
+# $x_t/\sqrt{\bar\alpha_t}=x_0+\sigma_t\,\epsilon$ with $\sigma_t=\sqrt{(1-\bar\alpha_t)/\bar\alpha_t}$, so
+# $q^\text{VP}_t(x)\propto q^\text{VE}_{\sigma_t}(x/\sqrt{\bar\alpha_t})$ and
+# $\nabla\log q^\text{VP}_t(x)=\nabla\log q^\text{VE}_{\sigma_t}(x/\sqrt{\bar\alpha_t})\,/\sqrt{\bar\alpha_t}$.
+# The next cell checks this and places our $\sigma$ ladder on DDPM's time axis. From here on we use DDPM's (VP) notation.
+
+# %%
+sched = dm.NoiseSchedule(1000, "linear", device=device)   # DDPM's linear schedule, T = 1000, used from here on
+ABAR = sched.alpha_bars.cpu().double()                      # float64 copy for exact computations (.cpu() first: MPS)
+SIGMA_T = ((1 - ABAR) / ABAR).sqrt()                        # the VE noise level equivalent to each VP timestep
+
+# CHECK: the VP score is the rescaled VE score at the matched noise level
+xq = 2.0 * torch.randn(500, 2, dtype=torch.float64, generator=rng(5))
+for t in [10, 200, 700]:
+    a = ABAR[t].item()
+    vp = gmm_score(gmm.noised(a), xq)
+    ve = gmm_score(gmm.noised_ve(SIGMA_T[t].item()), xq / math.sqrt(a)) / math.sqrt(a)
+    assert torch.allclose(vp, ve, rtol=1e-8, atol=1e-8)
+print("grad log q_t^VP(x) == grad log q_sigma_t^VE(x / sqrt(abar_t)) / sqrt(abar_t)  ✓")
+for s in [sigmas[0], sigmas[len(sigmas) // 2], sigmas[-1]]:
+    print(f"annealing level sigma = {s:5.2f}  <->  DDPM timestep t ≈ {int((SIGMA_T - s).abs().argmin())}")
+print(f"DDPM's own range: sigma_t from {SIGMA_T[0]:.3f} (t=0) to {SIGMA_T[-1]:.0f} (t={sched.T - 1})")
+
+# %% [markdown]
+# Our hand-made ladder covers only the middle of DDPM's range. DDPM starts from far more noise (at $t=T-1$ the rescaled
+# $x_t$ is essentially pure $\mathcal N(0,I)$) and ends at a smaller $\sigma$. What remains is to *learn* the noised
+# scores from data.
 #
 # ## 5 · Learning the score: from explicit to denoising score matching
 #
-# **Explicit score matching** (Hyvärinen 2005) wants to minimise $\tfrac12\mathbb E_p\|s_\theta(x)-\nabla\log p(x)\|^2$
-# without knowing $\nabla\log p$. Expanding the square and integrating the cross term by parts,
-# $\mathbb E_p[s_\theta\cdot\nabla\log p]=\int s_\theta\cdot\nabla p\,dx=-\int p\,\nabla\cdot s_\theta\,dx$, gives
-# $$J_\text{ESM}(\theta) = \mathbb E_{x\sim p}\Big[\operatorname{tr}\big(\nabla_x s_\theta(x)\big)+\tfrac12\|s_\theta(x)\|^2\Big]+\text{const}.$$
+# **Explicit score matching** would minimise the distance to the true score,
+# $$J_\text{ESM}(s) = \mathbb E_{x\sim p}\,\|s(x)-\nabla\log p(x)\|^2,$$
+# which needs the unknown $\nabla\log p$. Hyvärinen (2005) expanded the square and integrated the cross term by parts,
+# $\mathbb E_p[s\cdot\nabla\log p]=\int s\cdot\nabla p\,dx=-\int p\,\nabla\cdot s\,dx$ (assuming $p\,s\to0$ at infinity), to get
+# the equivalent **implicit score matching** objective
+# $$J_\text{ISM}(s) = \mathbb E_{x\sim p}\Big[2\operatorname{tr}\big(\nabla_x s(x)\big)+\|s(x)\|^2\Big] = J_\text{ESM}(s)-\mathbb E_p\|\nabla\log p\|^2 .$$
+# (Papers usually carry an overall factor $\tfrac12$; we drop it everywhere so that the identities below need no factors of 2.)
 # This is tractable in principle, but the trace of the Jacobian costs one backward pass *per input dimension* (784 for MNIST,
 # about 200k for a 256×256 RGB image). It also only constrains $s_\theta$ where the data are (failure mode 3b).
 # (Sliced score matching replaces the trace by random projections; we will not need it.)
@@ -483,16 +551,19 @@ plt.show()
 # = \mathbb E\big[\nabla_{x_t}\log q(x_t\mid x_0)\,\big|\,x_t\big].$$
 # It is the same "responsibility-weighted average" as the mixture score of §1, now over a continuum of clean points $x_0$.
 #
-# **Why regression onto the conditional score works.** For any function $s$, add and subtract $s^*=\nabla\log q_t$:
-# $$\mathbb E\,\|s(x_t)-\nabla\log q(x_t\mid x_0)\|^2 = \mathbb E\,\|s(x_t)-s^*(x_t)\|^2 + \mathbb E\,\|s^*(x_t)-\nabla\log q(x_t\mid x_0)\|^2
+# **Why regression onto the conditional score works.** At a fixed noise level $t$ define the two objectives
+# $$J_\text{DSM}(s;t)=\mathbb E_{x_0,\epsilon}\,\|s(x_t)-\nabla\log q(x_t\mid x_0)\|^2,\qquad
+# J_\text{ESM}(s;t)=\mathbb E_{x_t\sim q_t}\,\|s(x_t)-s^*(x_t)\|^2,\qquad s^*=\nabla\log q_t .$$
+# For any function $s$, add and subtract $s^*$ inside the first:
+# $$J_\text{DSM}(s;t) = J_\text{ESM}(s;t) + \underbrace{\mathbb E\,\|s^*(x_t)-\nabla\log q(x_t\mid x_0)\|^2}_{C_t,\ \text{independent of } s}
 # + 2\,\mathbb E\big[(s-s^*)(x_t)\cdot\underbrace{\mathbb E[s^*(x_t)-\nabla\log q(x_t\mid x_0)\mid x_t]}_{=\,0\ \text{by the identity}}\big].$$
-# So $J_\text{DSM}(s)=J_\text{ESM}(s)+C$ with a constant $C$ independent of $s$: **minimising the denoising objective
-# minimises the distance to the true marginal score.** This is the familiar fact that least-squares regression onto a noisy target
-# recovers its conditional mean.
+# So $J_\text{DSM}=J_\text{ESM}+C_t$: **minimising the denoising objective minimises the distance to the true marginal score.**
+# This is the familiar fact that least-squares regression onto a noisy target recovers its conditional mean.
 #
 # **DDPM is denoising score matching.** Write the network as a noise predictor, $s_\theta(x_t,t)=-\epsilon_\theta(x_t,t)/\sqrt{1-\bar\alpha_t}$. Then
 # $$\Big\|s_\theta(x_t,t)+\frac{\epsilon}{\sqrt{1-\bar\alpha_t}}\Big\|^2 = \frac{\|\epsilon_\theta(x_t,t)-\epsilon\|^2}{1-\bar\alpha_t},
-# \qquad\text{so}\qquad L_\text{simple}=\mathbb E_t\Big[(1-\bar\alpha_t)\,J_\text{DSM}(t)\Big].$$
+# \qquad\text{so}\qquad L_\text{simple}=\mathbb E_t\Big[(1-\bar\alpha_t)\,J_\text{DSM}(s_\theta;t)\Big]$$
+# (`dm.diffusion_loss` also averages over the $d$ coordinates, an extra constant factor $1/d$).
 # DDPM's loss is denoising score matching summed over noise levels with the weighting $\lambda_t=1-\bar\alpha_t$. That is the
 # weighting Song et al. (2021) recommend, $\lambda_t\propto 1/\mathbb E\|\nabla\log q(x_t\mid x_0)\|^2$, which makes every level's loss $O(1)$. At the optimum,
 # $$\boxed{\ \epsilon_\theta(x_t,t)\approx-\sqrt{1-\bar\alpha_t}\;\nabla_{x_t}\log q_t(x_t)\ }$$
@@ -505,10 +576,6 @@ plt.show()
 # We draw many $x_0\sim p(x_0\mid x_t)$, average the conditional scores, and compare with the exact $\nabla\log q_t(x_t)$.
 
 # %%
-sched = dm.NoiseSchedule(1000, "linear", device=device)
-ABAR = sched.alpha_bars.double().cpu()               # float64 copy for exact computations
-
-
 def gmm_posterior(gmm, x_t, abar):
     """Exact p(x0 | x_t) for x_t = sqrt(abar) x0 + sqrt(1-abar) eps and a Gaussian-mixture prior on x0.
 
@@ -536,9 +603,10 @@ def sample_posterior(gmm, x_t, abar, n, generator=None):
 queries = [(torch.tensor([0.3, 0.3]), 120), (torch.tensor([1.4, -0.9]), 400), (torch.tensor([1.05, 0.55]), 30),
            (torch.tensor([2.5, 2.5]), 10)]
 print(f"{'x_t':>14} {'t':>4} | {'exact score':>18} | {'MC mean of cond. scores':>24} | max |diff| / std. error")
+g = rng(6)
 for x_t, t in queries:
     x_t, a = x_t.double(), ABAR[t].item()
-    x0 = sample_posterior(gmm, x_t, a, N_MC, generator=g_cpu)
+    x0 = sample_posterior(gmm, x_t, a, N_MC, generator=g)
     cond = -(x_t - math.sqrt(a) * x0) / (1 - a)                          # conditional scores, one per posterior sample
     exact = gmm_score(gmm.noised(a), x_t[None])[0]
     z = ((cond.mean(0) - exact).abs() / (cond.std(0) / math.sqrt(N_MC))).max()
@@ -555,19 +623,22 @@ print("E[conditional score | x_t] == marginal score (within Monte Carlo error)  
 
 # %%
 fig, axes = plt.subplots(1, 2, figsize=(9, 4.2))
+g = rng(7)
 for ax, (x_t, t), lim in zip(axes, queries[:2], [1.6, 2.2]):
     x_t, a = x_t.double(), ABAR[t].item()
     show_density(ax, gmm.noised(a), lim=lim)
-    targets = math.sqrt(a) * sample_posterior(gmm, x_t, a, 300, generator=g_cpu)      # x_t + (1-abar) * cond. score
+    targets = math.sqrt(a) * sample_posterior(gmm, x_t, a, 20_000, generator=g)      # x_t + (1-abar) * cond. score
     for p in targets[:60]:
         ax.plot([x_t[0], p[0]], [x_t[1], p[1]], color=C["learned"], lw=0.4, alpha=0.4)
-    ax.scatter(targets[:, 0], targets[:, 1], s=3, color=C["learned"], label=r"$\sqrt{\bar\alpha}\,x_0$, $x_0\sim p(x_0\mid x_t)$")
-    mc_end = targets.mean(0)
+    ax.scatter(targets[:300, 0], targets[:300, 1], s=3, color=C["learned"],
+               label=r"$\sqrt{\bar\alpha}\,x_0$, $x_0\sim p(x_0\mid x_t)$ (300 shown)")
+    mc_end = targets.mean(0)                    # average over all 20,000 posterior samples: small Monte Carlo error
     exact_end = x_t + (1 - a) * gmm_score(gmm.noised(a), x_t[None])[0]
     ax.scatter(*x_t.numpy(), marker="*", s=150, color="gold", edgecolor="k", zorder=5, label="$x_t$")
-    ax.annotate("", xy=exact_end.numpy(), xytext=x_t.numpy(), zorder=8,
-                arrowprops=dict(arrowstyle="-|>", color=C["exact"], lw=2.5, mutation_scale=15, shrinkA=0, shrinkB=0))
-    ax.scatter(*mc_end.numpy(), marker="x", s=50, color="k", lw=1.5, zorder=9, label="average of the blue points")
+    # a FancyArrowPatch ends exactly at its end point (an empty-text ax.annotate arrow can stop short of it)
+    ax.add_patch(FancyArrowPatch(tuple(x_t.tolist()), tuple(exact_end.tolist()), arrowstyle="-|>", color=C["exact"], lw=2,
+                                 mutation_scale=15, shrinkA=0, shrinkB=0, zorder=8))
+    ax.scatter(*mc_end.numpy(), marker="x", s=50, color="k", lw=1.5, zorder=9, label="average of 20,000 such points")
     ax.plot([], [], color=C["exact"], lw=2.5, label=r"$(1-\bar\alpha_t)\,\nabla\log q_t(x_t)$ (exact)")
     ax.set(xlim=(-lim, lim), ylim=(-lim, lim), title=rf"$t$={t} ($\bar\alpha_t$={a:.2f}); grey: $q_t$")
 axes[1].legend(loc="lower left", fontsize=7)
@@ -576,26 +647,36 @@ plt.show()
 
 # %% [markdown]
 # Each thin line is one conditional score ("the noise pointed away from *this* $x_0$"). On the left, $x_t$ sits between two
-# components, so the posterior over $x_0$ is split between them. The individual conditional scores disagree wildly, and their average
-# (black cross), which is exactly where the marginal score points (red arrow), lies *between* the two clusters. On the right the noise
+# components, so the posterior over $x_0$ is split between them. The individual conditional scores disagree wildly. Their average
+# (black cross) sits at the tip of the exact marginal score (red arrow), up to a small Monte Carlo error, *between* the two clusters. On the right the noise
 # is large: the posterior spreads over most components, and the score points towards the centre of the (shrunken) data. The network in
 # DDPM is trained on the noisy thin lines and learns their average.
 #
 # Second check: $J_\text{DSM}(s) - J_\text{ESM}(s)$ should be the same constant for *every* candidate score function $s$.
-# We evaluate four candidates on the same Monte Carlo samples, in $\epsilon$-units (multiplied by $1-\bar\alpha_t$ and averaged over
-# coordinates, like the DDPM loss).
+# We evaluate four quite different candidates on the same Monte Carlo samples, in $\epsilon$-units (multiplied by
+# $1-\bar\alpha_t$ and averaged over coordinates, like the DDPM loss): the exact score, the score of the best single Gaussian
+# (moment-matched to $q_t$, a linear score field), the exact score of the *wrong* noise level, and the zero function.
 
 # %%
+def gaussian_fit_score(dist, x):
+    """Score of the single Gaussian with the same mean and covariance as the mixture `dist` (a linear vector field)."""
+    mean = (dist.weights[:, None] * dist.means).sum(0)
+    second = (dist.weights[:, None, None] * (dist.covs + dist.means[:, :, None] * dist.means[:, None, :])).sum(0)
+    cov = second - torch.outer(mean, mean)
+    return -(x - mean) @ torch.linalg.inv(cov)                         # cov is symmetric, so no transpose needed
+
+
 t_chk = 100
 a = ABAR[t_chk].item()
-x0 = gmm.sample(N_MC, generator=g_cpu).double()
-eps = torch.randn(N_MC, 2, dtype=torch.float64, generator=g_cpu)
+g = rng(8)
+x0 = gmm.sample(N_MC, generator=g).double()
+eps = torch.randn(N_MC, 2, dtype=torch.float64, generator=g)
 x_t = math.sqrt(a) * x0 + math.sqrt(1 - a) * eps
 cond_score = -eps / math.sqrt(1 - a)                                   # the DSM regression target
 s_star = gmm_score(gmm.noised(a), x_t)                                 # the true marginal score
 candidates = {"exact score": s_star,
-              "0.5 x exact": 0.5 * s_star,
-              "score at t=300\n(wrong noise level)": gmm_score(gmm.noised(ABAR[300].item()), x_t),
+              "best single\nGaussian": gaussian_fit_score(gmm.noised(a), x_t),
+              "exact score at t=300\n(wrong noise level)": gmm_score(gmm.noised(ABAR[300].item()), x_t),
               "zero": torch.zeros_like(s_star)}
 rows = []
 gap_exact = (1 - a) * ((s_star - cond_score) ** 2).mean(1)            # per-sample gap of the exact score
@@ -603,11 +684,12 @@ for name, s in candidates.items():
     dsm_i = (1 - a) * ((s - cond_score) ** 2).mean(1)                 # per-sample losses, averaged over coordinates
     esm_i = (1 - a) * ((s - s_star) ** 2).mean(1)
     dsm, esm = dsm_i.mean().item(), esm_i.mean().item()
-    # Monte Carlo standard error of (this candidate's gap - the exact score's gap); its expectation is 0
+    # (this candidate's gap - the exact score's gap), per sample. Algebra: it equals (1-abar) (s - s*).(s* - cond) for d=2,
+    # i.e. exactly the cross term of the derivation, whose expectation is 0. We test it against its Monte Carlo standard error.
     diff = (dsm_i - esm_i) - gap_exact
     z = diff.mean().item() / (diff.std().item() / math.sqrt(N_MC) + 1e-300)
     rows.append((name, dsm, esm))
-    print(f"{name.replace(chr(10), ' '):38s} DSM {dsm:.4f} = ESM {esm:.4f} + gap {dsm - esm:.4f}   "
+    print(f"{name.replace(chr(10), ' '):40s} DSM {dsm:.4f} = ESM {esm:.4f} + gap {dsm - esm:.4f}   "
           f"(gap - exact gap: {diff.mean().item():+.1e}, {z:+.1f} SE)")
     assert abs(z) < 5, "the DSM - ESM gap should not depend on the candidate"
 gaps = np.array([r[1] - r[2] for r in rows])
@@ -624,9 +706,12 @@ plt.tight_layout()
 plt.show()
 
 # %% [markdown]
-# The hatched part, the irreducible noise in the regression target, is the same for every candidate. (The printed deviations
-# are within Monte Carlo error. They look alike because all candidates share the same samples and deviate from $s^*$ in similar
-# directions, so their errors are correlated.) So ranking score
+# The hatched part, the irreducible noise in the regression target, is the same for every candidate. The printed deviation of a
+# candidate's gap from the exact score's gap is, sample by sample, exactly the cross term of the derivation,
+# $(1-\bar\alpha)\,(s-s^*)\cdot(s^*-\nabla\log q(x_t\mid x_0))$ in these units. So each candidate tests the identity
+# $\mathbb E[s^*-\nabla\log q(x_t\mid x_0)\mid x_t]=0$ along a different direction $s-s^*$, and every deviation is within Monte Carlo
+# error. (Avoid candidates of the form $\lambda s^*$: they all test the same direction, so their deviations are identical up to a
+# factor and carry no extra information.) So ranking score
 # functions by the denoising loss (which we *can* compute from data) ranks them exactly as the explicit loss (which needs the unknown
 # true score) would. The total for the exact score is the Bayes-optimal loss at this $t$. Averaged over $t$, that is the floor
 # notebook 02's training loss plateaued at.
@@ -661,9 +746,10 @@ def tweedie_x0(score, x_t, abar):
 
 
 worst = 0.0
+g = rng(9)
 for t in [0, 10, 100, 300, 600, 999]:
     a = ABAR[t].item()
-    x_t = gmm.noised(a).sample(2000, generator=g_cpu).double()
+    x_t = gmm.noised(a).sample(2000, generator=g).double()
     r, m, _ = gmm_posterior(gmm, x_t, a)
     by_conditioning = (r[..., None] * m).sum(1)
     by_tweedie = tweedie_x0(gmm_score(gmm.noised(a), x_t), x_t, a)
@@ -675,9 +761,10 @@ print("Tweedie's formula == exact posterior mean (float64 precision)  ✓")
 
 # %%
 fig, axes = plt.subplots(1, 3, figsize=(12, 4.0))
+g = rng(10)
 for ax, t in zip(axes, [20, 150, 400]):
     a = ABAR[t].item()
-    x_t = gmm.noised(a).sample(150, generator=g_cpu).double()
+    x_t = gmm.noised(a).sample(150, generator=g).double()
     x0_hat = tweedie_x0(gmm_score(gmm.noised(a), x_t), x_t, a)
     show_density(ax, gmm)
     for p, q in zip(x_t, x0_hat):
@@ -717,15 +804,15 @@ print(f"{dm.count_params(net) / 1e3:.0f}k parameters, trained in {out['seconds']
 def learned_score(model, x, t):
     """s_theta(x, t) = -eps_theta(x, t) / sqrt(1 - abar_t), for a batch x and an integer timestep t. float64 on the CPU."""
     tt = torch.full((x.shape[0],), int(t), device=device, dtype=torch.long)
-    eps_hat = model(x.float().to(device), tt).double().cpu()
+    eps_hat = model(x.float().to(device), tt).cpu().double()        # .cpu() first: MPS has no float64
     return -eps_hat / math.sqrt(1 - ABAR[t].item())
 
 
 # CHECK: dm.model_predictions' x0-prediction is Tweedie's formula applied to the learned score.
-x_chk = gmm.noised(ABAR[200].item()).sample(500, generator=g_cpu)
+x_chk = gmm.noised(ABAR[200].item()).sample(500, generator=rng(11))
 _, x0_dm = dm.model_predictions(score_net, x_chk.to(device), 200, sched)
 x0_tw = tweedie_x0(learned_score(score_net, x_chk, 200), x_chk.double(), ABAR[200].item())
-assert torch.allclose(x0_dm.double().cpu(), x0_tw, atol=1e-4)
+assert torch.allclose(x0_dm.cpu().double(), x0_tw, atol=1e-4)
 print("dm.model_predictions(...)[1] == Tweedie(learned score)  ✓")
 
 # %% [markdown]
@@ -743,8 +830,8 @@ def hdr_levels(dist, masses=(0.99, 0.9, 0.5), n=20_000):
 
 
 T_SHOW = [5, 50, 200, 500]
-fig, axes = plt.subplots(3, len(T_SHOW), figsize=(10, 7.6))
-err_levels = np.linspace(-3, 0.5, 15)          # log10 error bands
+fig, axes = plt.subplots(3, len(T_SHOW), figsize=(10, 7.6), dpi=85)   # slightly lower dpi: 8 quiver panels make a big PNG
+err_levels = np.linspace(-3, 0.5, 8)           # log10 error bands, half a decade each
 n_grid = 120
 gx = torch.linspace(-LIM, LIM, n_grid, dtype=torch.float64)
 GX, GY = torch.meshgrid(gx, gx, indexing="xy")
@@ -756,10 +843,10 @@ for j, t in enumerate(T_SHOW):
     for i, (fn, col, lab) in enumerate([(lambda p: gmm_score(q_t, p), C["exact"], "exact"),
                                         (lambda p: learned_score(score_net, p, t), C["learned"], "learned")]):
         axes[i, j].contour(gx, gx, log_q, levels=levels, colors="0.55", linewidths=0.8, linestyles="solid")
-        dm.plot_vector_field(lambda p: fn(p).float(), ax=axes[i, j], lim=LIM, n=15, normalize=True, color=col,
+        dm.plot_vector_field(lambda p: fn(p).float(), ax=axes[i, j], lim=LIM, n=13, normalize=True, color=col,
                              angles="xy", scale_units="xy", scale=1 / 0.3, width=0.006)
         axes[i, j].set(xticks=[], yticks=[], title=rf"{lab} score, $t$={t}")
-    typical = gmm_score(q_t, q_t.sample(5000, generator=g_cpu)).pow(2).sum(1).mean().sqrt()   # RMS score under q_t
+    typical = gmm_score(q_t, q_t.sample(5000, generator=rng(12))).pow(2).sum(1).mean().sqrt()   # RMS score under q_t
     err = (learned_score(score_net, grid_pts, t) - gmm_score(q_t, grid_pts)).norm(dim=1) / typical
     im = axes[2, j].contourf(gx, gx, err.log10().reshape(n_grid, n_grid).numpy(), levels=err_levels, cmap="viridis",
                              extend="both")
@@ -787,9 +874,10 @@ g4 = torch.linspace(-4, 4, 80, dtype=torch.float64)
 G4X, G4Y = torch.meshgrid(g4, g4, indexing="xy")
 box_pts = torch.stack([G4X.flatten(), G4Y.flatten()], 1)
 err_typ, err_atyp, frac_atyp = [], [], []
+g = rng(13)
 for t in t_eval:
     q_t = gmm.noised(ABAR[t].item())
-    x_typ = q_t.sample(2000, generator=g_cpu).double()
+    x_typ = q_t.sample(2000, generator=g).double()
     s_true = gmm_score(q_t, x_typ)
     err_typ.append(((learned_score(score_net, x_typ, t) - s_true) ** 2).sum(1).mean().item()
                    / (s_true ** 2).sum(1).mean().item())
@@ -809,21 +897,32 @@ ax.legend()
 plt.tight_layout()
 plt.show()
 for t, e1, e2, f in list(zip(t_eval, err_typ, err_atyp, frac_atyp))[:: max(len(t_eval) // 6, 1)]:
-    print(f"t={t:4d}: relative error typical {e1:.1e} | atypical {e2:.1e} | atypical share of the box {f:.0%}")
+    print(f"t={t:4d}: relative error typical {e1:.1e} | atypical {e2:.1e} (ratio {e2 / e1:5.1f}) | "
+          f"atypical share of the box {f:.0%}")
+ratio = np.array(err_atyp) / np.array(err_typ)
+mid = t_eval <= 250
+print(f"atypical / typical error: {ratio[mid].min():.1f}x to {ratio[mid].max():.1f}x for t <= 250, "
+      f"{ratio[~mid].min():.0f}x to {ratio[~mid].max():.0f}x for t > 250")
+print(f"relative error at the smallest t, typical points: {err_typ[0]:.1f}  (> 1 means worse than predicting a zero score)")
 
 # %% [markdown]
 # Two regularities, both worth remembering:
-# - **Atypical points are worse** than typical ones at every $t$, by an order of magnitude or more over most of the range (at the
-#   very smallest $t$ both are bad). The training loss is an expectation under $q_t$ and simply does not see atypical points.
-# - **Small $t$ is hard even at typical points.** The relative error is largest at the lowest noise levels. The regression target $\epsilon$ there
+# - **Atypical points are worse** than typical ones at every $t$ (see the printed ratios): only slightly at the very smallest
+#   $t$, where both are bad; several-fold, up to about tenfold, at small and intermediate $t$; and by far more at large $t$,
+#   where the typical-point error becomes tiny. The training loss is an expectation under $q_t$ and simply does not see
+#   atypical points.
+# - **Small $t$ is hard even at typical points.** The relative error is largest at the lowest noise levels. At the very smallest
+#   $t$ it even exceeds 1: there the learned score is *worse than the zero function*. The regression target $\epsilon$ there
 #   is almost pure noise: the predictable part $\mathbb E[\epsilon\mid x_t]=-\sqrt{1-\bar\alpha_t}\,s^*$ is tiny compared with the
 #   target's unit variance, so many samples are needed to pin it down (the denoising-score-matching variance problem). In absolute
-#   score units the error is further amplified by $1/\sqrt{1-\bar\alpha_t}$, which this relative measure hides.
+#   score units the error is further amplified by $1/\sqrt{1-\bar\alpha_t}$.
 #
 # > **Gotcha: the score at tiny noise.** For ancestral sampling these small-$t$ errors hardly matter, because the sampler only uses the
 # > score through $\hat x_0 = (x_t-\sqrt{1-\bar\alpha_t}\,\epsilon_\theta)/\sqrt{\bar\alpha_t}$, where an $\epsilon$-error is multiplied by the tiny
-# > $\sqrt{1-\bar\alpha_t}$. They do matter for anything that uses the score *itself* at low noise: Langevin "corrector" steps
-# > (the predictor–corrector samplers of Song et al. 2021), likelihood evaluation, or classifier-guidance gradients (notebook 06).
+# > $\sqrt{1-\bar\alpha_t}$. They do matter for anything that uses the score *itself* at low noise: exact likelihoods via the
+# > probability-flow ODE (notebook 04), which integrate the divergence of the score down to the smallest noise level, or using
+# > $s_\theta$ as the gradient of a log-prior inside MCMC or optimisation (e.g. for inverse problems), where the step size is set
+# > by something other than the noise level.
 # > That is why practical systems stop at a minimum noise level $\sigma_\text{min}>0$ and parameterise the network as a noise or data predictor rather than as a raw score.
 #
 # ## 8 · Plugging the exact score into the DDPM sampler
@@ -840,7 +939,7 @@ class ExactScoreModel:
     """
 
     def __init__(self, gmm, schedule):
-        abar = schedule.alpha_bars.double().cpu()
+        abar = schedule.alpha_bars.cpu().double()       # .cpu() first: MPS has no float64
         self.s1a = (1 - abar).sqrt()
         self.q_t = [gmm.noised(a) for a in abar.tolist()]
 
@@ -880,27 +979,60 @@ for name, x in [("DDPM + exact score", x_exact), ("DDPM + learned score", x_lear
     frac = np.bincount(gmm.responsibilities(x.cpu()).argmax(1).numpy(), minlength=gmm.K) / N_SAMPLE
     print(f"{name:22s}  {frac.round(3)}   largest deviation {np.abs((frac - w) / se_w).max():.1f} SE")
 
+# Tails: MMD with these bandwidths barely registers a few per cent of misplaced samples. A tail-sensitive metric:
+# the fraction of samples outside the region that holds 99% of the mass of p (by definition 1% for exact samples).
+thr99 = hdr_levels(gmm, masses=(0.99,))[0]
+
+
+def frac_outside(x):
+    """Fraction of samples in the low-density region log p(x) < thr99 (expected: 0.01 for samples of p)."""
+    return (gmm.log_prob(x.cpu()) < thr99).double().mean().item()
+
+
+se_tail = math.sqrt(0.01 * 0.99 / N_SAMPLE)
+out_floor = np.array([frac_outside(x) for x in floor_sets])
+tails = {"fresh true samples": out_floor.mean()}
+print(f"\nfraction of samples outside the 99% region of p (expected 0.010, binomial SE {se_tail:.3f}):")
+print(f"{'fresh true samples':22s}  {out_floor.mean():.3f} ± {out_floor.std():.3f} (5 sets)")
+for name, x in [("DDPM + exact score", x_exact), ("DDPM + learned score", x_learned)]:
+    tails[name] = frac_outside(x)
+    print(f"{name:22s}  {tails[name]:.3f}   = {tails[name] / 0.01:.1f}x the expected 1%, {(tails[name] - 0.01) / se_tail:+.1f} SE")
+
 # %%
-fig, axes = plt.subplots(1, 3, figsize=(11, 3.8))
-dm.scatter2d(floor_sets[0], ax=axes[0], s=2, alpha=0.5, c=C["data"], lim=LIM,
-             title=f"fresh true samples\nfloor: MMD$^2$ {fl_mmd.mean():.4f}, SW {fl_sw.mean():.3f}")
-for ax, (name, x, col) in zip(axes[1:], [("DDPM + exact score", x_exact, C["exact"]),
-                                         ("DDPM + learned score", x_learned, C["learned"])]):
+fig, axes = plt.subplots(1, 3, figsize=(11, 4.0))
+gq = torch.linspace(-LIM, LIM, 200, dtype=torch.float64)
+GQX, GQY = torch.meshgrid(gq, gq, indexing="xy")
+log_p_grid = gmm.log_prob(torch.stack([GQX.flatten(), GQY.flatten()], 1)).reshape(200, 200).numpy()
+panels = [("fresh true samples", floor_sets[0], C["data"],
+           f"floor: MMD$^2$ {fl_mmd.mean():.4f}, SW {fl_sw.mean():.3f}"),
+          ("DDPM + exact score", x_exact, C["exact"], f"MMD$^2$ {metrics['DDPM + exact score'][0]:.4f}, "
+                                                        f"SW {metrics['DDPM + exact score'][1]:.3f}"),
+          ("DDPM + learned score", x_learned, C["learned"], f"MMD$^2$ {metrics['DDPM + learned score'][0]:.4f}, "
+                                                            f"SW {metrics['DDPM + learned score'][1]:.3f}")]
+for ax, (name, x, col, line2) in zip(axes, panels):
+    ax.contour(gq, gq, log_p_grid, levels=[thr99], colors="0.6", linewidths=0.8, linestyles="solid")
     dm.scatter2d(x.cpu(), ax=ax, s=2, alpha=0.5, c=col, lim=LIM,
-                 title=f"{name}\nMMD$^2$ {metrics[name][0]:.4f}, SW {metrics[name][1]:.3f}")
+                 title=f"{name}\n{line2}\noutside the 99% region: {tails[name]:.1%}")
+axes[0].plot([], [], color="0.6", lw=0.8, label="boundary of the 99% region of $p$")
+axes[0].legend(loc="lower left")
 plt.tight_layout()
 plt.show()
 
 # %% [markdown]
 # With the exact score, DDPM's 1000 small steps reproduce the data distribution to within the sampling noise of the metrics
 # (compare with the floor of fresh true samples), so the sampler's own discretisation error is negligible here. Unlike plain
-# Langevin in §2, DDPM also gets the **mode weights** right (see the printed fractions): its reverse process *is* an annealed sampler.
+# Langevin in §2, DDPM also gets the **mode weights** right (see the printed fractions): it too travels from high noise to
+# low noise, and at high noise the modes are connected (§4).
 #
-# On this easy 2-D problem the learned model typically lands close to the floor as well. Its errors (§7) sit in regions the
-# sampler rarely visits, or at noise levels where they barely move the samples. The general lesson is the decomposition:
-# exact score + sampler = sampler error only, so any gap between a learned model and its exact-score counterpart is *model* error.
-# With few steps the picture changes, because a perfect score with a coarse sampler is no longer perfect (notebook 04). Keeping an
-# exact-score oracle around lets you attribute every bit of error to the right culprit.
+# On this easy 2-D problem the learned model lands close to the MMD floor as well, so by MMD alone the score error of §7 seems to
+# have vanished. It has not. The tail metric shows that the learned model puts several times too many samples *between* the
+# components (the stray blue points outside the grey boundary), while the exact-score sampler does not. Those are the
+# low-density errors of §7 made visible in the samples. MMD hardly sees them: if a fraction $f$ of the mass is misplaced,
+# MMD$^2$ grows only like $f^2$, which for a few per cent is below the metric's own sampling noise. This is the decomposition at work: the same sampler with
+# the exact score shows no excess, so the excess is *model* error, not sampler error. (Two lessons for practice: look at more
+# than one metric, and include one that is sensitive to the tails.) With few steps the picture changes, because a perfect score
+# with a coarse sampler is no longer perfect (notebook 04). Keeping an exact-score oracle around lets you attribute every bit of
+# error to the right culprit.
 #
 # ## 9 · Memorisation vs generalisation: the exact score of a training set
 #
@@ -910,8 +1042,10 @@ plt.show()
 # $\tau\to0$; its noised version is again a mixture, with components $\mathcal N(\sqrt{\bar\alpha_t}x^{(i)},v_t I)$ and $v_t=\bar\alpha_t\tau^2+1-\bar\alpha_t$. By
 # Tweedie, the **ideal denoiser of a training set** is a softmax-weighted average of training points:
 # $$\mathbb E_{\hat p}[x_0\mid x_t] \approx \sum_i w_i(x_t)\,x^{(i)},\qquad w_i(x_t)=\operatorname{softmax}_i\Big(-\frac{\|x_t-\sqrt{\bar\alpha_t}\,x^{(i)}\|^2}{2v_t}\Big).$$
-# As $t\to0$ the softmax becomes a hard nearest-neighbour assignment, so a sampler driven by this score **can only output
-# training points**. A perfectly optimised diffusion model is a lookup table. Yet trained networks produce new samples.
+# As the noise level goes to zero the softmax becomes a hard nearest-neighbour assignment, so a sampler driven by this score
+# **can only output training points**. A perfectly optimised diffusion model is a lookup table. (With a finite smallest noise
+# level, DDPM's $\sqrt{1-\bar\alpha_0}=0.01$ here, "hard" needs the training points to be much further apart than that; otherwise the
+# last step returns local averages of very close neighbours. We will see both.) Yet trained networks produce new samples.
 # Let us compare the two on the same training sets.
 
 # %%
@@ -919,8 +1053,8 @@ class EmpiricalScoreModel:
     """eps*(x, t) for the empirical distribution of `train`: a mixture of N tiny isotropic Gaussians (width tau)."""
 
     def __init__(self, train, schedule, tau=1e-3):
-        self.train = train.double().cpu()
-        self.abar = schedule.alpha_bars.double().cpu()
+        self.train = train.cpu().double()
+        self.abar = schedule.alpha_bars.cpu().double()                  # .cpu() first: MPS has no float64
         self.tau2 = tau ** 2
 
     def x0_hat(self, x, t):
@@ -939,16 +1073,17 @@ class EmpiricalScoreModel:
 
     def __call__(self, x, t, y=None):
         tv = int(t[0])                                                   # samplers pass one t per batch
-        eps = -math.sqrt(1 - self.abar[tv].item()) * self.score(x.double().cpu(), tv)
+        eps = -math.sqrt(1 - self.abar[tv].item()) * self.score(x.cpu().double(), tv)
         return eps.to(x.device, x.dtype)
 
 
 # CHECK: the fast formula agrees with dm.GaussianMixture built on the same tiny-variance components.
-pts_train = gmm.sample(16, generator=g_cpu)
+g = rng(14)
+pts_train = gmm.sample(16, generator=g)
 emp = EmpiricalScoreModel(pts_train, sched)
 emp_gmm = dm.GaussianMixture(torch.ones(16), pts_train, torch.full((16,), 1e-3 ** 2))
 for t in [0, 50, 500]:
-    xq = 1.5 * torch.randn(300, 2, dtype=torch.float64, generator=g_cpu)
+    xq = 1.5 * torch.randn(300, 2, dtype=torch.float64, generator=g)
     assert torch.allclose(emp.score(xq, t), gmm_score(emp_gmm.noised(ABAR[t].item()), xq), rtol=1e-6, atol=1e-6)
 print("EmpiricalScoreModel.score == score of the noised tiny-Gaussian mixture  ✓")
 
@@ -960,7 +1095,13 @@ print("EmpiricalScoreModel.score == score of the noised tiny-Gaussian mixture  �
 # %%
 def nn_dist(x, train):
     """Distance from every row of x to its nearest training point."""
-    return torch.cdist(x.double().cpu(), train.double().cpu()).min(1).values
+    return torch.cdist(x.cpu().double(), train.cpu().double()).min(1).values
+
+
+def train_spacing(train):
+    """Median distance from each training point to its nearest *other* training point."""
+    d = torch.cdist(train.double(), train.double())
+    return (d + torch.diag(torch.full((len(train),), float("inf"), dtype=torch.float64))).min(1).values.median().item()
 
 
 N_SIZES = [32, 1000]
@@ -978,10 +1119,13 @@ for n_tr in N_SIZES:
     fresh = gmm.sample(N_GEN, generator=torch.Generator().manual_seed(7))
     held_out = gmm.sample(2000, generator=torch.Generator().manual_seed(8))
     mem[n_tr] = dict(train=train_n, emp=x_emp.cpu(), net=x_net.cpu(), fresh=fresh)
-    print(f"N={n_tr} ({time.time() - t0:.0f} s):")
-    print(f"   {'training set itself':22s} {'':44s} | MMD^2 to held-out data {dm.mmd_rbf(train_n, held_out):.4f}")
+    print(f"N={n_tr} ({time.time() - t0:.0f} s): typical spacing of the training points {train_spacing(train_n):.3f} "
+          f"(smallest noise level of the sampler: {math.sqrt(1 - ABAR[0].item()):.3f})")
+    print(f"   {'training set itself':22s} {'':56s} | MMD^2 to held-out data {dm.mmd_rbf(train_n, held_out):.4f}")
     for name, x in [("exact empirical score", x_emp), ("trained network", x_net), ("fresh samples of p", fresh)]:
-        print(f"   {name:22s} median NN distance to training set {nn_dist(x, train_n).median():.1e} | "
+        d_nn = nn_dist(x, train_n)
+        # "copy" = within 1e-3 (the width tau of the tiny Gaussians) of a training point
+        print(f"   {name:22s} NN distance to training set: median {d_nn.median():.1e}, copies {(d_nn < 1e-3).double().mean():4.0%} | "
               f"MMD^2 to held-out data {dm.mmd_rbf(x.cpu(), held_out):.4f}")
 
 # %%
@@ -1011,12 +1155,20 @@ plt.tight_layout()
 plt.show()
 
 # %% [markdown]
-# **The exact empirical score memorises at both sizes.** Its samples sit on top of training points (orange histograms far to the
-# left, many orders of magnitude closer than fresh data). For $N=1000$ the points are so dense that the final denoising step
-# sometimes averages two neighbours, but the samples are still far closer to the training set than new data would be.
+# **The exact empirical score memorises at both sizes.** For $N=32$ essentially every sample is a copy of a training point: the
+# orange histogram sits far to the left, at about the width $\tau$ of the tiny Gaussians, orders of magnitude closer than fresh
+# data. For $N=1000$ the mechanism shows through. The training points are only about twice as far apart as the sampler's
+# smallest noise level (printed above). DDPM's last step returns the posterior mean *at* that noise level, so it acts like a kernel
+# smoother with a bandwidth of about $0.01$. Only a minority of samples are exact copies (the small left-hand orange peak); most
+# are weighted averages of two or three neighbouring training points (the main orange peak). They still hug the training set,
+# about an order of magnitude closer than new data. The smallest noise level $\sigma_\text{min}$ thus acts as a bandwidth, which is
+# one more reason why it matters (§7, gotcha).
 #
 # **The trained network behaves differently.** For $N=1000$ its distance histogram lies on top of the fresh-data reference: by
-# this measure its samples are as novel as new draws from $p$. For $N=32$ its histogram is shifted somewhat to the left of the
+# this measure its samples are as novel as new draws from $p$. Its MMD is close to that of its own *training set* (first printed
+# row), not to that of fresh data. That is expected: a model fitted to $N$ points can at best reproduce the distribution those
+# points represent, sampling fluctuations included. (This particular 1000-point draw happens to be a somewhat unrepresentative
+# sample of $p$, so its MMD is above that of fresh data, and the network inherits that.) For $N=32$ its histogram is shifted somewhat to the left of the
 # reference (samples lie a little closer to training points than new data would) but sits orders of magnitude away from the copies.
 # The scatter plot shows what it has learned: blobs *around* the training points, and nothing where there are no training
 # points (a component with no training point gets no samples). That is a smoothed version of the training set, closer to a
@@ -1036,10 +1188,10 @@ plt.show()
 # Metropolis–Hastings accept/reject step (MALA) and confirm the bias disappears.
 # <details><summary>Hint / solution</summary>
 #
-# $x'=(1-\tfrac{\delta}{2\sigma^2})x+\sqrt\delta z$ gives $v=(1-\tfrac{\delta}{2\sigma^2})^2v+\delta$, i.e. $v=\sigma^2/(1-\delta/4\sigma^2)$: inflated by
+# $x'=(1-\tfrac{\delta}{2\sigma^2})x+\sqrt\delta z$ gives $v=(1-\tfrac{\delta}{2\sigma^2})^2v+\delta$, i.e. $v=\sigma^2/\big(1-\delta/(4\sigma^2)\big)$: inflated by
 # 2.6%, 33% and 300% for the three steps. For MALA, with proposal $x'\sim\mathcal N(x+\tfrac\delta2 s(x),\delta)$ accept with probability
 # $\min\{1,\ \frac{p(x')\,\mathcal N(x;\,x'+\frac\delta2 s(x'),\,\delta)}{p(x)\,\mathcal N(x';\,x+\frac\delta2 s(x),\,\delta)}\}$.
-# Note that this needs $\log p$ (up to a constant), not just the score. That is why diffusion samplers cannot simply use it.
+# Note that this needs $\log p$ (up to a constant), not just the score. That is why score-based samplers cannot simply use it.
 # </details>
 #
 # **Exercise 2 (annealing knobs).** Re-run the annealed sampler of §4 with (a) `sigmas = np.geomspace(0.5, 0.05, N_LEVELS)`,
@@ -1070,13 +1222,14 @@ plt.show()
 # </details>
 #
 # **Exercise 4 (where does a weaker model fail?).** Retrain the §7 network with `STEPS // 8` steps, or with `hidden=32, n_blocks=1`, and redraw
-# the relative-error curves. Predict which part of the curve rises most, and whether the DDPM samples of §8 get visibly worse.
+# the relative-error curves. Predict which part of the curve rises most, and whether the DDPM samples of §8 get visibly worse
+# (MMD and the fraction outside the 99% region).
 # <details><summary>Hint / solution</summary>
 #
 # The typical-point error rises most at small and *intermediate* $t$ (for the under-trained network by more than an order of
 # magnitude in the middle of the range). The large-$t$ error stays small, because the noised data are nearly Gaussian there and the
 # score is nearly linear in $x$, which even a tiny network fits. The samples get worse, clearly so for the under-trained network
-# (MMD far above the floor) and mildly for the tiny one. Intermediate noise levels are where the reverse process decides which component
+# (MMD far above the floor, and a large fraction of samples outside the 99% region) and mildly for the tiny one. Intermediate noise levels are where the reverse process decides which component
 # a particle ends up in. A weak model's typical-point error can even exceed its atypical-point error: it is not yet accurate anywhere.
 # </details>
 #
@@ -1093,26 +1246,31 @@ plt.show()
 # ## Key takeaways
 #
 # - The **score** $\nabla\log p$ does not involve the normalising constant. For a mixture it is the posterior-weighted average of the component
-#   scores. A score field alone fixes $p$ only up to the relative weights of disconnected regions.
+#   scores. It knows $p$ only through differences of $\log p$, so the relative mass of well-separated modes is encoded only in its
+#   values in the near-empty space between them.
 # - **Langevin dynamics** $x\leftarrow x+\tfrac\delta2 s(x)+\sqrt\delta z$ samples $p$ using only the score (ULA, with $O(\delta)$ bias).
-#   On multimodal data it gets each mode's shape right but cannot discover mode weights, and a learned score is unreliable where data are rare.
+#   On multimodal data it gets each mode's shape right but cannot discover mode weights in any practical time, and a learned score is
+#   unreliable where data are rare.
 # - **Annealing over noise levels** fixes both: noise connects modes *without changing their weights* (unlike tempering) and fills
-#   the empty space with training signal. Following the scores of decreasingly noisy distributions is exactly a diffusion model's reverse process.
+#   the empty space with training signal. A diffusion model's reverse process follows the same high-to-low-noise path, but each
+#   step transports samples from one level to the next (a reverse-SDE step) instead of re-equilibrating by MCMC.
 # - **Denoising score matching**: the marginal score is the posterior mean of the conditional score
 #   $-\epsilon/\sqrt{1-\bar\alpha_t}$, so regressing onto the conditional score learns the marginal score. DDPM's $\epsilon$-loss is DSM with weight
 #   $1-\bar\alpha_t$, and $\epsilon_\theta\approx-\sqrt{1-\bar\alpha_t}\,\nabla\log q_t$.
 # - **Tweedie**: $\mathbb E[x_0\mid x_t]=(x_t+(1-\bar\alpha_t)\nabla\log q_t)/\sqrt{\bar\alpha_t}$. Noise, score and $x_0$ predictions are one function in three
 #   parameterisations, and the $x_0$ prediction is a Bayesian posterior mean (blurry at high noise), not a sample.
 # - A learned score is accurate where the noised data live and poor elsewhere and at the smallest noise levels. With the exact score, DDPM
-#   is essentially perfect, so remaining errors are model errors.
-# - The exact score of a finite training set memorises. Generalisation comes from the network's inductive biases, not from a better optimum.
+#   is essentially perfect, so remaining errors are model errors. They can hide from MMD in the tails, so use a tail-sensitive metric too.
+# - The exact score of a finite training set memorises: it outputs training points, or local averages of neighbours closer than the
+#   smallest noise level. Generalisation comes from the network's inductive biases, not from a better optimum.
 #
 # ## Further reading
 #
-# - A. Hyvärinen (2005). *Estimation of Non-Normalized Statistical Models by Score Matching.* Journal of Machine Learning Research 6. Explicit score matching.
+# - A. Hyvärinen (2005). *Estimation of Non-Normalized Statistical Models by Score Matching.* Journal of Machine Learning Research 6. Score matching via the implicit (integration-by-parts) objective.
 # - P. Vincent (2011). *A Connection Between Score Matching and Denoising Autoencoders.* Neural Computation 23(7). Denoising score matching.
 # - Y. Song, S. Ermon (2019). *Generative Modeling by Estimating Gradients of the Data Distribution.* arXiv:1907.05600. NCSN: the failure modes of §3 and annealed Langevin dynamics.
-# - Y. Song, J. Sohl-Dickstein, D. Kingma, A. Kumar, S. Ermon, B. Poole (2021). *Score-Based Generative Modeling through Stochastic Differential Equations.* arXiv:2011.13456. DDPM and NCSN as reverse-time SDEs; the $\lambda_t$ weighting.
+# - Y. Song, S. Ermon (2020). *Improved Techniques for Training Score-Based Generative Models.* NeurIPS. arXiv:2006.09011. Practical rules for $\sigma_\text{max}$, the number of noise levels and the Langevin step size (§4, Exercise 2).
+# - Y. Song, J. Sohl-Dickstein, D. Kingma, A. Kumar, S. Ermon, B. Poole (2021). *Score-Based Generative Modeling through Stochastic Differential Equations.* arXiv:2011.13456. NCSN and DDPM as the VE and VP SDEs; predictor–corrector samplers; the $\lambda_t$ weighting.
 # - B. Efron (2011). *Tweedie's Formula and Selection Bias.* Journal of the American Statistical Association 106(496). Tweedie's formula and empirical Bayes.
 # - B. D. O. Anderson (1982). *Reverse-time diffusion equation models.* Stochastic Processes and their Applications 12(3). The reverse-time SDE that the score defines.
 # - J. Ho, A. Jain, P. Abbeel (2020). *Denoising Diffusion Probabilistic Models.* arXiv:2006.11239. Section 3.2 makes the connection to denoising score matching and Langevin dynamics.
