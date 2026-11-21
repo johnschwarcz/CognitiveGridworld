@@ -32,8 +32,8 @@
 # 03 (scores, Tweedie's formula), 04 (DDIM).
 #
 # **Runtime:** CPU ≈ 15–20 min on an otherwise idle 4-core machine, about half of it the in-notebook training run
-# (bfloat16 autocast; much slower on a busy machine). CUDA GPU ≈ 10 min with the GPU default of 20 000 training
-# steps (a few minutes if you lower `TRAIN_STEPS`).
+# (bfloat16 autocast; much slower on a busy machine). CUDA GPU ≈ 5 min with the GPU default of 4 000 training
+# steps, plus ≈ 10 min once if `dmtools` has to train the reference checkpoint (section 4).
 
 # %%
 import contextlib
@@ -56,7 +56,8 @@ device = dm.get_device(verbose=True)
 FAST = dm.fast_mode()  # automated smoke-test switch, leave as is
 dm.seed_everything(0)
 plt.rcParams.update({"figure.dpi": 100, "font.size": 9, "axes.titlesize": 10,
-                     "axes.labelsize": 9, "legend.fontsize": 8})
+                     "axes.labelsize": 9, "legend.fontsize": 8,
+                     "image.interpolation": "nearest"})   # show pixels as pixels (and keep the notebook small)
 
 # bfloat16 mixed precision: ~2x faster on CUDA GPUs and on recent x86 CPUs (AVX-512/AMX).
 # Off on Apple MPS. If it turns out *slower* on your CPU, set USE_AMP = False.
@@ -71,7 +72,9 @@ def autocast():
 
 
 GPU = device.type == "cuda"
-TRAIN_STEPS = 20 if FAST else (20_000 if GPU else 1500)  # GPU: ~20k steps gives clean digits
+# In-notebook training run. On a GPU, ~20_000 steps gives clean digits (~10 min); the default stays below the
+# reference model's training length so that "the longer-trained reference" of section 4 really is longer-trained.
+TRAIN_STEPS = 20 if FAST else (4000 if GPU else 1500)
 BATCH, LR, WARMUP = 64, 2e-4, (5 if FAST else 200)
 N_EVAL = 32 if FAST else (2000 if GPU else 512)   # DDIM-50 samples per model for the evaluation
 N_DDPM = 8 if FAST else (512 if GPU else 128)     # DDPM-1000 samples (1000 network calls each!)
@@ -104,8 +107,9 @@ print(f"FAST={FAST}  USE_AMP={USE_AMP}  TRAIN_STEPS={TRAIN_STEPS}  N_EVAL={N_EVA
 #    gives large receptive fields cheaply; skip connections carry the fine detail around the bottleneck. That is
 #    the **U-Net** (Ronneberger et al. 2015).
 # 3. **Global context.** Whether a blob in the top-left is the top of a 7 or of a 9 depends on the whole image.
-#    **Self-attention** lets every position look at every other position. It costs $(HW)^2$, which is affordable at
-#    $7\times7=49$ positions but not at 784.
+#    **Self-attention** lets every position look at every other position. Its cost grows like $(HW)^2$: 256 times
+#    more at 28×28 than at 7×7. Image diffusion models therefore use attention only on down-sampled feature maps
+#    (typically 32×32 or smaller) or on patch / latent tokens.
 #
 # Let's check claim 1 numerically: a convolution commutes with shifts and a dense layer does not.
 
@@ -308,9 +312,10 @@ for hw in (28, 14, 7):
 # Our explicit softmax attention agrees with PyTorch's fused kernel. A 3×3 conv sees 9 positions. One attention
 # layer draws a substantial part of its output from the whole 7×7 map. (Strictly, GroupNorm alone already couples
 # all positions a little, through the shared mean and variance, which is why we measure influence *mass*.) The cost
-# explains why attention is used only at the lowest resolution: the attention matrix at 28×28 is 256 times larger
-# than at 7×7. Large image models (Stable Diffusion, DiT) use attention more
-# widely, but always on down-sampled feature maps or patch tokens, for the same reason.
+# is why this small model uses attention only at the lowest resolution: the attention matrix at 28×28 is 256 times
+# larger than at 7×7. (784 tokens would still be affordable on a GPU; the 256-fold cost just buys little at this
+# size.) Large image models (Stable Diffusion, DiT) use attention more widely, but on down-sampled feature maps or
+# patch tokens, for the same reason.
 #
 # ### 2.3 Down- and up-sampling
 #
@@ -397,14 +402,23 @@ with torch.no_grad():
     traced = trace_unet(check_net, x_dummy, t_dummy)
     print(f"\nmax |trace - model(x, t)| = {(traced - check_net(x_dummy, t_dummy)).abs().max():.1e}")
 
+# Which parameters receive a gradient on the very first training step of the fresh (zero-output) U-Net?
+F.mse_loss(unet(x_dummy, t_dummy), torch.randn_like(x_dummy)).backward()
+moving = [name for name, p in unet.named_parameters() if p.grad is not None and p.grad.abs().max() > 0]
+print(f"parameters with a non-zero gradient at step 1: {moving}  ({len(moving)} of {len(list(unet.parameters()))})")
+unet.zero_grad(set_to_none=True)
+
 # %% [markdown]
 # Reading the trace: the encoder goes 28 → 14 → 7 while channels go 32 → 64. The decoder pops the skips in reverse
 # order, so every concatenation pairs features of the same resolution. Attention runs only on the 7×7 maps.
 #
 # A fresh U-Net outputs **exactly zero**, so it initially predicts $\hat\epsilon=0$ and the initial loss is
-# $\mathbb{E}\|\epsilon\|^2/784 = 1$. This does not stop learning. The gradient with respect to the
-# zero-initialised weights is (activations × upstream error), which is non-zero, so they move on the first step and
-# the signal starts to flow. We will see the loss start at 1 in section 4.
+# $\mathbb{E}\|\epsilon\|^2/784 = 1$. This does not stop learning, but it changes *how* learning starts, as the
+# last printout shows. On the first step only the output conv receives a gradient: its weight gradient is
+# (activations × error), which is non-zero, but the error it passes back to the rest of the network is multiplied by
+# its zero weights. Once the output conv has moved, gradients flow backwards, and the zero-initialised residual
+# branches switch on over the next steps. A zero output delays the interior by a step or two; it does not block it.
+# We will see the loss start at 1 in section 4.
 #
 # ## 3 · Data: MNIST in $[-1, 1]$
 #
@@ -461,8 +475,8 @@ plt.tight_layout()
 plt.show()
 
 # %% [markdown]
-# With data in $[-1,1]$, structure fades gradually: strokes are clear up to $t\approx100$, the digit is barely
-# visible at $t\approx300$, and from $t\approx500$ on the eye sees only noise. (Some low-frequency information
+# With data in $[-1,1]$, structure fades gradually: strokes are clear up to $t\approx100$, the digit is still
+# visible at $t\approx300$ and faint at $t\approx500$, and by $t\approx700$ the eye sees only noise. (Some low-frequency information
 # survives longer than the eye suggests, see section 6.) The second figure shows the scaling gotcha. Data in $[0,255]$
 # is still plainly visible at the last timestep, so the model would never be trained on the pure noise the sampler
 # starts from. Data in $[0,1]$ has a small variance, so SNR = 1 is reached much earlier, and fewer of the
@@ -478,17 +492,17 @@ plt.show()
 # | optimiser | AdamW, lr $2\cdot10^{-4}$, no weight decay | the standard DDPM setting for small U-Nets. Adam's per-parameter scaling copes with very different gradient scales across layers |
 # | warm-up | lr ramps up linearly over the first 200 steps | Adam's second-moment estimates are poor at first, and large early steps on freshly switched-on residual branches can destabilise training |
 # | gradient clipping | global norm ≤ 1 | caps the influence of unusually large gradients (unlucky batches, early training) on Adam's moment estimates. Adam divides by a running RMS of the gradients, so a *uniform* rescaling changes little; clipping only bites on outliers. Cheap insurance |
-# | batch size | 64 | same as the reference checkpoint. Larger batches mostly reduce the loss noise from random $t$ |
+# | batch size | 64 | same as the reference checkpoints. Larger batches mostly reduce the loss noise from random $t$ |
 # | random $t$ per sample | uniform | every minibatch is an unbiased estimate of the average over all noise levels. Stratified or low-discrepancy $t$ (VDM, Kingma et al. 2021) reduces the variance further |
 # | **EMA** of weights | decay 0.999, used for **sampling** | see below |
-# | mixed precision | bfloat16 autocast (`USE_AMP`) | convs and matmuls in bf16, while weights, optimiser state, norms and the loss stay in float32. bf16 has float32's exponent range, so unlike float16 it needs no loss scaling. `dm.train_diffusion(amp=...)` does the same |
-# | checkpointing | model + EMA + optimiser + step | resuming without the optimiser state resets Adam's moments and causes a loss spike |
+# | mixed precision | bfloat16 autocast (`USE_AMP`) | convs and matmuls in bf16, while weights, optimiser state and the loss stay in float32 (on CUDA, autocast also keeps normalisation layers in float32; on CPU, GroupNorm runs in bf16). bf16 has float32's exponent range, so unlike float16 it needs no loss scaling. `dm.train_diffusion(amp=...)` does the same |
+# | checkpointing | model + EMA (with its update counter) + optimiser + LR scheduler + step | resuming without the optimiser state resets Adam's moments and causes a loss spike. Resuming without the EMA counter restarts the EMA warm-up below, which overwrites the average within a few steps |
 # | augmentation | none | augmentations must leave the data distribution unchanged, or the model learns to generate augmented data. A horizontally flipped 2 is not a digit |
 #
 # **Why sample with EMA weights?** With a constant learning rate, SGD does not converge to a point. It keeps jittering
 # around the optimum, with a spread set by the learning rate and the gradient noise. The exponential moving average
 #
-# $$\theta^{\mathrm{EMA}}_n=d\,\theta^{\mathrm{EMA}}_{n-1}+(1-d)\,\theta_n=(1-d)\sum_{k\le n}d^{\,n-k}\theta_k+d^{\,n}\theta_0$$
+# $$\theta^{\mathrm{EMA}}_n=d\,\theta^{\mathrm{EMA}}_{n-1}+(1-d)\,\theta_n=(1-d)\sum_{k=1}^{n}d^{\,n-k}\theta_k+d^{\,n}\theta_0,\qquad \theta^{\mathrm{EMA}}_0=\theta_0,$$
 #
 # averages the last $\approx 1/(1-d)$ iterates (an exponentially weighted cousin of Polyak–Ruppert averaging),
 # which cancels much of that jitter.
@@ -500,59 +514,107 @@ plt.show()
 # few hundred steps.
 #
 # **Another image gotcha: broadcasting.** Per-sample schedule coefficients have shape `(B,)` and must be reshaped
-# to `(B, 1, 1, 1)` before they multiply a `(B, C, H, W)` batch (`NoiseSchedule._bcast` does this). A `(B, 1)`
-# coefficient can broadcast silently into the wrong shape when `B` happens to equal `H` or `W`.
+# to `(B, 1, 1, 1)` before they multiply a `(B, C, H, W)` batch (`NoiseSchedule._bcast` does this). Broadcasting
+# aligns *trailing* dimensions, so a bare `(B,)` coefficient silently scales image *columns* when `B == W`, and a
+# `(B, 1)` coefficient silently scales image *rows* when `B == H`. Neither raises an error; with batch size 28 on
+# MNIST both happen.
+#
+# The training loop below is written as a function, so that the exercises can reuse it for other networks.
 
 # %%
-def save_checkpoint(path, model, ema, opt, step, losses):
-    """Everything needed to resume training *and* to sample (EMA weights + config).
-    Only tensors and plain Python types, so that it loads with torch.load(..., weights_only=True)."""
-    torch.save({"config": model.config, "model": model.state_dict(), "ema": ema.model.state_dict(),
-                "opt": opt.state_dict(), "step": step, "losses": torch.tensor(losses)}, path)
+def warmup_factor(step):
+    """Linear learning-rate warm-up over the first WARMUP steps (a function, not a lambda, so it can be rebuilt)."""
+    return min(1.0, (step + 1) / WARMUP)
+
+
+def train(net, steps, data, state=None, ema_decay=0.999):
+    """Train `net` in place. Returns (state, log) with state = (opt, lr_sched, ema).
+    Pass a previous `state` to continue a run (e.g. one restored from a checkpoint)."""
+    if state is None:
+        opt = torch.optim.AdamW(net.parameters(), lr=LR, weight_decay=0.0)
+        state = (opt, torch.optim.lr_scheduler.LambdaLR(opt, warmup_factor), dm.EMA(net, decay=ema_decay))
+    opt, lr_sched, ema = state
+    log, log_every, t_start = {"loss": [], "grad_norm": []}, max(1, steps // 6), time.time()
+    net.train()
+    for step in range(steps):
+        x0 = data[torch.randint(0, len(data), (BATCH,), device=data.device)]
+        with autocast():
+            loss = dm.diffusion_loss(net, x0, schedule)       # random t per sample, eps-prediction MSE
+        opt.zero_grad(set_to_none=True)
+        loss.backward()
+        grad_norm = nn.utils.clip_grad_norm_(net.parameters(), max_norm=1.0)  # returns the norm *before* clipping
+        opt.step()
+        lr_sched.step()
+        ema.update(net)                                       # after every optimiser step
+        log["loss"].append(loss.item())
+        log["grad_norm"].append(grad_norm.item())
+        if step == 0 or (step + 1) % log_every == 0:
+            print(f"step {step + 1:5d} | loss (last {log_every}) {np.mean(log['loss'][-log_every:]):.4f} | "
+                  f"lr {lr_sched.get_last_lr()[0]:.1e} | {time.time() - t_start:5.0f}s")
+    net.eval()
+    log["seconds"] = time.time() - t_start
+    return state, log
 
 
 dm.seed_everything(0)
-model = dm.UNet(**dm.MNIST_RECIPE).to(device)
-opt = torch.optim.AdamW(model.parameters(), lr=LR, weight_decay=0.0)
-lr_sched = torch.optim.lr_scheduler.LambdaLR(opt, lambda s: min(1.0, (s + 1) / WARMUP))  # linear warm-up
-ema = dm.EMA(model, decay=0.999)
 data = x_train.to(device)
-log = {"loss": [], "grad_norm": []}
-LOG_EVERY = max(1, TRAIN_STEPS // 6)
-
-model.train()
-t_start = time.time()
-for step in range(TRAIN_STEPS):
-    x0 = data[torch.randint(0, len(data), (BATCH,), device=device)]
-    with autocast():
-        loss = dm.diffusion_loss(model, x0, schedule)       # random t per sample, eps-prediction MSE
-    opt.zero_grad(set_to_none=True)
-    loss.backward()
-    grad_norm = nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)  # returns the norm *before* clipping
-    opt.step()
-    lr_sched.step()
-    ema.update(model)                                       # after every optimiser step
-    log["loss"].append(loss.item())
-    log["grad_norm"].append(grad_norm.item())
-    if step == 0 or (step + 1) % LOG_EVERY == 0:
-        print(f"step {step + 1:5d} | loss (last {LOG_EVERY}) {np.mean(log['loss'][-LOG_EVERY:]):.4f} | "
-              f"lr {lr_sched.get_last_lr()[0]:.1e} | {time.time() - t_start:5.0f}s")
-model.eval()
-train_sec = time.time() - t_start
-print(f"\n{TRAIN_STEPS} steps in {train_sec / 60:.1f} min ({TRAIN_STEPS / train_sec:.1f} steps/s on {device})")
+model = dm.UNet(**dm.MNIST_RECIPE).to(device)       # `model` keeps the raw (optimiser) weights
+state, log = train(model, TRAIN_STEPS, data)
+opt, lr_sched, ema = state
+print(f"\n{TRAIN_STEPS} steps in {log['seconds'] / 60:.1f} min ({TRAIN_STEPS / log['seconds']:.1f} steps/s on {device})")
 print(f"first-step loss {log['loss'][0]:.3f}  (zero-initialised output => E||eps||^2/784 = 1)")
 assert abs(log["loss"][0] - 1) < 0.15
 
-# checkpoint (FAST smoke tests write to a temporary file instead of checkpoints/)
+# %% [markdown]
+# **Checkpointing.** Save everything that defines the run's state: config, raw weights, EMA weights *and* the EMA's
+# update counter, optimiser and scheduler state, step. Then check that a restored run is the same run.
+
+# %%
+def save_checkpoint(path, net, state, step, losses):
+    """Everything needed to resume training *and* to sample (EMA weights + config).
+    Only tensors and plain Python types, so that it loads with torch.load(..., weights_only=True)."""
+    opt, lr_sched, ema = state
+    torch.save({"config": net.config, "model": net.state_dict(), "ema": ema.model.state_dict(),
+                "ema_decay": ema.decay, "ema_updates": ema.num_updates, "opt": opt.state_dict(),
+                "lr_sched": lr_sched.state_dict(), "step": step, "losses": torch.tensor(losses)}, path)
+
+
+def resume(path):
+    """Rebuild (net, state, checkpoint) from a checkpoint, ready for `train(net, more_steps, data, state)`."""
+    ck = torch.load(path, map_location=device, weights_only=True)   # never unpickle arbitrary objects
+    net = dm.UNet(**ck["config"]).to(device)
+    net.load_state_dict(ck["model"])
+    opt = torch.optim.AdamW(net.parameters(), lr=LR, weight_decay=0.0)
+    opt.load_state_dict(ck["opt"])
+    lr_sched = torch.optim.lr_scheduler.LambdaLR(opt, warmup_factor)
+    lr_sched.load_state_dict(ck["lr_sched"])
+    ema = dm.EMA(net, decay=ck["ema_decay"])
+    ema.model.load_state_dict(ck["ema"])
+    ema.num_updates = ck["ema_updates"]       # forget this and the EMA warm-up starts again from scratch
+    return net, (opt, lr_sched, ema), ck
+
+
+# FAST smoke tests write to a temporary file instead of checkpoints/
 CKPT_PATH = (Path(tempfile.gettempdir()) / "05_my_unet_fast.pt") if FAST else dm.CKPT_DIR / "05_my_unet.pt"
 CKPT_PATH.parent.mkdir(exist_ok=True)
-save_checkpoint(CKPT_PATH, model, ema, opt, TRAIN_STEPS, log["loss"])
-ck = torch.load(CKPT_PATH, map_location=device, weights_only=True)  # never unpickle arbitrary objects
-reloaded = dm.UNet(**ck["config"]).to(device).eval()
-reloaded.load_state_dict(ck["ema"])
+save_checkpoint(CKPT_PATH, model, state, TRAIN_STEPS, log["loss"])
+net2, state2, ck = resume(CKPT_PATH)
 with torch.no_grad():
-    same = torch.equal(reloaded(x_dummy.to(device), t_dummy.to(device)), ema.model(x_dummy.to(device), t_dummy.to(device)))
-print(f"saved {CKPT_PATH.name}; reloaded EMA model reproduces the in-memory one exactly: {same}")
+    xd, td = x_dummy.to(device), t_dummy.to(device)
+    same = torch.equal(state2[2].model(xd, td), ema.model(xd, td)) and torch.equal(net2(xd, td), model(xd, td))
+print(f"saved {CKPT_PATH.name}; restored raw + EMA models reproduce the in-memory ones exactly: {same}")
+print(f"restored: step {ck['step']}, EMA updates {state2[2].num_updates}, lr {state2[1].get_last_lr()[0]:.1e}")
+
+# The gotcha, measured: one more EMA update with the restored counter vs with a fresh EMA object (counter = 0)
+fresh = dm.EMA(net2, decay=ck["ema_decay"])
+fresh.model.load_state_dict(ck["ema"])
+with torch.no_grad():
+    for name, e in [("restored counter", copy.deepcopy(state2[2])), ("counter reset to 0", fresh)]:
+        before = [p.clone() for p in e.model.parameters()]
+        e.update(net2)   # moves the average a fraction (1 - d) of the way towards the raw weights
+        moved = sum((p - b).norm() ** 2 for p, b in zip(e.model.parameters(), before)).sqrt()
+        gap = sum((q - b).norm() ** 2 for q, b in zip(net2.parameters(), before)).sqrt()
+        print(f"{name:18s}: one EMA update moves the average {(moved / gap).item():5.1%} of the way to the raw weights")
 
 # %%
 def running_mean(v, w):
@@ -562,7 +624,7 @@ def running_mean(v, w):
 
 
 steps_axis = np.arange(1, TRAIN_STEPS + 1)
-w = 50
+w = max(1, min(50, TRAIN_STEPS // 10))
 fig, axes = plt.subplots(1, 2, figsize=(10, 3.4))
 axes[0].plot(steps_axis, log["loss"], color=C_MINE, alpha=0.25, lw=0.6, label="per step")
 axes[0].plot(steps_axis[len(steps_axis) - len(running_mean(log["loss"], w)):], running_mean(log["loss"], w),
@@ -585,9 +647,9 @@ plt.show()
 # occasional spikes.
 #
 # **Samples from the model we just trained.** We use DDIM with 50 steps (notebook 04) and the same starting noise
-# for the raw and the EMA weights. On a CPU budget of 1500 steps, expect rough results: digit-like strokes and
-# blobs, some recognisable digits, many malformed ones. That is honest for this little compute. On a GPU, set
-# `TRAIN_STEPS = 20_000` (the default there) and the samples become clean.
+# for the raw and the EMA weights. On the CPU budget of 1500 steps, expect rough results: digit-like strokes and
+# blobs, some recognisable digits, many malformed ones. That is honest for this little compute. On a GPU, raise
+# `TRAIN_STEPS` to about 20 000 (≈ 10 min) and the samples become clean.
 
 # %%
 SAMPLE_BS = 256
@@ -606,11 +668,10 @@ def sample_ddim(net, n, steps=50, seed=0, clip=1.0, eta=0.0):
     return torch.cat(out)
 
 
-n_raw = min(N_DDPM, N_EVAL)
-mine_raw = sample_ddim(model, n_raw, seed=10)         # raw (optimiser) weights
+mine_raw = sample_ddim(model, N_EVAL, seed=10)        # raw (optimiser) weights
 t0 = time.time()
-mine_ema = sample_ddim(ema.model, N_EVAL, seed=10)    # EMA weights; the first n_raw share x_T with mine_raw
-print(f"DDIM-50: {N_EVAL} samples in {time.time() - t0:.1f}s")
+mine_ema = sample_ddim(ema.model, N_EVAL, seed=10)    # EMA weights, from the same starting noise x_T
+print(f"DDIM-50: {N_EVAL} samples per model, {time.time() - t0:.1f}s each")
 
 fig, axes = plt.subplots(1, 2, figsize=(10, 3.2))
 dm.show_images(mine_raw[:32], nrow=8, ax=axes[0], title=f"in-notebook model, raw weights ({TRAIN_STEPS} steps)")
@@ -624,28 +685,41 @@ plt.show()
 # the backgrounds and stroke edges. Section 7 measures the difference with Fréchet distances, which detect it more
 # reliably than the eye.
 #
-# **From here on we use a longer-trained reference model:** the same recipe, the same code, 12 000 steps at batch
-# 64 (8× our budget). `dm.load_or_train_mnist_model` loads it from `checkpoints/`, or trains and caches it if it is
-# missing (slow on a CPU).
+# **From here on we use a longer-trained reference model** with the same architecture and recipe
+# (`dm.MNIST_RECIPE`, batch 64, the same loss and noise schedule). Normally that is
+# `checkpoints/mnist_unet_uncond.pt`, which `dm.load_or_train_mnist_model` loads, or trains and caches if it is
+# missing (minutes on a GPU, most of an hour on a CPU). On a CPU without that file we fall back to the model saved
+# by notebook 06 (`06_mnist_cond.pt`). It was trained with the same recipe, except that it was also given each
+# digit's class label, replaced by a special "no label" token 10% of the time. Called with `y=None` it receives that
+# token and is an *unconditional* model of the same digits (notebook 06 explains why). The cell prints which model
+# it loaded and how much longer than ours it was trained.
 
 # %%
-# The reference checkpoint stores its loss curve as a numpy array, and torch >= 2.6 loads files with
-# weights_only=True, which refuses numpy objects unless they are allow-listed. These are our own files, so:
-if hasattr(torch.serialization, "add_safe_globals"):
-    np_core = getattr(np, "_core", None) or np.core
-    torch.serialization.add_safe_globals([np_core.multiarray._reconstruct, np.ndarray, np.dtype])
-
-ref_model, ref_schedule = dm.load_or_train_mnist_model(conditional=False, device=device, batch_size=BATCH,
-                                                       amp=USE_AMP)
-assert torch.allclose(ref_schedule.alpha_bars, schedule.alpha_bars)  # same noise schedule as ours
+REF_CKPT = dm.CKPT_DIR / "mnist_unet_uncond.pt"   # the reference (made by pretrain_checkpoints.py, or by dm below)
+ALT_CKPT = dm.CKPT_DIR / "06_mnist_cond.pt"       # same U-Net and recipe, saved while writing notebook 06
+if REF_CKPT.exists() or GPU or not ALT_CKPT.exists():
+    # loads the reference; if it is missing, dmtools trains and caches it first
+    ref_model, ref_schedule = dm.load_or_train_mnist_model(conditional=False, device=device, batch_size=BATCH,
+                                                           amp=USE_AMP)
+    assert torch.allclose(ref_schedule.alpha_bars, schedule.alpha_bars)  # same noise schedule as ours
+    # (in FAST mode dmtools trains a 300-step stand-in and does not save it)
+    ref_steps = torch.load(REF_CKPT, map_location="cpu", weights_only=True)["steps"] if REF_CKPT.exists() else 300
+else:
+    ck_ref = torch.load(ALT_CKPT, map_location=device, weights_only=True)
+    ref_model = dm.UNet(**ck_ref["config"]).to(device).eval()
+    ref_model.load_state_dict(ck_ref["ema"])
+    ref_steps = ck_ref["steps"]
+    print(f"{REF_CKPT.name} not found: using {ALT_CKPT.name}, always called with y=None (unconditional)")
 n_ref_params = sum(p.numel() for p in ref_model.parameters())  # (dm.count_params skips frozen EMA copies)
-print(f"reference model: {n_ref_params:,} parameters, config {ref_model.config}")
+print(f"reference model: {n_ref_params:,} parameters, trained {ref_steps} steps "
+      f"= {ref_steps / TRAIN_STEPS:.1f}x our {TRAIN_STEPS}; config {ref_model.config}")
 
 
 @torch.no_grad()
 def loss_per_t(net, x0, ts, seed=0):
     """Mean eps-MSE at each fixed t, with the same noise for every network (common random numbers).
-    Runs in float32 on purpose: at large t the eps-error is ~1e-5, below bfloat16's resolution."""
+    Runs in float32 on purpose: bf16 rounding of eps_hat would add ~1e-5 to the MSE, which is not negligible
+    against the small eps-errors at large t."""
     vals = []
     for t in ts:
         torch.manual_seed(seed)
@@ -693,7 +767,7 @@ for name, (eps_mse, _) in curves.items():
 #   at those noise levels. Sampling hardly suffers, because $\hat x_0$ enters the early updates with a tiny weight.
 #   But it is one reason for **x0-clipping** (next section) and for alternative parameterisations such as
 #   $v$-prediction (Salimans & Ho 2022).
-# * Compare the two models: the gap between the curves shows at which noise levels the reference's 8× longer
+# * Compare the two models: the gap between the curves shows at which noise levels the reference's longer
 #   training paid off.
 #
 # ## 5 · Sampling images: DDPM vs DDIM, the denoising chain, x0-clipping
@@ -709,11 +783,14 @@ with autocast():
                                        return_traj=True, traj_every=50)
 ddpm_x = ddpm_x.float().cpu()
 ddpm_sec = (time.time() - t0) / N_DDPM
+# time DDIM on a batch of the same size: the cost per sample depends strongly on the batch size
 t0 = time.time()
-ddim_x = sample_ddim(ref_model, N_EVAL, steps=50, seed=2)
-ddim_sec = (time.time() - t0) / N_EVAL
-print(f"DDPM-1000: {N_DDPM} samples, {1000 * ddpm_sec:.0f} ms per sample")
-print(f"DDIM-50  : {N_EVAL} samples, {1000 * ddim_sec:.0f} ms per sample  ({ddpm_sec / ddim_sec:.0f}x faster)")
+with autocast():
+    dm.ddim_sample(ref_model, schedule, (N_DDPM, 1, 28, 28), n_steps=50, clip_x0=1.0)
+ddim_sec = (time.time() - t0) / N_DDPM
+print(f"one batch of {N_DDPM} samples: DDPM-1000 {1000 * ddpm_sec:.0f} ms/sample, DDIM-50 {1000 * ddim_sec:.0f} "
+      f"ms/sample -> DDIM is {ddpm_sec / ddim_sec:.0f}x faster (ratio of network calls: 20)")
+ddim_x = sample_ddim(ref_model, N_EVAL, steps=50, seed=2)   # more DDIM samples, for the evaluation in section 7
 
 fig, axes = plt.subplots(1, 2, figsize=(10, 5))
 n_show = min(36, N_DDPM)
@@ -723,17 +800,18 @@ plt.tight_layout()
 plt.show()
 
 # %% [markdown]
-# Both grids look like handwriting, and DDIM costs 1/20 of the network calls. (Its measured speed-up is a bit
-# smaller because of fixed per-call overheads.) Expect a share of malformed digits from a 1.2M-parameter model
-# trained for 12k steps on a CPU. Look closely at the backgrounds. If DDIM's samples keep some residual speckle that
+# Both grids look like handwriting, and DDIM costs 1/20 of the network calls. Both samplers were timed on the same
+# batch size, so the measured speed-up should be close to 20; the remaining difference comes from per-step overheads
+# (and from other programs competing for the machine). Expect a share of malformed digits from a 1.2M-parameter
+# model with this little training. Look closely at the backgrounds. If DDIM's samples keep some residual speckle that
 # DDPM's do not, that is a known difference. The deterministic ODE sampler carries every error of the network along
 # its path, while DDPM injects fresh noise at every step, which lets later steps correct earlier mistakes (Karras et
 # al. 2022 analyse this trade-off). Section 7 compares the two samplers quantitatively.
 #
 # **Numerical precision.** We sampled under bfloat16 autocast. The schedule coefficients and the sampler arithmetic
 # stay in float32. This matters, because $\hat x_0=(x_t-\sqrt{1-\bar\alpha_t}\,\hat\epsilon)/\sqrt{\bar\alpha_t}$
-# multiplies errors in $\hat\epsilon$ by up to $1/\sqrt{\bar\alpha_{T-1}}\approx156$. How much does bf16 change the
-# samples? Run DDIM from the same $x_T$ in both precisions:
+# multiplies errors in $\hat\epsilon$ by $\sqrt{(1-\bar\alpha_t)/\bar\alpha_t}=1/\sqrt{\mathrm{SNR}(t)}$, which reaches
+# $\approx157$ at $t=999$. How much does bf16 change the samples? Run DDIM from the same $x_T$ in both precisions:
 
 # %%
 if USE_AMP:
@@ -746,8 +824,9 @@ if USE_AMP:
           f"max |diff| {diff.max():.3f}   (pixel range is 2)")
     for k in (0, len(tr32) // 2, len(tr32) - 1):
         d0 = (tr32[k][2] - tr16[k][2].float()).abs().mean().item()
-        amp = (1 / schedule.sqrt_alpha_bars[tr32[k][0]]).item()
-        print(f"x0_hat at t={tr32[k][0]:3d}: mean |diff| {d0:.4f}   (error amplification 1/sqrt(abar) = {amp:6.1f})")
+        t_k = tr32[k][0]
+        amp = (schedule.sqrt_one_minus_alpha_bars[t_k] / schedule.sqrt_alpha_bars[t_k]).item()
+        print(f"x0_hat at t={t_k:3d}: mean |diff| {d0:.4f}   (eps errors amplified by sqrt((1-abar)/abar) = {amp:6.2f})")
 else:
     print("USE_AMP is False: everything runs in float32, nothing to compare.")
 
@@ -755,9 +834,11 @@ else:
 # The final samples barely change: the mean pixel difference is a small fraction of the $[-1,1]$ range, so for
 # sampling bf16 is a nearly free speed-up. (A deterministic ODE sampler can still move a few pixels noticeably. Use
 # float32 when you need exact reproducibility, for example for DDIM inversion.) The intermediate $\hat x_0$
-# is a different story. At $t=999$ bf16 rounding of $\hat\epsilon$ is amplified about 156-fold, so the *prediction*
+# is a different story. At $t=999$ bf16 rounding of $\hat\epsilon$ is amplified about 157-fold, so the *prediction*
 # is visibly corrupted even though the sample is not: in the DDPM/DDIM update, $\hat x_0$ enters with a weight of
-# order $\sqrt{\bar\alpha}$, which cancels the amplification. Whenever we *look at* $\hat x_0$ at large $t$ below, we
+# order $\sqrt{\bar\alpha}$, which cancels the amplification. (At smaller $t$ the printed differences also contain
+# the drift between the two trajectories, whose states $x_t$ no longer coincide, so they are not pure
+# amplification.) Whenever we *look at* $\hat x_0$ at large $t$ below, we
 # therefore recompute it in float32 from the stored states $x_t$. That costs one extra network call per snapshot.
 #
 # ### The denoising chain is coarse-to-fine
@@ -767,9 +848,9 @@ else:
 
 # %%
 @torch.no_grad()
-def x0_hat_fp32(net, x, t, bs=256):
-    """Recompute x0_hat(x_t, t) in float32 (clipped to [-1, 1]) for a batch of stored states, on the CPU."""
-    return torch.cat([dm.model_predictions(net, x[i:i + bs].to(device), t, schedule, clip_x0=1.0)[1].cpu()
+def x0_hat_fp32(net, x, t, bs=256, clip=1.0):
+    """Recompute x0_hat(x_t, t) in float32 (clipped to [-clip, clip]) for a batch of stored states, on the CPU."""
+    return torch.cat([dm.model_predictions(net, x[i:i + bs].to(device), t, schedule, clip_x0=clip)[1].cpu()
                       for i in range(0, len(x), bs)])
 
 
@@ -836,8 +917,13 @@ print(f"class of x0_hat agrees with the final class for >= 50% of samples from t
 #
 # The network predicts $\hat\epsilon$, and we convert it to $\hat x_0=(x_t-\sqrt{1-\bar\alpha_t}\,\hat\epsilon)/\sqrt{\bar\alpha_t}$.
 # At large $t$ the factor $1/\sqrt{\bar\alpha_t}$ is huge, so small errors in $\hat\epsilon$ produce $\hat x_0$ far
-# outside the data range. Since we *know* $x_0\in[-1,1]$, clipping $\hat x_0$ to that range is a free projection
-# onto the data support. `dm.model_predictions(..., clip_x0=1.0)` clips, then recomputes $\hat\epsilon$ from the
+# outside the data range. Since we *know* $x_0\in[-1,1]^{784}$, we can clip $\hat x_0$ to that box. This is a
+# Euclidean projection onto a convex set, and it can only help. The true posterior mean $\mathbb{E}[x_0\mid x_t]$ is an
+# average of images in the box, so it lies in the box too, and projecting onto a convex set $C$ never increases the
+# distance to any point of $C$: $\|P_C(z)-y\|\le\|z-y\|$ for all $y\in C$. Clipping therefore leaves a Bayes-optimal
+# denoiser untouched and moves a wrong $\hat x_0$ closer to the right answer. (The box is much larger than the set of
+# digits, so clipping is a weak correction. It also means the sampler no longer follows the learned ODE exactly.)
+# `dm.model_predictions(..., clip_x0=1.0)` clips, then recomputes $\hat\epsilon$ from the
 # clipped $\hat x_0$ so that the pair stays consistent with $x_t$. Let's see how far out the raw predictions go along
 # an unclipped DDIM trajectory, and what clipping does to few-step sampling:
 
@@ -923,15 +1009,34 @@ for (net_name, clip), xs in few.items():
 # survive longest. Run backwards, the reverse process must therefore produce low frequencies (global shape) first
 # and high frequencies (stroke edges) last. It is an approximate autoregression from coarse to fine.
 #
-# The link to Bayesian denoising is direct. For a stationary *Gaussian* image prior, the posterior mean is the
-# **Wiener filter**, which (after undoing the $\sqrt{\bar\alpha_t}$ scaling) shrinks every frequency by
-# $\mathrm{SNR}/(1+\mathrm{SNR})$. Its relative error at frequency $f$ is
+# The link to Bayesian denoising is direct, and it needs one correction first. The **mean image** $\mu=\mathbb{E}[x_0]$
+# is known before sampling starts (it is the posterior mean at $t=T-1$), so it is not information that the reverse
+# process has to *generate*. It also carries much of the low-frequency power of MNIST. So for the Bayesian analysis
+# we use the **centred** spectrum $P_c(f)$ of $x_0-\mu$, and $\mathrm{SNR}(f,t)=\bar\alpha_t P_c(f)/(1-\bar\alpha_t)$.
 #
-# $$\frac{\mathbb{E}\,|\mathcal{F}(\hat x_0-x_0)(f)|^2}{P_{x_0}(f)}=\frac{1}{1+\mathrm{SNR}(f,t)},$$
+# For a **Gaussian prior** $x_0\sim\mathcal{N}(\mu,\Sigma)$ the posterior is Gaussian, its mean is a linear function of
+# $x_t$, and its covariance follows from adding precisions ($x_t/\sqrt{\bar\alpha_t}$ is $x_0$ plus noise of variance
+# $(1-\bar\alpha_t)/\bar\alpha_t$). With the eigen-decomposition $\Sigma=\sum_i\lambda_iu_iu_i^\top$:
 #
-# so a frequency is "decided" (error below 1/2) once its SNR exceeds 1. Below we (a) measure spectra of noised
-# MNIST, (b) turn them into this Wiener prediction, and (c) compare it with the actual reverse chain of our model.
-# In (c), the final sample plays the role of $x_0$ and each $\hat x_0(t)$ is measured against it.
+# $$\mathrm{Cov}[x_0\mid x_t]=\Big(\Sigma^{-1}+\tfrac{\bar\alpha_t}{1-\bar\alpha_t}I\Big)^{-1}
+#   =\sum_i\frac{\lambda_i}{1+\mathrm{SNR}_i(t)}\,u_iu_i^\top,\qquad \mathrm{SNR}_i(t)=\frac{\bar\alpha_t\lambda_i}{1-\bar\alpha_t}.$$
+#
+# Each principal component is shrunk independently, and its remaining error is a fraction $1/(1+\mathrm{SNR}_i)$ of its
+# prior variance. This posterior mean is also the **best linear (affine) denoiser** for *any* prior with mean $\mu$ and
+# covariance $\Sigma$. If the image statistics were **stationary** (the same at every position), the eigenvectors $u_i$
+# would be Fourier modes and the $\lambda_i$ the power spectrum. We would get the classical **Wiener filter**, with
+# relative error per frequency
+#
+# $$\frac{\mathbb{E}\,|\mathcal{F}(\hat x_0-x_0)(f)|^2}{P_c(f)}=\frac{1}{1+\mathrm{SNR}(f,t)},$$
+#
+# so a frequency is "decided" (error below 1/2) once its SNR exceeds 1. MNIST is not stationary (digits are centred,
+# the border is always black), so the full-covariance Gaussian, whose error per frequency is the diagonal of
+# $\mathcal{F}\,\mathrm{Cov}[x_0\mid x_t]\,\mathcal{F}^{H}$, does better. That gives three levels of prior knowledge:
+# **stationary Gaussian** (Wiener) $\to$ **Gaussian with the true mean and covariance** (best linear filter) $\to$
+# **the true, non-Gaussian prior** (Bayes-optimal, nonlinear). A perfect diffusion model attains the last one. Below
+# we (a) measure spectra of noised MNIST, (b) compute the two Gaussian predictions, and (c) measure the actual
+# reverse chain of the reference model. In (c), the final sample plays the role of $x_0$, and each $\hat x_0(t)$
+# (clipped to $[-1,1]$, as in the sampler) is measured against it.
 
 # %%
 H = 28
@@ -940,10 +1045,14 @@ R_BIN = (torch.sqrt(fy[:, None] ** 2 + fx[None, :] ** 2) * H).round().long()   #
 FREQS = np.arange(1, H // 2 + 1)                                                # skip DC, stop at Nyquist (14)
 
 
+def radial_average(P):
+    """(..., H, W) array of per-frequency values -> (..., len(FREQS)) averages over rings of equal |f|."""
+    return np.stack([P[..., R_BIN == k].mean(-1).numpy() for k in FREQS], axis=-1)
+
+
 def power_spectrum(x):
     """Radially averaged power spectrum of a batch of images (B, 1, H, W), orthonormal FFT, batch-averaged."""
-    P = torch.fft.fft2(x.double().cpu(), norm="ortho").abs().pow(2).mean(dim=(0, 1))   # (H, W)
-    return np.array([P[R_BIN == k].mean().item() for k in FREQS])
+    return radial_average(torch.fft.fft2(x.cpu().double(), norm="ortho").abs().pow(2).mean(dim=(0, 1)))
 
 
 x_spec = x_train[:2000]
@@ -957,52 +1066,106 @@ print(f"white noise power: min {P_noise.min():.3f}, max {P_noise.max():.3f} (sho
 print(f"P_xt vs abar*P_x0 + (1-abar) at t={t_chk}: max relative error "
       f"{np.max(np.abs(power_spectrum(xt_chk) - pred) / pred):.3f}")
 
+# The Gaussian prior fitted to MNIST: mean image and full 784 x 784 pixel covariance
+x_gauss = x_train[: (5000 if FAST else 20_000)].double()
+mu_img = x_gauss.mean(0, keepdim=True)
+Xc = (x_gauss - mu_img).flatten(1)
+lam, U = torch.linalg.eigh(Xc.T @ Xc / len(Xc))               # principal components of the digits
+lam = lam.clamp(min=0)
+FU2 = torch.fft.fft2(U.T.reshape(784, H, H), norm="ortho").abs().pow(2)  # |F u_i|^2 at every frequency
+P_c = radial_average(torch.einsum("i,ihw->hw", lam, FU2))    # centred spectrum = diag(F Sigma F^H), averaged
+P_raw = power_spectrum(x_gauss)
+print(f"centred spectrum: from the eigen-decomposition vs directly, max relative difference "
+      f"{np.max(np.abs(P_c / power_spectrum(x_gauss - mu_img) - 1)):.1e}")
+print("share of the raw power due to the mean image at f = 1, 2, 3, 4:", np.round(1 - P_c[:4] / P_raw[:4], 2))
+
 # %%
-t_lines = [20, 100, 200, 300, 450, 700]
+def decision_time(err, ts):
+    """Per frequency: the t (in sampling order, i.e. from large to small t) at which the relative error first drops
+    below 1/2, linearly interpolated between grid points. err: (n_freq, len(ts))."""
+    order = np.argsort(ts)[::-1]
+    ts, err = np.asarray(ts, dtype=float)[order], err[:, order]
+    out = np.full(len(err), np.nan)
+    for f, e in enumerate(err):
+        k = int(np.argmax(e < 0.5))
+        if e[k] < 0.5:   # (otherwise the frequency is never decided: NaN)
+            out[f] = ts[0] if k == 0 else ts[k - 1] + (e[k - 1] - 0.5) / (e[k - 1] - e[k]) * (ts[k] - ts[k - 1])
+    return out
+
+
 t_grid = np.arange(0, 1000, 10)
-ab_grid = abar[t_grid].numpy()
-snr_ft = ab_grid[None, :] * P0[:, None] / (1 - ab_grid[None, :])    # (freq, t)
+ab_grid = abar[t_grid]                                                        # float64 tensor
+snr_ft = ab_grid.numpy()[None, :] * P_c[:, None] / (1 - ab_grid.numpy()[None, :])   # (freq, t), stationary
 wiener_err = 1 / (1 + snr_ft)
+post_var = lam[None, :] / (1 + ab_grid[:, None] * lam[None, :] / (1 - ab_grid[:, None]))  # (t, components)
+gauss_err = (radial_average(torch.einsum("ti,ihw->thw", post_var, FU2)) / P_c).T          # (freq, t)
 
-# measured: per-frequency error of the chain's x0_hat(t) relative to the final sample
-P_final = power_spectrum(ddpm_x)
-chain_err = np.stack([power_spectrum(x0h - ddpm_x) / P_final for _, _, x0h in ddpm_traj], axis=1)  # (freq, snaps)
+# measured: per-frequency error of the chain's x0_hat(t) against the final sample, relative to the centred spectrum
+P_final_c = power_spectrum(ddpm_x - ddpm_x.mean(0, keepdim=True))
+chain_err = np.stack([power_spectrum(x0h - ddpm_x) / P_final_c for _, _, x0h in ddpm_traj], axis=1)  # (freq, snaps)
+# the same without clipping x0_hat (clipping can only move x0_hat towards any image in [-1, 1], incl. the sample)
+chain_err_nc = np.stack([power_spectrum(x0_hat_fp32(ref_model, xt, t, clip=None) - ddpm_x) / P_final_c
+                         for t, xt, _ in ddpm_traj], axis=1)
+t_dec = {"stationary Gaussian (Wiener)": (decision_time(wiener_err, t_grid), "tab:cyan", "-"),
+         "Gaussian, full covariance (best linear)": (decision_time(gauss_err, t_grid), "0.35", "--"),
+         "reference model, reverse DDPM chain": (decision_time(chain_err, traj_t), C_DDPM, "-"),
+         "reference model, chain, x̂0 not clipped": (decision_time(chain_err_nc, traj_t), C_DDPM, ":")}
 
-fig, axes = plt.subplots(1, 3, figsize=(13, 3.8), layout="constrained")
+fig, axes = plt.subplots(2, 2, figsize=(11, 7.6), layout="constrained")
 cmap = plt.get_cmap("viridis")
-for i, t in enumerate(t_lines):
-    c = cmap(i / (len(t_lines) - 1))
+ax = axes[0, 0]
+for i, t in enumerate([20, 100, 200, 300, 450, 700]):
+    c = cmap(i / 5)
     xt = schedule.q_sample(x_spec[:500].to(device), torch.full((500,), t, device=device)).cpu()
-    axes[0].plot(FREQS, power_spectrum(xt), "-", color=c, lw=1.8, label=f"t={t}")
-    axes[0].axhline(1 - abar[t].item(), color=c, ls=":", lw=1)
-axes[0].plot(FREQS, P0, "k--", lw=1, label="clean $x_0$")
-axes[0].set(xscale="log", yscale="log", ylim=(3e-3, None), xlabel="spatial frequency (cycles / image)", ylabel="power",
-            title="(a) spectra of $x_t$ (dotted: noise floor $1-\\bar\\alpha_t$)")
-axes[0].legend(ncol=2)
-extent = [0, 999, FREQS[0] - 0.5, FREQS[-1] + 0.5]
-for ax, err, ts_, title in [(axes[1], wiener_err, t_grid, "(b) Wiener prediction $1/(1+\\mathrm{SNR}(f,t))$"),
-                            (axes[2], chain_err, np.array(traj_t), "(c) measured: reverse DDPM chain")]:
+    ax.plot(FREQS, power_spectrum(xt), "-", color=c, lw=1.8, label=f"t={t}")
+    ax.axhline(1 - abar[t].item(), color=c, ls=":", lw=1)
+ax.plot(FREQS, P0, "k--", lw=1, label="clean $x_0$")
+ax.plot(FREQS, P_c, "k-.", lw=1, label="clean, mean image removed")
+ax.set(xscale="log", yscale="log", ylim=(3e-3, None), xlabel="spatial frequency (cycles / image)", ylabel="power",
+       title="(a) spectra of $x_t$ (dotted: noise floor $1-\\bar\\alpha_t$)")
+ax.legend(ncol=2)
+for ax, err, ts_, title in [(axes[0, 1], wiener_err, t_grid, "(b) stationary Gaussian: $1/(1+\\mathrm{SNR}(f,t))$"),
+                            (axes[1, 0], chain_err, np.array(traj_t), "(c) measured: reverse DDPM chain (clipped $\\hat x_0$)")]:
     order = np.argsort(ts_)
     im = ax.imshow(np.clip(err[:, order], 0, 1), origin="lower", aspect="auto", cmap="magma", vmin=0, vmax=1,
-                   extent=[ts_.min(), ts_.max(), extent[2], extent[3]])
-    ax.contour(t_grid, FREQS, snr_ft, levels=[1.0], colors="cyan", linewidths=1.5)
-    ax.set(xlabel="t", ylabel="frequency (cycles / image)", title=title)
-    ax.set_xlim(999, 0)   # sampling direction: left to right
-fig.colorbar(im, ax=axes[1:], label="relative error of $\\hat x_0$ at that frequency")
+                   extent=[ts_.min(), ts_.max(), FREQS[0] - 0.5, FREQS[-1] + 0.5])
+    ax.contour(t_grid, FREQS, wiener_err, levels=[0.5], colors="cyan", linewidths=1.5)
+    ax.contour(t_grid, FREQS, gauss_err, levels=[0.5], colors="white", linewidths=1.5, linestyles="--")
+    ax.set(xlabel="t  (sampling runs left to right)", ylabel="frequency (cycles / image)", title=title)
+    ax.set_xlim(999, 0)
+    fig.colorbar(im, ax=ax, label="relative error of $\\hat x_0$ (lines: = 1/2)")
+ax = axes[1, 1]
+for name, (td, c, ls) in t_dec.items():
+    ax.plot(FREQS, td, ls, color=c, marker="o", ms=3, lw=1.8, label=name)
+ax.set(xlabel="spatial frequency (cycles / image)", ylabel="t at which the error drops below 1/2",
+       title="(d) when is each frequency decided? (higher = earlier in sampling)", ylim=(0, 1000))
+ax.legend()
 plt.show()
+for name, (td, _, _) in t_dec.items():
+    print(f"{name:40s}: decided at t = " + " ".join(f"{v:4.0f}" for v in td[[0, 1, 3, 5, 8, 13]])
+          + "   (f = 1, 2, 4, 6, 9, 14)")
 
 # %% [markdown]
 # (a) The clean spectrum (dashed) falls by orders of magnitude from low to high frequency. Each noisy spectrum
-# follows it until it hits its noise floor (dotted), then goes flat. As $t$ grows the floor rises and the
-# crossing moves to lower frequencies. (b) In the Wiener picture, the region where a frequency is still
-# undetermined (bright) sweeps from high to low frequencies as $t$ grows. The cyan line is $\mathrm{SNR}(f,t)=1$.
-# (c) The trained model's reverse chain shows the same ordering: the boundary between "still open" (bright) and
-# "settled" (dark) runs from low frequencies at large $t$ (early in sampling) to high frequencies near the end,
-# roughly along the SNR = 1 line. The match is not exact, and need not be. The Wiener filter is the optimal
-# *linear* denoiser under a *Gaussian* prior, and MNIST is far from Gaussian. Where (c) is darker than (b), the
-# model pins down a frequency band earlier than any linear filter could, because much of a digit's fine structure
-# (sharp stroke edges) is implied by its coarse shape. Where it is brighter, the network is simply imperfect.
-# The coarse-to-fine ordering, however, is unmistakable.
+# follows it until it hits its noise floor (dotted), then goes flat. As $t$ grows the floor rises and the crossing
+# moves to lower frequencies. The dash-dotted line shows that the mean image accounts for much of the power at the
+# lowest frequencies (printed above). (b) In the stationary-Gaussian picture the region where a frequency is still
+# undetermined (bright) sweeps from high to low frequencies as $t$ grows; the cyan line is $\mathrm{SNR}(f,t)=1$.
+# The dashed white line is the same boundary for the full-covariance Gaussian. (c) The model's reverse chain shows
+# the same ordering: the boundary between "still open" (bright) and "settled" (dark) runs from low frequencies at
+# large $t$ (early in sampling) to high frequencies near the end.
+#
+# (d) condenses this into one number per frequency, the noise level at which it is decided. All three curves fall
+# with frequency: **coarse-to-fine is already a property of the Gaussian predictions**, and the trained model
+# follows it. Read the gaps between the curves as answers to separate questions. The gap from the stationary to the
+# full-covariance Gaussian is what knowing *where* digits sit (non-stationarity) is worth to a purely linear
+# denoiser. For a *perfect* model, the chain's curve would be the Bayes-optimal one for the true prior, which can only
+# lie above the full-covariance curve. Where the measured curve lies above it, the network decides a frequency band
+# earlier than *any* linear denoiser could, which points to non-Gaussian structure in the digits (for instance,
+# sharp stroke edges are largely implied by the coarse shape). Three caveats keep this honest. The chain is measured
+# against the model's *own* final samples, so a model that is less diverse than the data (overconfident) would also
+# look decisive. Clipping can only move $\hat x_0$ closer to the final sample, which is why the dotted, unclipped curve
+# is shown too. And the estimate is noisy: the chain was recorded every 50 steps, on `N_DDPM` samples.
 #
 # This is the spectral explanation of the coarse-to-fine chain in section 5. It also explains several
 # practical facts: why noise schedules matter so much (they decide how many steps are spent on each frequency
@@ -1023,7 +1186,10 @@ plt.show()
 # averages the noisy input. It is proportional to the posterior covariance of pixel $p$ with every other pixel.
 # Two predictions follow. The filter should widen as $t$ grows, which needs the U-Net's large receptive field.
 # And the Jacobian should be **symmetric** (positive semi-definite, too), although nothing in the architecture
-# enforces that.
+# enforces that. One subtlety for the symmetry test: $\hat x_0=(x_t-s\,\hat\epsilon)/a$ gives
+# $\partial\hat x_0/\partial x_t=(I-s\,\partial\hat\epsilon/\partial x_t)/a$, which contains the symmetric term
+# $I/a$ whatever the network computes. An untrained network would look "fairly symmetric" for free. So we measure
+# symmetry on the **off-diagonal** part of the Jacobian and compare a trained network with an untrained one.
 
 # %%
 def x0_hat_fn(net, t):
@@ -1067,16 +1233,23 @@ plt.tight_layout()
 plt.show()
 
 # symmetry check on the central 12x12 block of pixels (a 144 x 144 sub-matrix of the 784 x 784 Jacobian)
+def offdiag_asymmetry(J):
+    """||A - A^T|| / ||A|| for A = J without its diagonal (0: symmetric; ~1.41 for a random matrix)."""
+    A = J - torch.diag(torch.diag(J))
+    return ((A - A.T).norm() / A.norm()).item()
+
+
 block_pix = torch.tensor([r * 28 + c for r in range(8, 20) for c in range(8, 20)])
 t_sym = 300
 xt = schedule.q_sample(x_clean, torch.full((1,), t_sym, device=device), noise)
-J = jacobian_rows(x0_hat_fn(ref_model, t_sym), xt, block_pix)[:, block_pix].double().cpu()
-asym = ((J - J.T).norm() / J.norm()).item()
-eig = torch.linalg.eigvalsh((J + J.T) / 2)
+untrained = copy.deepcopy(check_net).to(device).eval()   # section 2.4's U-Net, zero-init layers randomised
+for name, net in [("trained (reference)", ref_model), ("untrained, same architecture", untrained)]:
+    J = jacobian_rows(x0_hat_fn(net, t_sym), xt, block_pix).cpu()[:, block_pix].double()   # .cpu() first (MPS)
+    eig = torch.linalg.eigvalsh((J + J.T) / 2)
+    print(f"{name:29s} t={t_sym}: off-diagonal asymmetry {offdiag_asymmetry(J):.3f} | negative eigenvalue mass of "
+          f"the symmetric part {eig.clamp(max=0).abs().sum() / eig.abs().sum():5.1%}")
 A_rand = torch.randn(144, 144, dtype=torch.float64)
-print(f"t={t_sym}: ||J - J^T|| / ||J|| = {asym:.3f}   (random matrix: {((A_rand - A_rand.T).norm() / A_rand.norm()):.2f})")
-print(f"eigenvalues of the symmetric part: {eig.min():.3f} ... {eig.max():.3f}; "
-      f"negative mass {eig.clamp(max=0).abs().sum() / eig.abs().sum():.1%}")
+print(f"{'random Gaussian matrix':29s}       : off-diagonal asymmetry {offdiag_asymmetry(A_rand):.3f}")
 
 # %% [markdown]
 # At small $t$ the filter is a narrow spot around the pixel, so the model barely smooths. As $t$ grows it widens:
@@ -1086,11 +1259,14 @@ print(f"eigenvalues of the symmetric part: {eig.min():.3f} ... {eig.max():.3f}; 
 # section 1, made visible. (At the very largest $t$ the filters of an $\epsilon$-network become erratic, for the
 # reason discussed in section 4, so we stop at $t=650$.)
 #
-# The symmetry check compares the Jacobian with its transpose. Read the printed asymmetry against the
-# random-matrix baseline, and the negative eigenvalue mass against 0. The network was never told that its output is a
-# posterior mean, i.e. that $\hat\epsilon$ is proportional to the gradient of a log-density (notebook 03), and
-# nothing in the architecture forces a symmetric Jacobian. Yet training pushes it towards that structure, and the
-# remaining asymmetry measures how far the network still is from an exact posterior mean. Kadkhodaie et al. (2024)
+# The symmetry check compares the off-diagonal part of the Jacobian with its transpose. An untrained network of
+# the same architecture is about as asymmetric as a random matrix. The trained one is clearly more symmetric (compare
+# the printed values). The network was never told that its output is a posterior mean, i.e. that $\hat\epsilon$ is
+# proportional to the gradient of a log-density (notebook 03), and nothing in the architecture forces a symmetric
+# Jacobian. Training on the denoising objective pushes it towards that structure, and the remaining asymmetry
+# measures how far the network still is from an exact posterior mean. The negative eigenvalue mass should be
+# compared with 0, the value for an exact posterior covariance. (The untrained network passes this test trivially,
+# because its Jacobian is dominated by the $I/a$ term.) Kadkhodaie et al. (2024)
 # build their analysis of generalisation on the eigen-decomposition of exactly these Jacobians.
 #
 # ## 7 · Evaluating image samples
@@ -1163,7 +1339,8 @@ for i, (name, (xs, c)) in enumerate(sets.items()):
     ax.bar(np.arange(10) + (i - 1.5) * width, freq, width, color=c, label=f"{name} (n={len(xs)})")
     conf = p.max(1).values
     print(f"{name:22s}: mean confidence {conf.mean():.3f} | confident (p>0.9): {(conf > 0.9).float().mean():.1%}"
-          f" | largest class share {freq.max():.1%}, smallest {freq.min():.1%}")
+          f" | class shares {freq.min():.1%} to {freq.max():.1%} | standard error of a bar "
+          f"~ sqrt(0.1*0.9/n) = {np.sqrt(0.09 / len(xs)):.1%}")
 ax.plot(np.arange(10), train_freq, "k_", ms=14, mew=2, label="training-set frequency")
 ax.set(xticks=range(10), xlabel="predicted digit", ylabel="fraction of samples", title="Class histogram")
 ax.legend(ncol=3, loc="upper center", bbox_to_anchor=(0.5, -0.2))
@@ -1171,10 +1348,10 @@ plt.tight_layout()
 plt.show()
 
 # %% [markdown]
-# All ten digits appear, so no mode is missing, but the proportions are not perfect. Judge the deviations against
-# sampling noise: each bar has a standard error of about $\sqrt{0.1\cdot0.9/n}$, i.e. about 1.3 percentage points at
-# $n=512$ and 2.7 at $n=128$. Larger deviations mean either a real imbalance in the model, or classifier confusion
-# on malformed samples, which tend to land in a few "catch-all" classes. The printed confidences separate fidelity
+# A missing mode would show up as a class share near 0 (the printout gives each set's smallest share). The
+# proportions are never perfect, so judge the deviations against sampling noise: a bar near 10% has a standard error
+# of about $\sqrt{0.1\cdot0.9/n}$ (printed for each set). Larger deviations mean either a real imbalance in the
+# model, or classifier confusion on malformed samples, which tend to land in a few "catch-all" classes. The printed confidences separate fidelity
 # from coverage. Compare each model's fraction of confidently classified samples with the test-image value: the gap
 # measures ambiguous or malformed digits.
 #
@@ -1182,7 +1359,8 @@ plt.show()
 #
 # **FID** (Heusel et al. 2017) summarises "how far is the sample distribution from the data distribution" in one
 # number. Embed real and generated images with a fixed, pre-trained network $\phi$. Fit a Gaussian to each set of
-# features, and compute the Fréchet (2-Wasserstein) distance between the two Gaussians, which has a closed form:
+# features, and compute the *squared* Fréchet (2-Wasserstein) distance $W_2^2$ between the two Gaussians, which has
+# a closed form:
 #
 # $$\mathrm{FD}=\|\mu_r-\mu_g\|^2+\mathrm{Tr}\Big(\Sigma_r+\Sigma_g-2\big(\Sigma_r\Sigma_g\big)^{1/2}\Big).$$
 #
@@ -1232,8 +1410,11 @@ f_test = features(x_test)
 
 # %% [markdown]
 # **Pitfall 1: FD is biased upwards at small sample size.** Even two samples from the *same* distribution have
-# FD > 0, because the covariance estimated from $n$ points is noisy. The bias shrinks roughly like $1/n$. Below we
-# compute this "floor" for held-out test images at several $n$, then compare all models **at the same $n$**.
+# FD > 0, because the covariance estimated from $n$ points is noisy. A $d\times d$ covariance has $d(d+1)/2$ free
+# entries (about 8 000 for our $d=128$ features), so $n$ must be several times $d$ before the estimate settles; at
+# $n\le d$ the sample covariance is not even full rank. The bias shrinks roughly like $1/n$. Below we compute this
+# "floor" for held-out test images at several $n$, then compare models **at a common $n$**. For error bars we use the
+# bootstrap: recompute FD on resamples (with replacement) of the same $n$ samples, and take the standard deviation.
 
 # %%
 def fd_of_subsets(feats, n, max_rep=10, seed=0):
@@ -1247,49 +1428,61 @@ def fd_of_subsets(feats, n, max_rep=10, seed=0):
 ns = [8, 32] if FAST else [64, 128, 256, 512, 1024, 2500, 5000]
 floor = {n: fd_of_subsets(f_test, n) for n in ns}
 
-N_FD = N_DDPM   # the DDPM run is the most expensive set, so its size fixes the common n
-results = {
-    "test images (floor)": (fd_of_subsets(f_test, N_FD), C_REAL),
-    "reference DDPM-1000": (fd_of_subsets(features(ddpm_x), N_FD), C_DDPM),
-    "reference DDIM-50": (fd_of_subsets(features(ddim_x), N_FD), C_DDIM),
-    "in-notebook EMA, DDIM-50": (fd_of_subsets(features(mine_ema), N_FD), C_MINE),
-    "in-notebook raw, DDIM-50": (fd_of_subsets(features(mine_raw), N_FD), "tab:red"),
-}
-fig, axes = plt.subplots(1, 2, figsize=(11, 3.6), gridspec_kw={"width_ratios": [1, 1.3]})
+def fd_with_bootstrap(feats, n, reps=10, seed=0):
+    """FD of the first n feature vectors against the training reference, and its bootstrap sd."""
+    f, rng = feats[:n], np.random.default_rng(seed)
+    boot = [frechet_distance(*gaussian_stats(f[torch.from_numpy(rng.integers(0, n, n))]), mu_ref, S_ref)
+            for _ in range(reps)]
+    return frechet_distance(*gaussian_stats(f), mu_ref, S_ref), np.std(boot)
+
+
+feats = {"test images (floor)": (f_test, C_REAL), "reference DDPM-1000": (features(ddpm_x), C_DDPM),
+         "reference DDIM-50": (features(ddim_x), C_DDIM), "in-notebook EMA, DDIM-50": (features(mine_ema), C_MINE),
+         "in-notebook raw, DDIM-50": (features(mine_raw), "tab:red")}
+# Two comparisons, each at its own common n: everything sampled with DDIM-50 at n = N_EVAL, and the expensive
+# DDPM-1000 set against DDIM-50 at n = N_DDPM.
+groups = [(N_EVAL, ["test images (floor)", "reference DDIM-50", "in-notebook EMA, DDIM-50", "in-notebook raw, DDIM-50"]),
+          (N_DDPM, ["test images (floor)", "reference DDPM-1000", "reference DDIM-50"])]
+rows = []   # (label, fd, sd, colour), with an empty row between the groups
+for n, names in groups:
+    rows += [(f"{k}  [n={n}]", *fd_with_bootstrap(feats[k][0], n), feats[k][1]) for k in names] + [("", np.nan, np.nan, "w")]
+rows = rows[:-1]
+
+fig, axes = plt.subplots(1, 2, figsize=(11, 4.0), gridspec_kw={"width_ratios": [1, 1.3]})
 axes[0].errorbar(ns, [floor[n].mean() for n in ns], yerr=[floor[n].std() for n in ns], fmt="o-", color=C_REAL,
-                 capsize=3)
+                 capsize=3, label="test subsets (sd over disjoint subsets)")
+axes[0].axvline(128, color="k", ls=":", lw=1, label="n = feature dimension d")
 axes[0].set(xscale="log", yscale="log", xlabel="number of samples n",
             ylabel="FD(test subset, train reference)", title="Pitfall: FD of real data vs n")
-names = list(results)
-means = [results[k][0].mean() for k in names]
-stds = [results[k][0].std() if len(results[k][0]) > 1 else 0 for k in names]
-axes[1].barh(range(len(names)), means, xerr=stds, color=[results[k][1] for k in names], capsize=3)
-axes[1].set_yticks(range(len(names)))
-axes[1].set_yticklabels(names)
+axes[0].legend()
+axes[1].barh(range(len(rows)), [r[1] for r in rows], xerr=[r[2] for r in rows], color=[r[3] for r in rows], capsize=3)
+axes[1].set_yticks(range(len(rows)))
+axes[1].set_yticklabels([r[0] for r in rows])
 axes[1].invert_yaxis()
-axes[1].set(xlabel=f"Fréchet distance in classifier features (n = {N_FD} per set)",
-            title="Lower is better (error bars: sd over disjoint subsets)")
+axes[1].set(xlabel="Fréchet distance in classifier features", title="Lower is better (error bars: bootstrap sd)")
 plt.tight_layout()
 plt.show()
-for k in names:
-    v = results[k][0]
-    print(f"{k:26s}: FD = {v.mean():7.2f}" + (f" ± {v.std():.2f}  ({len(v)} subsets)" if len(v) > 1 else "  (1 set)"))
+for label, fd, sd, _ in rows:
+    if label:
+        print(f"{label:38s}: FD = {fd:7.2f} ± {sd:5.2f}")
+print(f"check of the error bars at n = {N_EVAL}: bootstrap sd of the floor {rows[0][2]:.2f} vs "
+      f"sd over disjoint test subsets {fd_of_subsets(f_test, N_EVAL).std():.2f}")
 
 # %% [markdown]
-# **Left:** even real data has a clearly non-zero FD at small $n$, and the value keeps falling as $n$ grows. FD values
-# computed at different $n$ (or with different feature networks, image resizing, or libraries) are **not
-# comparable**. Published FIDs use 50 000 samples and a fixed Inception implementation for this reason.
+# **Left:** even real data has a clearly non-zero FD at small $n$, and the value keeps falling as $n$ grows, well past
+# $n=d$ (dotted). FD values computed at different $n$ (or with different feature networks, image resizing, or
+# libraries) are **not comparable**. For Inception features ($d=2048$) this is why FID needs at least ~10 000 samples
+# and is conventionally computed on 50 000, with a fixed implementation.
 #
-# **Right**, everything at the same $n$. The real-data floor is lowest, and every model sits above it. Three
-# comparisons are worth reading off, each against its error bars:
-# * **reference vs in-notebook:** what 8× more training buys;
-# * **DDPM-1000 vs DDIM-50:** whether 20× fewer network calls cost measurable quality. This connects to the
-#   background speckle discussed in section 5;
-# * **EMA vs raw weights** of the in-notebook model: what weight averaging buys, even in a short run where the two
-#   sample grids looked alike by eye.
-#
-# With only $n=$ `N_FD` samples per set, small differences are within noise. On a GPU, raise `N_EVAL`/`N_DDPM` to
-# make these comparisons sharp.
+# **Right:** two groups, each at its own common $n$ (shown in brackets). Compare bars only *within* a group, against
+# their error bars; the last printed line checks that the bootstrap error bars match the spread over independent sets
+# of real images. Three comparisons are worth reading off:
+# * **reference vs in-notebook** (first group): what longer training buys;
+# * **EMA vs raw weights** of the in-notebook model (first group): what weight averaging buys, even in a short run
+#   where the two sample grids looked alike by eye;
+# * **DDPM-1000 vs DDIM-50** of the reference model (second group): whether 20× fewer network calls cost measurable
+#   quality. This connects to the background speckle discussed in section 5. Here $n$ = `N_DDPM` is only about the
+#   feature dimension, so the bias is large and only a clear gap means something. On a GPU, raise `N_DDPM`.
 #
 # **Further pitfalls of FID** to keep in mind:
 # * **It is blind to memorisation.** Returning the training set verbatim gives a near-floor FD. Pair it with a
@@ -1303,10 +1496,9 @@ for k in names:
 # ## Exercises
 #
 # **Exercise 1 (architecture ablation).** Predict first, then test. (a) Replace the U-Net by an MLP on flattened
-# images with *more* parameters (wrapper below), train it with the loop of section 4 for the same number of steps,
-# and compare `loss_per_t` and DDIM samples. (b) Remove all attention from the U-Net:
-# `net = dm.UNet(**{**dm.MNIST_RECIPE, "attn_levels": ()}); net.mid[1] = nn.Identity()` (the middle block always
-# contains one `AttnBlock`). Which change hurts more at this resolution, and why?
+# images with *more* parameters (wrapper below), train it with `train` from section 4 for the same number of steps,
+# and compare `loss_per_t` and DDIM samples. (b) Remove all attention from the U-Net (the middle block always
+# contains one `AttnBlock`, hence the second line). Which change hurts more at this resolution, and why?
 #
 # ```python
 # class FlatMLP(nn.Module):                 # ~11M parameters vs the U-Net's 1.2M
@@ -1315,6 +1507,11 @@ for k in names:
 #         self.mlp = dm.MLPDenoiser(data_dim=784, hidden=1024, n_blocks=4)
 #     def forward(self, x, t, y=None):
 #         return self.mlp(x.flatten(1), t).view_as(x)
+#
+# (_, _, ema_mlp), log_mlp = train(FlatMLP().to(device), TRAIN_STEPS, data)          # (a)
+# no_attn = dm.UNet(**{**dm.MNIST_RECIPE, "attn_levels": ()})
+# no_attn.mid[1] = nn.Identity()
+# (_, _, ema_noattn), log_noattn = train(no_attn.to(device), TRAIN_STEPS, data)     # (b)
 # ```
 #
 # <details><summary>Hint / solution</summary>
@@ -1324,12 +1521,13 @@ for k in names:
 # position. It has to learn the same local operation 784 times over (section 1). Removing attention should cost
 # much less at 28×28, because two stride-2 down-samplings plus a stack of 3×3 convs already give the bottleneck a
 # receptive field covering the whole digit. Attention earns its keep at higher resolutions and for long-range
-# consistency (Dhariwal & Nichol 2021 ablate this). Plot `loss_per_t(new_model, x_eval, ts_loss)` next to the curves
-# of section 4. A GPU makes this quick.
+# consistency (Dhariwal & Nichol 2021 ablate this). Plot `loss_per_t(ema_mlp.model, x_eval, ts_loss)` next to the
+# curves of section 4, and compare `sample_ddim(ema_mlp.model, 32)` with the U-Net's samples. A GPU makes this quick.
+# (`train` does not touch `model`, `ema` or `checkpoints/`, so the rest of the notebook is unaffected.)
 # </details>
 #
-# **Exercise 2 (EMA decay).** Before running anything: in a 1500-step run, what changes if you use
-# `dm.EMA(model, decay=0.9999)` instead of 0.999? And with `decay=0.99`?
+# **Exercise 2 (EMA decay).** Before running anything: in a 1500-step run (the CPU default), what changes if you
+# train with `ema_decay=0.9999` instead of 0.999? And with `ema_decay=0.99`?
 #
 # <details><summary>Hint / solution</summary>
 #
@@ -1342,7 +1540,8 @@ for k in names:
 #
 # **Exercise 3 (dynamic thresholding).** Write your own DDIM loop (copy `dm.ddim_sample`, ~15 lines) that applies
 # dynamic thresholding to $\hat x_0$. Compare it with static clipping and with no clipping for DDIM-10 on the
-# in-notebook model, using the grids and the classifier confidence from section 5.
+# in-notebook model, using the grids and the off-manifold fraction from section 5 and the classifier confidence from
+# section 7b. Predict first: which of the two thresholding rules helps the under-trained model more?
 #
 # <details><summary>Hint / solution</summary>
 #
@@ -1353,8 +1552,12 @@ for k in names:
 # # inside the loop, after eps, x0 = dm.model_predictions(net, x, t, schedule):
 # #     x0 = dynamic_threshold(x0); eps = (x - ab.sqrt() * x0) / (1 - ab).sqrt()
 # ```
-# On MNIST, static and dynamic thresholding behave similarly, because almost all pixels are near ±1 anyway. The
-# difference shows up with strong guidance (notebook 06), where static clipping produces saturated, "burnt" images.
+# The two rules differ only where $\hat x_0$ is far out of range, which section 5 showed happens mainly in the first,
+# high-noise steps. There static clipping *saturates* (every out-of-range pixel becomes ±1), while dynamic
+# thresholding *shrinks* the whole image by $s\gg1$, pulling it towards grey (0). Later steps, where $\hat x_0$ is
+# nearly in range, are treated almost identically, and they can correct much of the early difference. So the final
+# samples may differ little for MNIST, or noticeably for the under-trained model with only 10 steps: check it. The
+# difference is large with strong guidance (notebook 06), where static clipping produces saturated, "burnt" images.
 # </details>
 #
 # **Exercise 4 (spectra of generated images).** Compare `power_spectrum(ddim_x)` and `power_spectrum(mine_ema)` with
@@ -1370,17 +1573,20 @@ for k in names:
 # </details>
 #
 # **Exercise 5 (memorisation on a tiny training set).** Train the same U-Net on only the first 64 training
-# images (`data = x_train[:64].to(device)`) for a few thousand steps (GPU recommended), then rerun the
-# nearest-neighbour check of 7a. What happens to the distance histogram? And what happens to the FD, measured
-# against those 64 images and against the full training set?
+# images for a few thousand steps (GPU recommended),
+# `(_, _, ema64), _ = train(dm.UNet(**dm.MNIST_RECIPE).to(device), 3000, x_train[:64].to(device))`, then rerun the
+# nearest-neighbour check of 7a on `sample_ddim(ema64.model, 256)`. What happens to the distance histogram? And what
+# happens to the FD, measured against those 64 images and against the full training set?
 #
 # <details><summary>Hint / solution</summary>
 #
 # With 64 images the model has enough capacity to learn the *empirical* distribution, a mixture of 64 deltas, whose
 # exact denoiser is a softmax-weighted average of training images (notebook 03). Samples then reproduce training
-# images: the NN histogram collapses towards 0. FD against those 64 images becomes small, which shows pitfall 1 of
-# FID: it rewards copying. Kadkhodaie et al. (2024) map out this memorisation-to-generalisation transition as a
-# function of training-set size.
+# images: the NN histogram collapses towards 0. FD against those 64 images becomes small, which illustrates the
+# first of the "further pitfalls": FID is blind to memorisation and rewards copying. (With only 64 reference images
+# in 128 dimensions, the FD itself is dominated by the small-$n$ bias of pitfall 1, so compare it with the FD of 64
+# *other* real digits against the same 64.) Kadkhodaie et al. (2024) map out this memorisation-to-generalisation
+# transition as a function of training-set size.
 # </details>
 #
 # ## Key takeaways
@@ -1393,18 +1599,23 @@ for k in names:
 #   residual branches and outputs make the fresh network start out as identity blocks with a zero output, so the
 #   initial loss is 1.
 # * The training recipe: data scaled to $[-1,1]$, AdamW at 2e-4 with warm-up, gradient clipping, uniform random $t$,
-#   bf16 autocast, checkpoints that include optimiser and EMA state. **Sample with EMA weights.**
+#   bf16 autocast, checkpoints that include optimiser, scheduler and EMA state (with the EMA's update counter).
+#   **Sample with EMA weights.**
 # * The $\epsilon$-loss is an SNR-weighted $x_0$-loss. It is largest at small $t$ and noisy because of random $t$.
 #   The weighting leaves the network's $\hat x_0$ at the largest $t$ barely trained, possibly worse than the
 #   Bayes-optimal "prior mean" answer.
 # * DDIM-50 gives usable samples at 1/20 of DDPM-1000's network calls. Stochastic sampling can still be cleaner
 #   with an imperfect model, because the injected noise lets later steps correct earlier errors. x0-clipping is a
-#   free projection onto the known data range that matters most for few-step or under-trained sampling.
-# * Sampling is **coarse-to-fine** because the noise floor swamps the weak high frequencies first. In the Wiener /
-#   posterior-mean picture, a frequency is decided once its SNR exceeds 1. The denoiser's Jacobian is an adaptive
-#   filter that widens with $t$, proportional to the posterior covariance.
+#   projection onto a box that contains the true posterior mean, so it can only reduce the error of $\hat x_0$; it
+#   matters most for few-step or under-trained sampling.
+# * Sampling is **coarse-to-fine** because the noise floor swamps the weak high frequencies first. Already for a
+#   Gaussian prior the posterior mean shrinks each component by $1/(1+\mathrm{SNR})$, so a frequency is decided
+#   once its SNR exceeds about 1; a trained network can decide some bands earlier by exploiting non-Gaussian
+#   structure. The denoiser's Jacobian is an adaptive filter that widens with $t$, proportional to the posterior
+#   covariance.
 # * Evaluate with several imperfect tools: nearest neighbours (memorisation), class histograms (coverage),
-#   Fréchet distances in a suitable feature space (always at equal $n$), and your own eyes.
+#   Fréchet distances in a suitable feature space (always at equal $n$, with $n\gg d$ and error bars), and your own
+#   eyes.
 #
 # ## Further reading
 #

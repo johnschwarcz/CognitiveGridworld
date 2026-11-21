@@ -32,7 +32,7 @@
 # **Prerequisites:** 01 (forward process), 02 (DDPM loss and ancestral sampling), 03 (scores and Tweedie's
 # formula), 04 (DDIM), 05 (the U-Net, EMA, `train_diffusion`, mixed precision).
 #
-# **Runtime:** CPU ≈ 10–15 min (mostly MNIST sampling, plus a short in-notebook U-Net training run).
+# **Runtime:** CPU ≈ 8–15 min (mostly MNIST sampling, plus a short in-notebook U-Net training run).
 # CUDA GPU ≈ 5 min, including a longer in-notebook training run; add roughly 10 min if the reference MNIST
 # checkpoint is missing and has to be trained first.
 
@@ -175,8 +175,9 @@ assert max_err < 1e-8
 # Bayes' rule for scores holds to machine precision. Now a Monte Carlo check of the *meaning* of
 # $p_t(y\mid x_t)$. We draw labelled data, noise it, and ask whether the classifier is **calibrated**: among points
 # where it reports confidence $\approx p$, is it right a fraction $\approx p$ of the time? A correct label posterior
-# must be calibrated at every noise level. We summarise calibration by the expected calibration error (ECE, the
-# confidence-weighted gap between confidence and accuracy; 0 = perfect).
+# must be calibrated at every noise level. We summarise calibration by the expected calibration error (ECE: the
+# gap between confidence and accuracy within confidence bins, averaged with each bin weighted by how many points
+# fall into it; 0 = perfect).
 
 # %%
 def expected_calibration_error(conf, correct, n_bins=10):
@@ -287,11 +288,25 @@ plt.suptitle(f"t = {t_q} (grey contours: $q_t(x)$)", y=1.0)
 plt.tight_layout()
 plt.show()
 
+# how do the two terms scale far from the data? Walk out along the +x axis.
+ray = torch.tensor([[r, 0.0] for r in (2.0, 5.0, 10.0, 20.0, 40.0)], dtype=torch.float64)
+print("distance r                     :", ray[:, 0].numpy())
+print("|grad log p_t(y=1|x)|          :", classifier_grad(ray, y_q, ab_q).norm(dim=1).numpy().round(2))
+print("log p_t(y=1|x)                 :", noisy_classifier_logprobs(ray, ab_q)[:, y_q].numpy().round(1))
+print("|unconditional score|          :", full_q.score(ray).norm(dim=1).numpy().round(1))
+
 # %% [markdown]
 # The unconditional score points towards *all* of the probability mass. The classifier gradient is near zero
-# where class 1 is already certain (dark orange) and everywhere else points back towards that region, growing with
-# distance (far from a class, its log-probability falls off quadratically). Their sum, the conditional score, points
-# only at class 1's two components.
+# where class 1 is already certain (dark orange). Everywhere else it points back towards that region, with a
+# strength that grows near the class and then **levels off**: far from the data the arrows have roughly constant
+# length. The printout shows why. Along a ray, $\log p_t(y\mid x)$ falls off only *linearly* (doubling $r$ roughly
+# doubles it), so its gradient saturates. All components share one covariance, which after noising is
+# $s_t I$ with $s_t=0.12\,\bar\alpha_t+1-\bar\alpha_t$, so the quadratic term $-\|x\|^2/2s_t$ is common to every
+# component and cancels in $\log q_t(x,y)-\log q_t(x)$. What remains is a difference of log-sum-exps of *affine*
+# functions of $x$, a soft piecewise-linear discriminant. It is the mixture version of linear discriminant analysis,
+# where equal-covariance Gaussian classes give exactly linear log-odds (as in logistic regression). The scores, by
+# contrast, grow linearly with distance, so far out the unconditional score dominates the guidance term. Their sum, the conditional score, points only at
+# class 1's two components.
 #
 # ## 2 · Classifier guidance
 #
@@ -413,8 +428,30 @@ print(f"MMD^2, w=0 vs true p(x)                  : {dm.mmd_rbf(cg_samples[0.0], 
 #   $\arg\max_c p(c\mid x)=y$;
 # * **diversity**: the mean pairwise distance between samples of the same class, divided by the same quantity
 #   for true samples of that class (1 = as diverse as the data).
+#
+# To tell what belongs to the *target* and what to the *sampler*, we also draw exact samples from the tilted density
+# $p_w\propto p(x)\,p(y\mid x)^w$ itself. It is not a Gaussian mixture, but in 2-D we can tabulate it on a fine grid
+# and sample from it: pick a cell in proportion to its mass, then a uniform point inside the cell.
 
 # %%
+def tilted_density_grid(y, w, lim=4.5, n=300):
+    """Exact p_w(x|y) ∝ p(x) p(y|x)^w on a regular n x n grid: (cell centres, cell probabilities, spacing)."""
+    g1 = torch.linspace(-lim, lim, n, dtype=torch.float64)
+    X, Y = torch.meshgrid(g1, g1, indexing="xy")
+    pts = torch.stack([X.flatten(), Y.flatten()], 1)
+    log_joint = class_log_joint(pts)
+    log_px = torch.logsumexp(log_joint, 1)
+    log_tilted = log_px + w * (log_joint[:, y] - log_px)          # log p(x) + w log p(y|x)
+    return pts, torch.softmax(log_tilted, 0), (g1[1] - g1[0]).item()
+
+
+def sample_from_grid(pts, probs, h, n, seed):
+    """Draw from the tabulated density: cell ~ probs, then uniform within the cell."""
+    g = torch.Generator().manual_seed(seed)
+    idx = torch.multinomial(probs, n, replacement=True, generator=g)
+    return (pts[idx] + (torch.rand(n, 2, generator=g, dtype=torch.float64) - 0.5) * h).float()
+
+
 REF_DIV_2D = [torch.pdist(true_cond[labels_2d == c]).mean().item() for c in range(N_CLASSES)]
 
 
@@ -433,28 +470,48 @@ def component_occupancy(x, c):
     return torch.bincount(k, minlength=class_gmms[c].K).float() / len(x)
 
 
-print("   w   accuracy  mean p(y|x)   rel. diversity: class 0  class 1  class 2")
-for w, x in cg_samples.items():
-    acc, conf, div = fidelity_diversity_2d(x, labels_2d)
-    print(f"{w:5.1f}   {acc:7.3f}   {conf:9.3f}   {'':15s}{div[0]:7.2f}  {div[1]:7.2f}  {div[2]:7.2f}")
+def grid_occupancy(pts, probs, c):
+    """The same fractions, computed exactly for a tabulated density (mass of the cells assigned to each component)."""
+    k = class_gmms[c].responsibilities(pts).argmax(1)
+    return torch.zeros(class_gmms[c].K, dtype=torch.float64).index_add_(0, k, probs).float()
+
+
+# exact p_w for every class and w: tabulated once, then sampled (N_PER_CLASS_2D per class, like the guided runs)
+pw_grids = {(w, c): tilted_density_grid(c, w) for w in W_LIST for c in range(N_CLASSES)}
+pw_samples = {w: torch.cat([sample_from_grid(*pw_grids[(w, c)], N_PER_CLASS_2D, seed=40 + c) for c in range(N_CLASSES)])
+              for w in W_LIST}
+
+print("   w   samples from      accuracy  mean p(y|x)   rel. diversity: class 0  class 1  class 2")
+for w in W_LIST:
+    for name, x in [("guided sampler", cg_samples[w]), ("exact p_w", pw_samples[w])]:
+        acc, conf, div = fidelity_diversity_2d(x, labels_2d)
+        print(f"{w:5.1f}   {name:15s}   {acc:7.3f}   {conf:9.3f}   {'':15s}{div[0]:7.2f}  {div[1]:7.2f}  {div[2]:7.2f}")
+
 print("\nfraction of each class's samples in each of its components (true p(x|y): equal shares)")
-for w, x in cg_samples.items():
-    if w == 0:
-        continue                                            # w = 0 ignores the label: not meaningful
-    occ_txt = "   ".join(f"class {c}: " + " ".join(f"{v:.2f}" for v in component_occupancy(x[labels_2d == c], c))
-                         for c in range(N_CLASSES))
-    print(f"w = {w:4.1f}   {occ_txt}")
+comp_hdr = " | ".join(" ".join(f"({m[0]:4.1f},{m[1]:4.1f})" for m in class_gmms[c].means.numpy())
+                      for c in range(N_CLASSES))
+print(f"{'':25s}" + " | ".join(f"{'class ' + str(c):<{12 * class_gmms[c].K - 1}s}" for c in range(N_CLASSES)))
+print(f"{'component mean':25s}{comp_hdr}")
+for w in W_LIST[1:]:                                       # w = 0 ignores the label: not meaningful
+    rows = {"guided sampler": [component_occupancy(cg_samples[w][labels_2d == c], c) for c in range(N_CLASSES)],
+            "exact p_w": [grid_occupancy(*pw_grids[(w, c)][:2], c) for c in range(N_CLASSES)]}
+    for name, occ_list in rows.items():
+        occ_txt = " | ".join(" ".join(f"{v:11.2f}" for v in o) for o in occ_list)
+        print(f"w = {w:4.1f}  {name:15s}{occ_txt}")
 
 clean_rgb = class_rgb_image(None)
 SHOW = slice(None, None, 2)          # plot every 2nd sample (class-balanced: labels are sorted); metrics use all
-fig, axes = plt.subplots(1, len(W_LIST), figsize=(3.2 * len(W_LIST), 3.4))
-for ax, w in zip(axes, W_LIST):
-    ax.imshow(clean_rgb, extent=[-LIM, LIM, -LIM, LIM], origin="lower", alpha=0.25)
-    dm.scatter2d(cg_samples[w][SHOW], ax=ax, lim=LIM, s=2, alpha=0.5, c=CLASS_RGB[labels_2d[SHOW].numpy()])
-    ax.set_title(f"w = {w:g}" + ("  (unconditional)" if w == 0 else "  (conditional)" if w == 1 else ""))
-axes[0].legend(handles=[Patch(color=c, label=f"requested y={i}") for i, c in enumerate(CLASS_COLORS)],
-               loc="lower left", fontsize=7)
-plt.suptitle("Exact classifier guidance; background = clean decision regions", y=1.0)
+fig, axes = plt.subplots(2, len(W_LIST), figsize=(3.2 * len(W_LIST), 6.6))
+for j, w in enumerate(W_LIST):
+    for i, (name, s) in enumerate([("guided sampler", cg_samples[w]), ("exact target $p_w$", pw_samples[w])]):
+        ax = axes[i, j]
+        ax.imshow(clean_rgb, extent=[-LIM, LIM, -LIM, LIM], origin="lower", alpha=0.25)
+        dm.scatter2d(s[SHOW], ax=ax, lim=LIM, s=2, alpha=0.5, c=CLASS_RGB[labels_2d[SHOW].numpy()])
+        ax.set_title(f"{name}, w = {w:g}" + (" (uncond.)" if w == 0 else " (cond.)" if w == 1 else ""))
+axes[0, 0].legend(handles=[Patch(color=c, label=f"requested y={i}") for i, c in enumerate(CLASS_COLORS)],
+                  loc="lower left", fontsize=7)
+plt.suptitle("Top: exact classifier guidance (DDPM).  Bottom: exact samples of $p_w\\propto p(x)\\,p(y\\mid x)^w$.  "
+             "Background = clean decision regions", y=1.0)
 plt.tight_layout()
 plt.show()
 
@@ -463,11 +520,19 @@ plt.show()
 #   that of the whole mixture, hence above 1.)
 # * $w=1$ samples each class correctly, including the few class-1 points (orange) that fall into the other
 #   classes' territory.
-# * $w>1$ moves samples away from the other classes. Fidelity goes to 1 and diversity drops. Look at *how* it
-#   drops: each blob keeps roughly its width, but the **components nearest another class lose samples** (the
-#   occupancy table: class 1's right-hand component, class 2's upper one, class 0's top one). Far from a class
-#   boundary $p(y\mid x)\approx1$, so the tilt $p(y\mid x)^{w-1}$ cannot reshape a well-separated blob. It can
-#   only re-weight blobs. Keep this picture in mind for the next two sections.
+# * $w>1$: fidelity goes to 1 and diversity drops. But compare the two rows. The **target** $p_w$ barely differs
+#   from $p(x\mid y)$ here. Its blobs are well separated, so $p(y\mid x)\approx1$ wherever they have mass, and the
+#   tilt $p(y\mid x)^{w-1}$ only trims the thin tails that reach into other classes' territory. That alone is
+#   enough to push fidelity to 1, while its component shares stay close to equal and its diversity stays close
+#   to 1 (the "exact p_w" rows). The **guided samples** behave differently. Each blob keeps roughly its width, but the
+#   **components nearest another class lose samples**: class 1's right-hand component at $(0.9, 0.6)$, class 2's
+#   upper one at $(2.0, 1.2)$, class 0's top one at $(-1.0, 2.0)$. Most of the diversity loss comes from this
+#   re-weighting.
+#
+# So the re-weighting is not in the target. The guided *dynamics* produce it, even though every score and every
+# classifier probability here is exact. At intermediate noise the noisy classifier is uncertain over whole blobs,
+# and $w$ times its gradient pushes trajectories away from the other classes *before* they commit to a component.
+# This gap between what guidance is supposed to sample and what it does sample is the subject of Section 4.
 #
 # ## 3 · Classifier-free guidance
 #
@@ -556,13 +621,16 @@ print(f"loss: mine {mine.item():.6f} | dmtools {ref.item():.6f};   "
 assert torch.allclose(mine, ref) and torch.allclose(cfg_eps(cfg_mlp, xb, tb, yb, 4.0), eps_ref, atol=1e-5)
 
 # %% [markdown]
-# Now train one network with label dropout. `dm.train_diffusion` (notebook 05) uses exactly `cfg_training_loss`
-# when it receives `labels` and `p_uncond`.
+# Now train one network with label dropout. When `dm.train_diffusion` (notebook 05) receives `labels` and
+# `p_uncond`, its loss is exactly our `cfg_training_loss` (via `dm.diffusion_loss`, checked above).
 
 # %%
 t0 = time.time()
+# amp=False: a tiny MLP gains nothing from bfloat16, and the eps_c - eps_u analysis below wants full precision
+# (with amp=None, dmtools would switch bf16 on automatically on CUDA GPUs only, so results would depend on the device)
 run2d = dm.train_diffusion(cfg_mlp, x_train, sched2d, labels=y_train, p_uncond=P_UNCOND, steps=STEPS_2D,
-                           batch_size=512, lr=1e-3, warmup=200, progress=False, log_every=max(1, STEPS_2D // 3))
+                           batch_size=512, lr=1e-3, warmup=200, progress=False, log_every=max(1, STEPS_2D // 3),
+                           amp=False)
 cfg_mlp_ema = run2d["ema"].model
 print(f"trained {STEPS_2D} steps in {time.time() - t0:.0f}s")
 
@@ -595,22 +663,32 @@ with torch.no_grad():
 # error of the difference is much larger than that of either term, and guidance multiplies exactly this error by
 # $w$. **Model errors are amplified by the guidance scale.**
 #
-# Now we sample with the learned CFG model and the exact one, using the **same** $x_T$ and sampler noise, so the
-# difference between rows is model error only.
+# Now we sample with the learned CFG model, using the **same** $x_T$ and sampler noise (seed) as the exact
+# classifier-guidance samples of Section 2. Exact CFG *is* exact classifier guidance (checked above), so those
+# samples serve as the exact reference, and in the figure the difference between rows is model error only.
+#
+# **A statistics gotcha.** Shared noise ("common random numbers") is ideal for eyeballing differences, but it makes
+# the two sample sets positively correlated, and that biases a two-sample statistic such as MMD *downwards*. A
+# paired MMD cannot be compared with a noise floor computed from independent samples. For the table we therefore
+# compare the learned samples with an *independent* exact draw (another seed), and take as the floor the MMD
+# between two independent exact draws.
 
 # %%
 t0 = time.time()
 learned_samples = {w: sample_2d(cfg_mlp_ema, labels_2d, w=w, seed=10) for w in W_LIST}
-exact_cfg_samples = {w: sample_2d(exact, labels_2d, w=w, seed=10) for w in W_LIST}   # = exact classifier guidance
+exact_shared = cg_samples                       # exact guidance, seed 10: same noise as learned_samples
+exact_indep = {w: sample_2d(exact, labels_2d, w=w, seed=11) for w in W_LIST}   # exact CFG, independent noise
 print(f"sampling: {time.time() - t0:.1f}s")
-floor = mmd_by_class(true_cond_2, true_cond, labels_2d)
-print("   w    MMD^2(learned CFG, exact)   (noise floor ~ %.5f)" % floor)
+print("   w   MMD^2(learned, exact)   MMD^2(exact, exact) = noise floor   [both: independent draws]")
 for w in W_LIST:
-    print(f"{w:5.1f}   {mmd_by_class(learned_samples[w], exact_cfg_samples[w], labels_2d):24.5f}")
+    print(f"{w:5.1f}   {mmd_by_class(learned_samples[w], exact_indep[w], labels_2d):20.5f}"
+          f"   {mmd_by_class(exact_shared[w], exact_indep[w], labels_2d):33.5f}")
+print(f"(for contrast, w = 1 with shared noise: {mmd_by_class(learned_samples[1.0], exact_shared[1.0], labels_2d):.5f},"
+      f" deceptively small)")
 
 fig, axes = plt.subplots(2, len(W_LIST), figsize=(3.2 * len(W_LIST), 6.6))
 for j, w in enumerate(W_LIST):
-    for i, (name, s) in enumerate([("exact guidance", exact_cfg_samples[w]), ("learned CFG", learned_samples[w])]):
+    for i, (name, s) in enumerate([("exact guidance", exact_shared[w]), ("learned CFG", learned_samples[w])]):
         axes[i, j].imshow(clean_rgb, extent=[-LIM, LIM, -LIM, LIM], origin="lower", alpha=0.25)
         dm.scatter2d(s[SHOW], ax=axes[i, j], lim=LIM, s=2, alpha=0.5, c=CLASS_RGB[labels_2d[SHOW].numpy()],
                      title=f"{name}, w = {w:g}")
@@ -618,9 +696,10 @@ plt.tight_layout()
 plt.show()
 
 # %% [markdown]
-# At $w=1$ the learned model matches the exact samples (MMD at the noise floor). With growing $w$ it drifts away,
-# and at $w=10$ the learned CFG does something exact guidance does *not* do: it **shrinks every mode** into a tight
-# clump. Look at the $w=0$ panels for the reason. The learned *unconditional* samples are visibly blurrier than
+# At $w\le1$ the learned model is close to the exact samples, but measurably above the noise floor: the learned
+# $\epsilon$ carries some error even without guidance (see $\epsilon_c$ and $\epsilon_u$ at small $t$ in the table
+# above). With growing $w$ the gap widens quickly, and at $w=10$ the learned CFG does something exact guidance does
+# *not* do: it **shrinks every mode** into a tight clump. Look at the $w=0$ panels for the reason. The learned *unconditional* samples are visibly blurrier than
 # the exact ones. The unconditional branch is the under-fitted one: it is trained only on the 15% of examples
 # whose label was dropped, and it has the harder, 8-mode distribution to learn (see its error at small $t$ in the
 # table above). So its density is too wide. Take one Gaussian mode with true variance $\sigma^2$, and suppose $\epsilon_u$ implies a wider
@@ -635,43 +714,28 @@ plt.show()
 # ## 4 · Advanced: guidance does not sample $p(x)\,p(y\mid x)^w$
 #
 # > It is tempting to read guidance as "sampling the tempered posterior $p_w(x\mid y)\propto p(x)p(y\mid x)^w$".
-# > That reading is **wrong for $w\notin\{0,1\}$**, even with perfect networks.
+# > That reading is **wrong in general for $w\notin\{0,1\}$**, even with perfect networks.
 #
-# **Why.** A reverse-time sampler produces the target $p_w$ only if the field it follows at every noise level $t$
-# is the score of the *forward-noised* target, $q^w_t=p_w * \mathcal N(0,\cdot)$ (after scaling by
-# $\sqrt{\bar\alpha_t}$). The guided field is
+# **Why.** A reverse-time sampler is guaranteed to produce the target $p_w$ if the field it follows at every noise
+# level $t$ is the score of the *forward-noised* target, $q^w_t=p_w * \mathcal N(0,\cdot)$ (after scaling by
+# $\sqrt{\bar\alpha_t}$). The guided field is not that score. It is
 # $$\tilde s_t=\nabla\log\big[q_t(x)^{1-w}\,q_t(x\mid y)^{w}\big],$$
 # i.e. we noise $p(x)$ and $p(x\mid y)$ *separately* and then take the geometric mixture. But noising is a
-# convolution, and convolution does not commute with powers and products:
-# $$\big(f^{1-w}g^{w}\big)*k\;\neq\;(f*k)^{1-w}\,(g*k)^{w}\qquad\text{unless } w\in\{0,1\}\text{ or }k=\delta .$$
-# So $\tilde s_t$ equals $\nabla\log q^w_t$ at $t=0$ only. At intermediate $t$, the family
-# $\{q_t^{1-w}q_t(\cdot\mid y)^w\}_t$ is not the diffusion of *any* distribution. Two consequences:
+# convolution, and convolution does not in general commute with powers and products:
+# $$\big(f^{1-w}g^{w}\big)*k\;\neq\;(f*k)^{1-w}\,(g*k)^{w}\qquad\text{in general, for } w\notin\{0,1\}.$$
+# (There are exceptions. For two Gaussians $f,g$ with the *same* covariance both sides are proportional to the same
+# Gaussian, and guidance is an exact extrapolation of the mean. The mismatch comes from the mixture structure of
+# $p(x)$.)
+# So in general $\tilde s_t$ equals $\nabla\log q^w_t$ only at $t=0$, and at intermediate $t$ the family
+# $\{q_t^{1-w}q_t(\cdot\mid y)^w\}_t$ is not the diffusion of any distribution. Two consequences:
 # 1. guided samples are **not** distributed as $p_w$;
 # 2. the stochastic sampler (DDPM, the reverse SDE) and the deterministic one (DDIM, the probability-flow ODE),
 #    which agree whenever the field is a genuine score family (notebook 04), now **disagree**.
 #
-# We can check both claims exactly. $p_w$ is not a Gaussian mixture, but in 2-D we can tabulate it on a fine grid
-# and sample from it (pick a cell in proportion to its mass, then a uniform point inside the cell).
+# We can check both claims exactly, with the tabulated $p_w$ of Section 2. We focus on class 0, where
+# Section 2 showed that $p_w$ hardly differs from $p(x\mid y{=}0)$, and compare DDPM and DDIM.
 
 # %%
-def tilted_density_grid(y, w, lim=4.5, n=300):
-    """Exact p_w(x|y) ∝ p(x) p(y|x)^w on a regular n x n grid: (cell centres, cell probabilities, spacing)."""
-    g1 = torch.linspace(-lim, lim, n, dtype=torch.float64)
-    X, Y = torch.meshgrid(g1, g1, indexing="xy")
-    pts = torch.stack([X.flatten(), Y.flatten()], 1)
-    log_joint = class_log_joint(pts)
-    log_px = torch.logsumexp(log_joint, 1)
-    log_tilted = log_px + w * (log_joint[:, y] - log_px)          # log p(x) + w log p(y|x)
-    return pts, torch.softmax(log_tilted, 0), (g1[1] - g1[0]).item()
-
-
-def sample_from_grid(pts, probs, h, n, seed):
-    """Draw from the tabulated density: cell ~ probs, then uniform within the cell."""
-    g = torch.Generator().manual_seed(seed)
-    idx = torch.multinomial(probs, n, replacement=True, generator=g)
-    return (pts[idx] + (torch.rand(n, 2, generator=g, dtype=torch.float64) - 0.5) * h).float()
-
-
 Y_TILT, W_TILT = 0, 6.0
 N_TILT = 3 * N_PER_CLASS_2D
 lab_tilt = torch.full((N_TILT,), Y_TILT)
@@ -723,58 +787,66 @@ plt.show()
 # classes (to the left here). Those early pushes decide *which* component a sample ends up in, and they cannot be
 # undone later.
 # The ODE (DDIM) follows the distorted field deterministically and squeezes the samples into narrow streaks at
-# the far edge of the class. The SDE (DDPM) keeps injecting noise. Its Langevin-like component partially pulls the
-# samples back towards the correct shape, but not back to the right mixture weights.
+# the far edge of the class. The SDE (DDPM) keeps injecting noise, which acts like a built-in Langevin corrector
+# (made precise at the end of this box). It relaxes the streaks back into round blobs, but it cannot restore the
+# mixture weights.
 #
 # Two quantitative views: how the samples are split over the three class-0 components, and how far the guided
 # field $\tilde s_t$ is from the true score of the noised tilted density, $\nabla\log q^w_t$, as a function of $t$.
-# The latter is computed by quadrature on the grid: $q^w_t(x_t)=\sum_j m_j\,\mathcal N(x_t;\sqrt{\bar\alpha_t}\,g_j,(1-\bar\alpha_t)I)$
-# for grid cells $g_j$ with masses $m_j$. It is accurate as long as $\sigma_t$ is a few grid spacings. We start at
-# $t=8$; at $t=0$ the two fields coincide by construction.
+# The latter is computed **by quadrature, without Monte Carlo**:
+# * the noised tilted density is a sum over the cells $g_j$ (masses $m_j$) of the tabulated $p_w$,
+#   $q^w_t(x_t)=\sum_j m_j\,\mathcal N(x_t;\sqrt{\bar\alpha_t}\,g_j,(1-\bar\alpha_t)I)$, and its score follows from
+#   Tweedie's formula with the posterior over cells;
+# * the average over $x_t\sim q^w_t$ becomes a weighted sum over a second, coarser grid of $x_t$ values.
+#
+# (A Monte Carlo average would be unreliable here: at small $t$ the squared error is heavy-tailed, and a few rare
+# samples far out in the tails would dominate it.) The quadrature is accurate as long as $\sigma_t$ is at least
+# about one grid spacing, so we start at $t=8$.
 
 # %%
-def noised_grid_score(x_t, pts, probs, abar, chunk=1024):
-    """Score of sum_j m_j N(x; sqrt(abar) p_j, (1 - abar) I): the forward-noised tabulated density."""
-    keep = probs > probs.max() * 1e-10                      # drop cells with negligible mass
+def noised_grid(x_t, pts, probs, abar, chunk=1024):
+    """Score and log-density (up to a constant) of sum_j m_j N(x; sqrt(abar) g_j, (1 - abar) I):
+    the forward-noised tabulated density, evaluated at the points x_t."""
+    keep = probs > probs.max() * 1e-12                      # drop cells with negligible mass
     P, log_m = pts[keep], probs[keep].log()
-    out = []
+    scores, log_dens = [], []
     for i in range(0, len(x_t), chunk):
         q = x_t[i:i + chunk].double()
         log_r = log_m[None] - torch.cdist(q, math.sqrt(abar) * P).pow(2) / (2 * (1 - abar))
+        log_dens.append(torch.logsumexp(log_r, dim=1))
         r = torch.softmax(log_r, dim=1)                     # posterior over grid cells given x_t
-        out.append((math.sqrt(abar) * r @ P - q) / (1 - abar))   # Tweedie: (sqrt(abar) E[x0|x_t] - x_t) / (1-abar)
-    return torch.cat(out)
+        scores.append((math.sqrt(abar) * r @ P - q) / (1 - abar))   # Tweedie: (sqrt(abar) E[x0|x_t] - x_t) / (1-abar)
+    return torch.cat(scores), torch.cat(log_dens)
 
 
-T_MIS = [8, 15, 25, 40, 60, 80, 100, 130, 170, 249]
+T_MIS = [8, 25, 60, 130, 249] if FAST else [8, 15, 25, 40, 60, 80, 100, 130, 170, 249]
 W_MIS = [1.0, 2.0, 4.0, 8.0]
-n_q = 200 if FAST else 600
-g = torch.Generator().manual_seed(5)
+N_XT = 30 if FAST else 50                                   # x_t quadrature grid: N_XT x N_XT points
+g_xt = torch.linspace(-4.5, 4.5, N_XT, dtype=torch.float64)
+xt_grid = torch.stack([a.flatten() for a in torch.meshgrid(g_xt, g_xt, indexing="xy")], 1)
+t0 = time.time()
 mismatch = {}
 for w in W_MIS:
-    pts_w, probs_w, h_w = tilted_density_grid(Y_TILT, w, n=200)
-    x0_w = sample_from_grid(pts_w, probs_w, h_w, n_q, seed=7).double()
+    # 100 x 100 cells suffice: finer grids (try n=200, N_XT=100) change these numbers by about 1%, but run much slower
+    pts_w, probs_w, _ = tilted_density_grid(Y_TILT, w, n=100)
     errs = []
     for t in T_MIS:
         ab = abar_at(t)
-        xt = math.sqrt(ab) * x0_w + math.sqrt(1 - ab) * torch.randn(n_q, 2, generator=g, dtype=torch.float64)
+        s_true, log_q = noised_grid(xt_grid, pts_w, probs_w, ab)
+        quad_w = torch.softmax(log_q, 0)                    # quadrature weights ∝ q^w_t(x_t) on the x_t grid
         full, per_class = noised_mixtures(ab)
-        s_guided = (1 - w) * full.score(xt) + w * per_class[Y_TILT].score(xt)
-        s_true = noised_grid_score(xt, pts_w, probs_w, ab)
-        errs.append(((s_guided - s_true).pow(2).sum(1).mean() / s_true.pow(2).sum(1).mean()).item())
+        s_guided = (1 - w) * full.score(xt_grid) + w * per_class[Y_TILT].score(xt_grid)
+        errs.append(((quad_w * (s_guided - s_true).pow(2).sum(1)).sum()
+                     / (quad_w * s_true.pow(2).sum(1)).sum()).item())
     mismatch[w] = np.array(errs)
+print(f"quadrature: {time.time() - t0:.0f}s")
 print(f"control w=1 (guided field IS the true score): max relative error {mismatch[1.0].max():.1e}")
 assert mismatch[1.0].max() < 1e-6
 
 # component occupancy: which class-0 component does each sample belong to?
-def occupancy(x):
-    return torch.bincount(class_gmms[Y_TILT].responsibilities(x).argmax(1), minlength=3).float() / len(x)
-
-
-resp_grid = class_gmms[Y_TILT].responsibilities(tw["pts"])
-occ = {"exact $p_w$": (tw["probs"].float() @ resp_grid).numpy(),
-       "DDPM + guidance": occupancy(tw["ddpm"]).numpy(),
-       "DDIM + guidance": occupancy(tw["ddim"]).numpy()}
+occ = {"exact $p_w$": grid_occupancy(tw["pts"], tw["probs"], Y_TILT).numpy(),
+       "DDPM + guidance": component_occupancy(tw["ddpm"], Y_TILT).numpy(),
+       "DDIM + guidance": component_occupancy(tw["ddim"], Y_TILT).numpy()}
 means0 = class_gmms[Y_TILT].means.numpy()
 
 fig, axes = plt.subplots(1, 2, figsize=(11, 3.6))
@@ -798,8 +870,8 @@ plt.show()
 # do not. The top component at $(-1,2)$, the one reaching furthest towards the other classes, loses much of its
 # share (DDIM: almost all of it). The early push is "to the left", and it decides which component a sample joins.
 # **Right:** the guided field departs from the true tilted score mostly at **intermediate noise levels**. The
-# departure is zero at $t=0$ (by construction), vanishes again at very high noise (both fields $\to -x$), and grows
-# rapidly with $w$.
+# departure vanishes as $t\to0$ (at $\sigma=0$ the guided field is exactly $\nabla\log p_w$), vanishes again at very
+# high noise (both fields $\to -x$), and grows rapidly with $w$.
 #
 # **Take-aways from this box.**
 # * Treat $w$ as a *knob judged by sample quality*, not as a principled temperature. Do not use guided samples where
@@ -811,15 +883,27 @@ plt.show()
 #
 # These effects are analysed rigorously by Chidambaram et al. (2024), *What does guidance do? A fine-grained
 # analysis in a simple setting*, and by Bradley & Nakkiran (2024), *Classifier-free guidance is a
-# predictor-corrector*. The latter shows that the DDPM and DDIM versions of CFG differ, and it interprets
-# CFG as an ODE predictor plus a Langevin corrector targeting $q_t(x)^{1-w}q_t(x\mid y)^w$ at each noise level.
+# predictor-corrector*. The former proves, in simple mixture settings, that guidance does not sample the tilted
+# distribution and that strong guidance pushes samples towards the boundary of the class's support. The latter
+# proves that the DDPM and DDIM versions of CFG differ, and it makes the "built-in Langevin corrector" precise. In
+# the continuous-time limit, DDPM with CFG at scale $w$ is equivalent to a predictor–corrector scheme. The predictor
+# is a DDIM (probability-flow) step for the plain *conditional* $q_t(x\mid y)$. The corrector is Langevin dynamics
+# targeting $q_t(x)^{1-\gamma}\,q_t(x\mid y)^{\gamma}$ with $\gamma=2w-1$, not $w$. One line shows where $2w-1$
+# comes from. Write the forward SDE as $dx=f\,dt+g\,dW$ and let $s_u,s_c$ be the unconditional and conditional
+# scores. The guided reverse SDE has drift $f-g^2\tilde s_t$ and noise $g\,d\bar W$. Subtracting the conditional
+# probability-flow drift $f-\tfrac12 g^2 s_c$ leaves
+# $$-\tfrac12 g^2\big[2(1-w)\,s_u+(2w-1)\,s_c\big]\,dt+g\,d\bar W ,$$
+# which (time runs backwards, $dt<0$) is a Langevin step of size $g^2|dt|$ on the $(2w-1)$-powered density; the
+# coefficients $2(1-w)$ and $2w-1$ sum to 1. Their analysis covers the DDPM version only. DDIM has no such corrector,
+# consistent with it ending up even further from $p_w$ here.
 #
 # ## 5 · Class-conditional MNIST: the training recipe
 #
 # Scaling up changes nothing conceptually. The conditional U-Net is `dm.UNet(n_classes=10, ...)`: a learned
 # embedding of the label, with one extra row for the null label 10, is added to the time embedding and enters
 # every residual block through FiLM. Training is notebook 05's loop with labels and label dropout. In
-# `dm.train_diffusion` this is just `labels=..., p_uncond=...`, which calls `cfg_training_loss` from above.
+# `dm.train_diffusion` this is just `labels=..., p_uncond=...`, which computes exactly our `cfg_training_loss`
+# (checked in Section 3).
 #
 # Practical details:
 # * $p_\text{uncond}=0.1$ here. Too small, and the unconditional branch, hence $\epsilon_u$, is poor. Too large,
@@ -827,8 +911,8 @@ plt.show()
 # * Train exactly as long as an unconditional model. The extra cost of CFG is paid at *sampling* time.
 # * Below, a CPU gets 200 steps: enough to watch the recipe run (the loss falls from 1 to a few percent), far too
 #   few to sample from. Notebook 05 showed how sample quality develops with training. On a CUDA GPU the default
-#   is 4000 steps (~2–3 min). The reference checkpoint used next was trained with exactly this recipe for
-#   12 000 steps at batch 64.
+#   is 4000 steps (~2–3 min). The checkpoint used next was trained with the same recipe for much longer; the
+#   loading cell prints for how many steps.
 
 # %%
 torch.set_num_threads(N_THREADS)   # back to all threads for the U-Net
@@ -904,22 +988,17 @@ assert torch.allclose(mine, ref, atol=1e-3)
 # %% [markdown]
 # ## 6 · Guidance on MNIST: the scale $w$
 #
-# From here on we use a longer-trained model of the same recipe: the reference checkpoint (12 000 steps) when it is
-# available, otherwise a shorter run saved with this notebook (the cell prints which one). The MNIST
-# classifier from `dmtools` serves as an *evaluator*; it plays no role in sampling.
+# From here on we use a longer-trained model of the same recipe: the reference checkpoint `mnist_unet_cond.pt`
+# when it is available, otherwise a shorter run saved with this notebook (the cell prints which one, and for how
+# many steps it was trained). The MNIST classifier from `dmtools` serves as an *evaluator*; it plays no role in
+# sampling.
 
 # %%
-# The checkpoint stores its loss curve as a numpy array; torch >= 2.6 loads with weights_only=True, which refuses
-# numpy objects unless they are allow-listed. These are our own files, so we allow-list the few numpy types needed.
-if hasattr(torch.serialization, "add_safe_globals"):
-    np_core = getattr(np, "_core", None) or np.core
-    torch.serialization.add_safe_globals([np_core.multiarray._reconstruct, np.ndarray, np.dtype,
-                                          type(np.dtype(np.float64)), type(np.dtype(np.float32))])
-
-REF_CKPT = dm.CKPT_DIR / "mnist_unet_cond.pt"   # reference model: 12k steps, made by pretrain_checkpoints.py
+REF_CKPT = dm.CKPT_DIR / "mnist_unet_cond.pt"   # reference model, made by pretrain_checkpoints.py (or by dm, below)
 OWN_CKPT = dm.CKPT_DIR / "06_mnist_cond.pt"     # same recipe, fewer steps, made while writing this notebook
 if REF_CKPT.exists() or device.type == "cuda":
-    # loads the reference checkpoint, or trains and caches it if missing (a few minutes on a CUDA GPU)
+    # Loads the reference checkpoint. On a CUDA GPU without it, dmtools trains and caches it first (~10 min),
+    # and notebook 07 then reuses the cached model.
     model, ref_sched = dm.load_or_train_mnist_model(conditional=True, device=device, amp=USE_AMP)
     assert torch.allclose(ref_sched.alpha_bars, mnist_sched.alpha_bars)
 elif OWN_CKPT.exists():
@@ -983,7 +1062,9 @@ plt.show()
 @torch.no_grad()
 def feature_diversity(x, y):
     """Mean pairwise distance of classifier features within each class, averaged over classes."""
-    feats = clf.features(x.clamp(-1, 1))
+    # .cpu(): torch.pdist has no Apple-MPS kernel, and a few hundred 128-d feature vectors are cheap on the CPU
+    feats = clf.features(x.clamp(-1, 1)).float().cpu()
+    y = y.cpu()
     return np.mean([torch.pdist(feats[y == c]).mean().item() for c in range(10) if (y == c).sum() > 1])
 
 
@@ -1032,11 +1113,10 @@ ws = np.array(W_SWEEP)
 get = lambda k: np.array([sweep[w][k] for w in W_SWEEP])
 fig, axes = plt.subplots(1, 3, figsize=(13, 3.8), gridspec_kw=dict(width_ratios=[1.7, 1, 1]))
 ax = axes[0]
-ax.plot(ws, get("acc"), "o-", color="tab:blue", label="accuracy (fidelity)")
+ax.plot(ws, get("acc"), "o-", color="tab:blue", label=f"accuracy (fidelity; real digits: {real_m['acc']:.2f})")
 ax.plot(ws, get("conf"), "s-", color="tab:cyan", label="mean confidence $p(y\\mid x)$ (fidelity)")
 ax.plot(ws, get("div"), "D-", color="tab:red", label="within-class diversity, rel. to real (diversity)")
-ax.axhline(real_m["acc"], color="tab:blue", ls=":", lw=1)
-ax.axhline(1.0, color="tab:red", ls=":", lw=1, label="real data (dotted)")
+ax.axhline(1.0, color="tab:red", ls=":", lw=1, label="diversity of real digits (= 1)")
 ax.set(xlabel="guidance scale w", ylabel="value", title="Fidelity rises, diversity falls",
        ylim=(0, max(1.1, get("div").max() + 0.05)))
 ax.legend(loc="lower right")
@@ -1099,8 +1179,9 @@ print(f"{'':28s} accuracy  confidence  rel.diversity  rel.ink  % px > 1.5")
 for name, m in trick_m.items():
     print(f"{name:28s} {m['acc']:7.3f}   {m['conf']:9.3f}   {m['div']:12.3f}   {m['ink']:6.2f}   {100 * m['over']:9.2f}")
 
-show_idx = torch.cat([torch.where(y_sweep == c)[0][:2] for c in range(10)])
-fig, axes = plt.subplots(1, len(trick_x), figsize=(3.1 * len(trick_x), 2.0))
+show_idx = torch.cat([torch.where(y_sweep == c)[0][:2] for c in range(10)])   # 2 samples per digit
+show_idx = torch.cat([show_idx[0::2], show_idx[1::2]])                          # row 1: 0..9, row 2: 0..9
+fig, axes = plt.subplots(len(trick_x), 1, figsize=(7.0, 1.75 * len(trick_x)))
 for ax, name in zip(axes, trick_x):
     dm.show_images(trick_x[name][show_idx].float().cpu(), nrow=10, ax=ax, title=name)
 plt.tight_layout()
@@ -1129,15 +1210,18 @@ plt.show()
 # (e.g. "blurry, extra fingers"), and it costs nothing extra: $y^-$ simply takes the place of $\varnothing$ in the
 # batch.
 #
-# **A caveat worth deriving.** At $t=0$ the two versions target
-# $$\underbrace{p(x\mid y)\Big[\tfrac{p(x\mid y)}{p(x)}\Big]^{w-1}}_{\text{null: }\;\le\;p(y)^{1-w}\,p(x\mid y)}
+# **A caveat worth deriving.** At every noise level $t$ the guided field is the log-gradient of
+# $$\underbrace{q_t(x\mid y)\Big[\tfrac{q_t(x\mid y)}{q_t(x)}\Big]^{w-1}}_{\text{null: }\;\le\;p(y)^{1-w}\,q_t(x\mid y)}
 # \qquad\text{vs.}\qquad
-# p(x\mid y)\Big[\tfrac{p(x\mid y)}{p(x\mid y^-)}\Big]^{w-1}.$$
-# With the null label, $p(x)\ge p(y)\,p(x\mid y)$ bounds the target by a multiple of $p(x\mid y)$, so
-# guidance can re-weight the class but never leave its support. A negative condition gives no such bound:
-# where $y^-$ has even less mass than $y$, the ratio grows without limit. Strong negative guidance can therefore
-# push samples *out of* class $y$ altogether. In 2-D, exactly: ask for class 1, steering away from nothing (null)
-# or from class 2, at two strengths.
+# q_t(x\mid y)\Big[\tfrac{q_t(x\mid y)}{q_t(x\mid y^-)}\Big]^{w-1}.$$
+# With the null label, $q_t(x)=\sum_c p(c)\,q_t(x\mid c)\ge p(y)\,q_t(x\mid y)$, and for $w\ge1$ the exponent $1-w$
+# is $\le0$. So the function plain CFG climbs is bounded by a constant times the class density itself, at *every*
+# $t$. It has no high ground where class $y$ has negligible mass: guidance can re-weight the class, but it does not
+# pull samples out of it. A negative condition gives no such bound. Where $y^-$ has even less mass than $y$, the
+# ratio grows without limit, so strong negative guidance can push samples *out of* class $y$ altogether.
+# (The bound constrains the field, not the sampler's output, and it assumes exact scores. With learned scores,
+# Chidambaram et al. (2024) show that a large enough $w$ leads off the class's support even with the null label.)
+# In 2-D, exactly: ask for class 1, steering away from nothing (null) or from class 2, at two strengths.
 
 # %%
 if device.type == "cpu":
@@ -1174,7 +1258,7 @@ plt.tight_layout()
 plt.show()
 
 # %% [markdown]
-# With the null negative, class-1 samples stay inside class 1's region, as the bound promises. With class 2 as
+# With the null negative, class-1 samples stay inside class 1's region, consistent with the bound. With class 2 as
 # the negative, they are pushed specifically away from class 2 (green, right). A mild $w=1.5$ shifts them to the left,
 # mostly still inside class 1. $w=3$ overshoots: the samples leave class 1 entirely and pile up in a narrow streak
 # in class 0's territory. That point is
@@ -1209,7 +1293,9 @@ plt.show()
 # Same starting noise in both rows. Most samples barely change, a few are visibly altered, and the evaluator's
 # $p(3\mid x)$ drops by a large factor. The price shows in $p(8\mid x)$, which can drop a little. Through
 # $\varnothing$, plain CFG pushes away from *all* other digits. The negative version pushes away from 3 only, and,
-# as in 2-D, it is not confined to the support of $p(x\mid 8)$. Try `W_NEG = 4` to watch it overshoot.
+# as in 2-D, nothing bounds it by $q_t(x\mid 8)$. Try `W_NEG = 4` or `8` and look at the *images* rather than the
+# printed numbers: the evaluator still calls most samples 8s, but the strokes bend into curly, open shapes that are
+# as un-3-like as possible. On MNIST the overshoot is subtler than in 2-D, but it is there.
 # The same mechanism, with several conditions, gives **compositional** generation (Exercise 6):
 # $\tilde\epsilon=\epsilon_u+\sum_i w_i(\epsilon_{c_i}-\epsilon_u)$, a product of experts with negative
 # weights allowed.
@@ -1217,15 +1303,20 @@ plt.show()
 # ## Exercises
 #
 # **Exercise 1 (label dropout).** Retrain the 2-D CFG network (Section 3) with `P_UNCOND = 0.0`, then with `0.5`.
-# Before running: which of $w=0$, $w=1$ and $w=3$ will still produce sensible samples in each case? Check with
-# the MMD table.
+# Before running: which of $w=0$, $w=1$, $w=3$ and $w=10$ will still produce sensible samples in each case? In
+# particular, using Section 3's diagnosis of the $w=10$ collapse, predict what $p_\text{uncond}=0.5$ does to it.
+# Check with the $\epsilon$-error table, the MMD table and the figure.
 #
 # <details><summary>Hint / solution</summary>
 #
 # With $p_\text{uncond}=0$ the null embedding is never trained, so $\epsilon_u$ is garbage. $w=0$ samples garbage,
 # $w=1$ is fine (it never evaluates $\epsilon_u$: `dm.model_predictions` skips the second pass when $w=1$), and
-# $w=3$ is badly distorted because it extrapolates away from garbage. With $p_\text{uncond}=0.5$ both branches
-# work, but each sees only half of the training signal, so at a fixed number of steps both are slightly worse.
+# $w=3$ is badly distorted because it extrapolates away from garbage. With $p_\text{uncond}=0.5$ the unconditional
+# branch sees more than three times as much data as with 0.15. Its error at small $t$ drops sharply, the error of
+# the implicit classifier $\epsilon_c-\epsilon_u$ drops several-fold, and the $w=10$ collapse of Section 3 largely
+# disappears. Meanwhile $\epsilon_c$ gets slightly worse, because the conditional branch now sees only half the
+# data. This confirms that the under-trained $\epsilon_u$ was the culprit. $p_\text{uncond}$ trades conditional
+# quality ($w=1$) against guided quality ($w\gg1$).
 # </details>
 #
 # **Exercise 2 (negative guidance scale).** Use classifier guidance with $w=-2$ in Section 2. Predict where the
@@ -1242,15 +1333,24 @@ plt.show()
 # *clean* one evaluated at the noisy point (`noisy_classifier_logprobs(x64, None)`), sample with $w=1$, and compare
 # with the true $p(x\mid y)$ (MMD). Then evaluate the clean classifier at the Tweedie denoised point
 # $\hat x_0(x_t)=\big(x_t+(1-\bar\alpha_t)\nabla\log q_t(x_t)\big)/\sqrt{\bar\alpha_t}$ instead, with the score from
-# `noised_mixtures(ab)[0].score(x64)`, which is differentiable. Which is closer, and why is neither exact?
+# `noised_mixtures(ab)[0].score(x64)`, which is differentiable. *Before running*, predict which of the two will be
+# closer to $p(x\mid y)$. Then check (per-class MMD over a few seeds, and the component occupancy), and explain why
+# neither is exact.
 #
 # <details><summary>Hint / solution</summary>
 #
-# The clean classifier at $x_t$ is over-confident and has the wrong geometry: $x_t$ is a shrunken, noisy version
-# of $x_0$, and the clean decision boundaries do not apply to it. The distribution comes out distorted, most
-# visibly for class 1. Evaluating at $\hat x_0(x_t)$ fixes the geometry, but $p(y\mid\mathbb E[x_0\mid x_t])\neq
-# \mathbb E[p(y\mid x_0)\mid x_t]$ (Jensen), so it is still over-confident at high noise. This approximation
-# underlies "universal guidance" and DPS-style posterior sampling (notebook 07).
+# Both are clearly biased: their MMD to $p(x\mid y)$ is a few times the noise floor, whereas the noise-aware
+# classifier sits at the floor. The clean classifier at $x_t$ has the wrong geometry, because $x_t$ is a shrunken,
+# noisy version of $x_0$ and the clean decision boundaries do not apply to it. Most people predict that the
+# Tweedie plug-in fixes this. In this lab it is actually *worse*, on every seed, and it visibly re-weights
+# components. The reason is that the expectation does not commute with the non-linear classifier:
+# $p(y\mid\mathbb E[x_0\mid x_t])\neq\mathbb E[p(y\mid x_0)\mid x_t]$. At high noise $\hat x_0(x_t)$ collapses to the
+# data mean $\mathbb E[x_0]$, which here lies inside class 1's region (check:
+# `(gmm.weights[:, None] * gmm.means).sum(0)`). So the plug-in says "class 1" with near certainty for *every*
+# $x_t$, while the truth is close to $1/3$ each. It is most over-confident exactly where the true classifier is
+# most uncertain, and, as with strong guidance, the decisions forced at high noise re-weight the components. A
+# plausible-looking fix need not help: measure. This plug-in approximation underlies "universal guidance" and
+# DPS-style posterior sampling (notebook 07).
 # </details>
 #
 # **Exercise 4 (is the Section 4 mismatch a discretisation error? can MCMC fix it?).** (a) Re-run the Section 4
@@ -1309,13 +1409,16 @@ plt.show()
 # * Increasing $w$ trades **diversity for fidelity**. Beyond a few units it adds little fidelity and causes
 #   over-saturation. Choose $w$ by measurement. Guidance intervals, CFG-rescale and $\hat x_0$ thresholding
 #   soften the side effects.
-# * Ideal guidance mostly **re-weights** modes, starving those near other classes. Learned CFG also **amplifies
-#   model error** by $w$. An over-smoothed $\epsilon_u$ in particular turns into over-sharpened, collapsed modes.
+# * Guided sampling, even with exact scores, mostly **re-weights** modes, starving those near other classes. That
+#   is an effect of the guided *dynamics*, not of the tilted target $p(x)p(y\mid x)^w$, which barely re-weights
+#   well-separated modes. Learned CFG also **amplifies model error** by $w$. An over-smoothed $\epsilon_u$ in
+#   particular turns into over-sharpened, collapsed modes.
 # * Guided samplers do **not** sample $p(x)p(y\mid x)^w$: noising does not commute with tilting, guidance acts
 #   mostly at intermediate noise, and DDPM and DDIM give different results. Use $w$ as a quality knob, not as a
 #   calibrated temperature.
-# * **Negative prompts** replace $\varnothing$ by $y^-$ and follow the gradient of a likelihood ratio. Unlike plain
-#   CFG, they are not confined to the support of $p(x\mid y)$, so strong negative guidance can overshoot.
+# * **Negative prompts** replace $\varnothing$ by $y^-$ and follow the gradient of a likelihood ratio. Plain CFG
+#   climbs a function bounded by a multiple of $q_t(x\mid y)$; a negative prompt has no such bound, so strong
+#   negative guidance can overshoot out of the class.
 #
 # ## Further reading
 #
@@ -1332,8 +1435,9 @@ plt.show()
 # * M. Chidambaram et al. (2024). *What does guidance do? A fine-grained analysis in a simple setting.* arXiv:2409.13074.
 # * A. Bradley & P. Nakkiran (2024). *Classifier-Free Guidance is a Predictor-Corrector.* arXiv:2408.09000.
 # * T. Kynkäänniemi et al. (2024). *Applying Guidance in a Limited Interval Improves Sample and Distribution Quality
-#   in Diffusion Models.* NeurIPS 2024.
-# * S. Lin et al. (2024). *Common Diffusion Noise Schedules and Sample Steps are Flawed.* WACV 2024. Introduces CFG-rescale.
+#   in Diffusion Models.* NeurIPS 2024. arXiv:2404.07724.
+# * S. Lin et al. (2024). *Common Diffusion Noise Schedules and Sample Steps are Flawed.* WACV 2024.
+#   arXiv:2305.08891. Introduces CFG-rescale.
 # * S. Dieleman (2022). *Guidance: a cheat code for diffusion models.* Blog post, sander.ai.
 # * Y. Song (2021). *Generative Modeling by Estimating Gradients of the Data Distribution.* Blog post (controllable
 #   generation section).

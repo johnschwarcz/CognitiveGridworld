@@ -23,7 +23,7 @@
 # - what a trained model gives you (samples, the denoiser $\mathbb E[x_0\mid x_t]$, scores), and the Bayesian recipe
 #   *prior × likelihood → posterior* behind every application
 # - **inpainting**: the simple *replacement* trick, why it is biased even with a perfect model, and how
-#   **RePaint**'s resampling removes most of the bias
+#   **RePaint**'s resampling reduces (but does not remove) that bias, at the cost of many more network evaluations
 # - **SDEdit**: image-to-image editing by "noise, then denoise", and its realism–faithfulness knob
 # - **Diffusion Posterior Sampling (DPS)** for linear inverse problems (super-resolution, sparse pixels): its key
 #   approximation $p(y\mid x_t)\approx p(y\mid\hat x_0(x_t))$ and its step size
@@ -66,7 +66,8 @@ N_TOY = 400 if FAST else 4000     # particles in the 2-D experiments
 TOY_STEPS = 20 if FAST else 100   # reverse steps in the 2-D experiments
 STEPS = 10 if FAST else 50        # reverse steps for MNIST (inpainting, SDEdit, DDIM inversion)
 DPS_STEPS = 10 if FAST else 100   # DPS needs more, smaller steps (section 4)
-N_IMG = 2 if FAST else 6          # test digits per experiment
+N_IMG = 2 if FAST else 6          # test digits per experiment (and per figure)
+N_EVAL = 2 if FAST else 10        # test digits per mask for the inpainting scores (section 2.4)
 N_POST = 2 if FAST else 4         # posterior samples per measurement
 
 # one colour per method, used in every figure
@@ -192,6 +193,14 @@ def heat_rgb(v, vmax):
 # With $\eta=1$ and $t'=t-1$ this is exactly DDPM's ancestral step. With $\eta=0$ it is deterministic. We also need
 # the forward process between two times, $q(x_{t'}\mid x_t)=\mathcal N\big(\sqrt{\bar\alpha_{t'}/\bar\alpha_t}\,x_t,\;
 # (1-\bar\alpha_{t'}/\bar\alpha_t)\,I\big)$ for $t'>t$, which "re-noises" a partially denoised image.
+#
+# **Gotcha: long strides under-disperse.** For $t'<t-1$ the $\eta=1$ step with a perfect denoiser still has the
+# correct *mean* $\mathbb E[x_{t'}\mid x_t]$, because that mean is linear in $x_0$ and $\hat x_0=\mathbb E[x_0\mid x_t]$.
+# But its variance $s^2$ is the variance of $q(x_{t'}\mid x_t,x_0)$ for a *known* $x_0$. The true reverse kernel
+# $p(x_{t'}\mid x_t)=\int q(x_{t'}\mid x_t,x_0)\,p(x_0\mid x_t)\,dx_0$ also carries the uncertainty about $x_0$, an
+# extra $c^2\,\mathrm{Cov}[x_0\mid x_t]$, where $c$ is the step's coefficient on $\hat x_0$. The missing term
+# vanishes as the steps get finer, but with a few dozen strided steps the samples are too concentrated *even with a
+# perfect denoiser* (Analytic-DPM, Bao et al. 2022, derives the optimal variance). We measure this in section 5.
 #
 # **Implementation detail.** Time is an integer $t\in\{0,\dots,T-1\}$, and we use $t=-1$ for clean data
 # ($\bar\alpha_{-1}=1$). This removes the special cases at the end of the chain that cause many off-by-one bugs.
@@ -325,10 +334,17 @@ plt.show()
 #
 # Lugmayr et al. (2022) give the unknown region time to adapt to the known one at every noise level. After going
 # down $j$ steps, the sampler **jumps back up** $j$ steps by adding fresh forward noise to the *whole* image,
-# $x_{t+j}\sim q(x_{t+j}\mid x_t)$, and denoises again (with replacement). It repeats this $r$ times before moving on.
-# Each "noise up, denoise down" round trip approximately leaves $p_t$ invariant, like an MCMC move. With the known
-# pixels clamped it acts like a Gibbs sweep over the unknown pixels, so repeating it pulls them towards the
-# conditional. The price is roughly $r$ times more network evaluations (NFE).
+# $x_{t+j}\sim q(x_{t+j}\mid x_t)$, and denoises again (with replacement). It climbs back and re-denoises $r-1$ times,
+# so every level on the resampling grid is traversed $r$ times in total ($r=1$ is plain replacement). The price is
+# roughly $r$ times more network evaluations (NFE).
+#
+# The intuition is MCMC-like. Without a constraint, noising up with the exact forward kernel and denoising back down
+# with the exact reverse kernel leaves $p_t$ invariant, so each round trip is a valid move that lets the unknown
+# pixels "mix" while the clamped known pixels keep pulling them. **But it is not an exact sampler of the
+# conditional.** Every descent still uses the replacement kernel, which conditions on the noisy $x^k_t$ rather than
+# on $y$, so $p_t(x_t\mid y)$ is not exactly invariant. RePaint is a heuristic that *reduces* the replacement bias,
+# with no guarantee that it vanishes. Asymptotically exact alternatives exist, e.g. sequential Monte Carlo with
+# twisted proposals (Wu et al. 2023), at a higher cost.
 #
 # **Gotchas** (each one silently produces bad results rather than an error):
 # - noise the known pixels to the level of the *destination* of each step (`t_next`), and copy them exactly at the
@@ -387,7 +403,8 @@ print("replacement   (n=8)            :", repaint_path(8, 2, 1))
 
 # %% [markdown]
 # Reading the RePaint path: it descends to grid index 4, climbs back to 6, descends to 4 again, and so on. Every
-# multiple of `jump` below the top (here 4, 2 and 0) is reached $r=3$ times before the walk continues downwards.
+# multiple of `jump` below the top (here 4, 2 and 0) is reached $r=3$ times (with $r-1=2$ climbs back) before the
+# walk continues downwards.
 #
 # ### 2.3 The exact lab: inpainting a 2-D Gaussian mixture
 #
@@ -454,6 +471,13 @@ def w1(a, b):
     return (torch.sort(a.double().flatten())[0] - torch.sort(b.double().flatten())[0]).abs().mean().item()
 
 
+def implausible_mass(x2, weights, means, variances, rel=0.05):
+    """Fraction of samples where the exact density is below `rel` times its peak (regions it nearly rules out)."""
+    grid = torch.linspace(-5, 6, 4000, dtype=torch.float64)
+    peak = gmm1d_pdf(grid, weights, means, variances).max()
+    return (gmm1d_pdf(x2.double().flatten(), weights, means, variances) < rel * peak).double().mean().item()
+
+
 exact_eps = ExactEps(gmm, sched_cpu)
 C_OBS = -1.0                                         # we observe x1 = -1 and infer x2
 cw, cm, cv = gmm_x2_given_x1(gmm, C_OBS)
@@ -471,24 +495,29 @@ assert abs(w1(near[:m_], exact_x2[:m_]) - dm.sliced_wasserstein(near[:m_, None],
 
 # %% [markdown]
 # Now we run replacement and RePaint with the perfect model and compare their $x_2$ samples with the exact conditional.
-# The 1-D Wasserstein distance $W_1$ to exact samples measures the error. Two exact samples of the same size are not
-# at $W_1=0$ either, so we also compute that sampling-noise floor.
+# Two numbers measure the error. The 1-D Wasserstein distance $W_1$ to exact samples is the overall error; two exact
+# samples of the same size are not at $W_1=0$ either, so we also compute that sampling-noise floor. The
+# **implausible mass** is the fraction of samples that land where the exact conditional density is below 5% of its
+# peak, i.e. in regions the observation nearly rules out. Exact samples give its baseline value.
 
 # %%
 x_obs_toy = torch.zeros(N_TOY, 2)
 x_obs_toy[:, 0] = C_OBS
 mask_toy = torch.tensor([1.0, 0.0])                  # x1 known, x2 unknown
-toy_runs = [("replacement", n, 1) for n in ([25, 100] if FAST else [25, 100, 400, 1000])] + \
+toy_runs = [("replacement", n_steps_toy, 1) for n_steps_toy in ([25, 100] if FAST else [25, 100, 400, 1000])] + \
            [("RePaint", TOY_STEPS, r) for r in ([2, 5] if FAST else [2, 5, 10, 20])]
 toy_results = {}
 t0 = time.time()
-for method, n, r in toy_runs:
-    out, nfe = inpaint(exact_eps, sched_cpu, x_obs_toy, mask_toy, n_steps=n, jump=5, n_resample=r,
+for method, n_steps_toy, r in toy_runs:
+    out, nfe = inpaint(exact_eps, sched_cpu, x_obs_toy, mask_toy, n_steps=n_steps_toy, jump=5, n_resample=r,
                        generator=torch.Generator().manual_seed(3))
-    toy_results[(method, n, r)] = dict(x2=out[:, 1], nfe=nfe, w1=w1(out[:, 1], exact_x2))
-    print(f"{method:<12s} n={n:5d} r={r:3d}: NFE = {nfe:5d}   W1 to exact = {toy_results[(method, n, r)]['w1']:.3f}")
+    res = dict(x2=out[:, 1], nfe=nfe, w1=w1(out[:, 1], exact_x2), bad=implausible_mass(out[:, 1], cw, cm, cv))
+    toy_results[(method, n_steps_toy, r)] = res
+    print(f"{method:<12s} n={n_steps_toy:5d} r={r:3d}: NFE = {nfe:5d}   W1 to exact = {res['w1']:.3f}   "
+          f"implausible mass = {res['bad']:.3f}")
 noise_floor = w1(gmm1d_sample(N_TOY, cw, cm, cv, seed=4), exact_x2)
-print(f"sampling-noise floor W1 = {noise_floor:.3f}   ({time.time() - t0:.0f}s)")
+print(f"exact samples: W1 = {noise_floor:.3f} (sampling-noise floor), implausible mass = "
+      f"{implausible_mass(exact_x2, cw, cm, cv):.3f}   ({time.time() - t0:.0f}s)")
 
 # %%
 REPL_SHOW = ("replacement", 100 if FAST else 400, 1)   # about the same NFE as ...
@@ -501,13 +530,14 @@ for c, colour in zip(range(3), plt.cm.Set2.colors):
 axes[0].axvline(C_OBS, color=COL["exact"], lw=1.5, label=f"observed $x_1={C_OBS:g}$")
 axes[0].set(title="2-D mixture (labelled_gmm)", xlabel="$x_1$", ylabel="$x_2$", aspect="equal")
 axes[0].legend(markerscale=4, loc="lower right", fontsize=7)
-z = torch.linspace(-3, 3.5, 400, dtype=torch.float64)
+x2_grid = torch.linspace(-3, 3.5, 400, dtype=torch.float64)
 for ax, key in zip(axes[1:3], [REPL_SHOW, REPAINT_SHOW]):
     res = toy_results[key]
     ax.hist(res["x2"].numpy(), bins=70, range=(-3, 3.5), density=True, color=COL[key[0]], alpha=0.6,
             label=f"{key[0]} (perfect model)")
-    ax.plot(z, gmm1d_pdf(z, cw, cm, cv), color=COL["exact"], lw=1.5, label=r"exact $p(x_2\mid x_1=c)$")
-    ax.set(title=f"{key[0]}: NFE = {res['nfe']},  $W_1$ = {res['w1']:.2f}", xlabel="$x_2$", ylabel="density")
+    ax.plot(x2_grid, gmm1d_pdf(x2_grid, cw, cm, cv), color=COL["exact"], lw=1.5, label=r"exact $p(x_2\mid x_1=c)$")
+    ax.set(title=f"{key[0]}: NFE = {res['nfe']},  $W_1$ = {res['w1']:.2f}\nimplausible mass = {res['bad']:.2f}",
+           xlabel="$x_2$", ylabel="density")
     ax.legend(loc="upper left")
 for method in ["replacement", "RePaint"]:
     keys = [k for k in toy_runs if k[0] == method]
@@ -525,14 +555,20 @@ plt.show()
 # exact conditional almost rules out. Its error barely changes with 40× more steps (red curve), confirming that the
 # bias is in the method, not the discretisation. The wrong mode comes from the components at $x_1=0$ and $x_1=-2.2$: at
 # high noise, the noisy copy of $x_1=-1$ cannot rule them out, and $x_2$ commits to them early. RePaint at about the
-# same cost moves most of that mass back, and more resampling keeps reducing the error (blue curve).
+# same cost moves only *part* of that mass back (compare the implausible mass of the two histograms). More resampling
+# keeps reducing the error (blue curve), but slowly: even the largest $r$, at about 20× the NFE of a plain chain, stays
+# far above the noise floor with a visible wrong mode. RePaint is better than replacement, but it is an approximation
+# too, and with a perfect model its remaining error is pure method bias. (A smaller part of the error at $n=100$ grid
+# steps comes from the under-dispersion of strided steps, section 1.1.)
 #
 # ### 2.4 Inpainting MNIST digits
 #
 # Now the real model. We use three masks: the bottom half missing, a 12×12 centre square missing, and 85% of the
-# pixels missing at random. Replacement and RePaint each run on six test digits per mask. The classifier tells us
-# whether a completion is still recognisably the original digit. This is a rough proxy for "coherent with the known
-# pixels", because a large mask can make a few digits genuinely ambiguous.
+# pixels missing at random. Three samplers see the same inputs: replacement with the usual `STEPS` steps; replacement
+# with as many steps as RePaint spends NFE, so that compute is not the difference; and RePaint ($r=5$). The
+# classifier tells us whether a completion is still recognisably the original digit. This is a rough proxy for
+# "coherent with the known pixels", because a large mask can make a few digits genuinely ambiguous. We score
+# `N_EVAL` digits per mask and show the first six.
 
 # %%
 def make_masks():
@@ -554,43 +590,61 @@ def show_masked(x, mask):
 
 
 MASKS = make_masks()
-INP_IDX = torch.tensor([0, 1, 3, 4, 7, 8])[:N_IMG]           # digits 7 2 0 4 9 5
+INP_IDX = torch.tensor([0, 1, 3, 4, 7, 8, 40, 41, 42, 43, 44, 45])[:N_EVAL]   # the figure shows 7 2 0 4 9 5
+n_per_mask = len(INP_IDX)
 x_inp = x_test[INP_IDX].repeat(len(MASKS), 1, 1, 1).to(device)  # every mask gets the same digits
 lab_inp = y_test[INP_IDX].repeat(len(MASKS))
-mask_inp = torch.cat([m.expand(len(INP_IDX), -1, -1, -1) for m in MASKS.values()]).to(device)
+mask_inp = torch.cat([m.expand(n_per_mask, -1, -1, -1) for m in MASKS.values()]).to(device)
 R_RESAMPLE = 2 if FAST else 5
+inp_out, inp_nfe = {}, {}
 t0 = time.time()
-out_repl, nfe_repl = inpaint(model, schedule, x_inp, mask_inp, n_steps=STEPS, generator=make_gen(10))
-t1 = time.time()
-out_rp, nfe_rp = inpaint(model, schedule, x_inp, mask_inp, n_steps=STEPS, jump=5, n_resample=R_RESAMPLE,
-                         generator=make_gen(10))
-print(f"replacement: NFE = {nfe_repl} ({t1 - t0:.0f}s);  RePaint (jump 5, r = {R_RESAMPLE}): "
-      f"NFE = {nfe_rp} ({time.time() - t1:.0f}s)")
-print(f"{'mask':<15s} {'replacement':>12s} {'RePaint':>9s}   (fraction classified as the original digit)")
-pred_repl, pred_rp = classify(out_repl), classify(out_rp)
-n = len(INP_IDX)
+inp_out["RePaint"], inp_nfe["RePaint"] = inpaint(model, schedule, x_inp, mask_inp, n_steps=STEPS, jump=5,
+                                                 n_resample=R_RESAMPLE, generator=make_gen(10))
+for name, n_steps_inp in [("replacement", STEPS), ("replacement, equal NFE", inp_nfe["RePaint"])]:
+    inp_out[name], inp_nfe[name] = inpaint(model, schedule, x_inp, mask_inp, n_steps=n_steps_inp,
+                                           generator=make_gen(10))
+INP_METHODS = ["replacement", "replacement, equal NFE", "RePaint"]
+print(f"{len(x_inp)} inputs x 3 samplers in {time.time() - t0:.0f}s; NFE: " +
+      ", ".join(f"{m} {inp_nfe[m]}" for m in INP_METHODS))
+# 1 = still classified as the original digit; one row per mask
+correct = {m: (classify(inp_out[m]) == lab_inp).float().view(len(MASKS), n_per_mask) for m in INP_METHODS}
+
+
+def mean_se(v):
+    """Mean and standard error of a 0/1 vector, as text."""
+    p = v.mean().item()
+    return f"{p:.2f} ± {math.sqrt(p * (1 - p) / len(v)):.2f}"
+
+
+print(f"\nfraction classified as the original digit (± standard error; {n_per_mask} digits per mask)")
+print(f"{'mask':<15s}" + "".join(f"{m:>25s}" for m in INP_METHODS))
 for i, name in enumerate(MASKS):
-    sl = slice(i * n, (i + 1) * n)
-    print(f"{name:<15s} {(pred_repl[sl] == lab_inp[sl]).float().mean():12.2f} "
-          f"{(pred_rp[sl] == lab_inp[sl]).float().mean():9.2f}")
+    print(f"{name:<15s}" + "".join(f"{mean_se(correct[m][i]):>25s}" for m in INP_METHODS))
+print(f"{'all masks':<15s}" + "".join(f"{mean_se(correct[m].flatten()):>25s}" for m in INP_METHODS))
 
 # %%
-fig, axes = plt.subplots(1, len(MASKS), figsize=(15, 3.6))
+fig, axes = plt.subplots(1, len(MASKS), figsize=(15, 4.4))
 for i, (ax, name) in enumerate(zip(axes, MASKS)):
-    sl = slice(i * n, (i + 1) * n)
-    image_grid([x_inp[sl], show_masked(x_inp[sl], mask_inp[sl]), out_repl[sl], out_rp[sl]], ax=ax, title=name,
-               row_labels=["original", "observed", "replacement", "RePaint"] if i == 0 else None)
+    sl = slice(i * n_per_mask, i * n_per_mask + N_IMG)            # the first N_IMG digits of each mask
+    image_grid([x_inp[sl], show_masked(x_inp[sl], mask_inp[sl])] + [inp_out[m][sl] for m in INP_METHODS],
+               ax=ax, title=name,
+               row_labels=["original", "observed"] + [f"{m.split(',')[0]}\n({inp_nfe[m]} NFE)" for m in INP_METHODS]
+               if i == 0 else None)
 plt.tight_layout()
 plt.show()
 
 # %% [markdown]
 # Look at how the completions connect to the known pixels. Replacement often produces strokes that do not continue
 # the observed ones (kinks and crossings at the border of the mask, an extra loop), and on the sparse mask it mostly
-# draws scribbles that ignore the scattered known pixels. RePaint's completions are coherent digits far more often,
-# and the classifier table agrees, at the cost of several times more NFE. Note that "coherent" does not mean
-# "the original digit": the upper half of a 2 or a 9 is genuinely compatible with other digits, and a correct
-# posterior sampler *should* sometimes complete it differently. The sparse mask is the hardest case for both methods
-# at this step budget. Section 4.3 attacks a similar problem with DPS.
+# draws scribbles that ignore the scattered known pixels. Giving it as many steps as RePaint spends NFE does not cure
+# this, just as in the 2-D lab: the problem is the method, not the step count. RePaint's completions are coherent
+# digits more often, most clearly on the sparse mask, and the pooled row of the table agrees. Read the per-mask rows
+# with their standard errors in mind: with `N_EVAL` digits per mask, differences of one or two digits are noise. RePaint
+# is not seamless either. Some of its completions still have strokes that stop or kink at the mask border, as the
+# 2-D lab predicts for $r=5$. Note also that "coherent" does not mean "the original digit": the upper half of a 2 or
+# a 9 is genuinely compatible with other digits, and a correct posterior sampler *should* sometimes complete it
+# differently. The sparse mask is the hardest case at this step budget. Section 4.3 attacks a similar problem with
+# DPS.
 #
 # ### 2.5 One input, many completions
 #
@@ -697,11 +751,12 @@ plt.show()
 # SDEdit at a range of strengths, and track three quantities:
 # - **faithfulness to the content**: does the classifier still recognise the *original* digit?
 # - **faithfulness to the pixels**: RMSE between output and guide;
-# - **realism (typicality under the prior)**: the diffusion model's own noise-prediction error on the image, averaged
-#   over a few noise levels and divided by the same quantity for real test digits. These errors are terms of the
-#   training objective, a reweighted variational bound on $-\log p(x)$ (notebook 02). A value of 1 means "as probable
-#   under the prior as real digits", larger means less typical. It is the model judging images, so it measures
-#   typicality under *this* prior rather than human-perceived realism.
+# - **realism**, measured by an **atypicality score**: the diffusion model's own noise-prediction error on the image,
+#   averaged over a few *low* noise levels and divided by the same quantity for real test digits. These errors are
+#   terms of the training objective, a reweighted variational bound on $-\log p(x)$ (notebook 02). A value of 1 means
+#   "as typical at fine scales as real digits", larger means less typical. Only low-noise terms of the bound are used,
+#   so global shape and identity are not judged (a well-drawn wrong digit scores 1). It is the model judging images,
+#   so it measures typicality under *this* prior rather than human-perceived realism.
 
 # %%
 def corrupt(x, generator):
@@ -725,8 +780,8 @@ def denoising_error(x, ts=(50, 150, 300), n_draws=2):
 err_real = denoising_error(x_test[7000:7032])                          # reference: real test digits
 
 
-def realism(x):
-    """Denoising error relative to real digits: 1 = as typical under the prior as real data, larger = less."""
+def atypicality(x):
+    """Fine-scale denoising error relative to real digits: 1 = as typical as real data, larger = less typical."""
     return denoising_error(x) / err_real
 
 
@@ -734,18 +789,18 @@ N_SD = 4 if FAST else 16
 x_clean_sd, lab_sd = x_test[100:100 + N_SD], y_test[100:100 + N_SD]
 x_bad = corrupt(x_clean_sd, torch.Generator().manual_seed(21)).to(device)
 STRENGTHS = [0.2, 0.6] if FAST else [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.8, 1.0]
-sd_out, sd_stats = {}, {"accuracy": [], "rmse_guide": [], "realism": []}
+sd_out, sd_stats = {}, {"accuracy": [], "rmse_guide": [], "atypicality": []}
 t0 = time.time()
 for s in [0.0] + STRENGTHS:
     out = x_bad if s == 0 else sdedit(model, schedule, x_bad, s, STEPS, generator=make_gen(22))
     sd_out[s] = out.cpu()
     sd_stats["accuracy"].append((classify(out) == lab_sd).float().mean().item())
     sd_stats["rmse_guide"].append(((out - x_bad) ** 2).mean().sqrt().item())
-    sd_stats["realism"].append(realism(out))
-print(f"done in {time.time() - t0:.0f}s;  the clean digits themselves: realism score {realism(x_clean_sd):.2f}, "
+    sd_stats["atypicality"].append(atypicality(out))
+print(f"done in {time.time() - t0:.0f}s;  the clean digits themselves: atypicality {atypicality(x_clean_sd):.2f}, "
       f"accuracy {(classify(x_clean_sd) == lab_sd).float().mean():.2f}")
-for s, a, r, g in zip([0.0] + STRENGTHS, sd_stats["accuracy"], sd_stats["rmse_guide"], sd_stats["realism"]):
-    print(f"strength {s:4.2f}: accuracy {a:.2f}   RMSE to guide {r:.2f}   realism score {g:5.2f}")
+for s, a, r, g in zip([0.0] + STRENGTHS, sd_stats["accuracy"], sd_stats["rmse_guide"], sd_stats["atypicality"]):
+    print(f"strength {s:4.2f}: accuracy {a:.2f}   RMSE to guide {r:.2f}   atypicality {g:5.2f}")
 
 # %%
 show_s = [0.0] + STRENGTHS
@@ -761,19 +816,19 @@ ax1.plot(show_s, sd_stats["accuracy"], "o-", color="tab:blue", label="classified
 ax1.plot(show_s, sd_stats["rmse_guide"], "s-", color="tab:gray", label="RMSE to the guide (pixel faithfulness)")
 ax1.set(xlabel="SDEdit strength $s=t_0/T$", ylabel="accuracy / RMSE", ylim=(0, 1.05))
 ax2 = ax1.twinx()
-ax2.plot(show_s, sd_stats["realism"], "^-", color="tab:orange", label="realism score (right axis, 1 = real data)")
+ax2.plot(show_s, sd_stats["atypicality"], "^-", color="tab:orange", label="atypicality (right axis, 1 = real data)")
 ax2.axhline(1.0, color="tab:orange", ls=":", lw=1)
-ax2.set_ylabel("realism score (log scale, lower = more typical)")
+ax2.set_ylabel("atypicality (log scale, lower = more realistic)")
 ax2.set_yscale("log")
 h1, l1 = ax1.get_legend_handles_labels()
 h2, l2 = ax2.get_legend_handles_labels()
 ax1.legend(h1 + h2, l1 + l2, loc="center right")
-ax1.set_title("SDEdit: realism rises quickly, faithfulness to the content falls")
+ax1.set_title("SDEdit: artefacts vanish at low strength, the content at high strength")
 plt.tight_layout()
 plt.show()
 
 # %% [markdown]
-# The realism score collapses to the level of real data already at small strengths: pixelation and specks are
+# The atypicality falls to the level of real data already at small strengths: pixelation and specks are
 # fine-scale artefacts, the first things the noise erases. Recognisability of the *original* digit holds up at first
 # (it can even improve, since the edit removes damage that confused the classifier) and then falls towards chance as
 # the strength approaches 1 and the content is forgotten. Pixel distance to the guide grows steadily. The useful
@@ -822,16 +877,25 @@ plt.show()
 # - The Jacobian $\partial\hat x_0/\partial x_t$ requires **backpropagation through the network** at every step: one
 #   vector–Jacobian product, about 2–3× the cost of a plain step, plus activation memory.
 # - The approximation is good at small $t$, where $p(x_0\mid x_t)$ is concentrated. It is crude at large $t$, where
-#   $\hat x_0$ is the blurry average shown in section 1. By Jensen's inequality,
-#   $\mathbb E[\mathcal N(y;Ax_0,\cdot)]\neq\mathcal N(y;A\,\mathbb E[x_0],\cdot)$, so the average of two wrong
-#   answers can be perfectly consistent with $y$.
+#   $\hat x_0$ is the blurry average shown in section 1. Because the likelihood is a nonlinear function of $x_0$,
+#   $\mathbb E[\mathcal N(y;Ax_0,\cdot)]\neq\mathcal N(y;A\,\mathbb E[x_0],\cdot)$ in general (Chung et al. call the
+#   difference the *Jensen gap*), so the average of two wrong answers can be perfectly consistent with $y$.
 #
 # **The step size.** Taken literally, the weight $1/(2\sigma_y^2)$ is huge for small $\sigma_y$ and makes the sampler
 # unstable unless the steps are tiny. DPS therefore uses a normalised step,
 # $$x_{t-1}=x'_{t-1}-\zeta\,\nabla_{x_t}\big\|y-A\hat x_0(x_t)\big\|,$$
 # where $x'_{t-1}$ is the ordinary ancestral step. This is the gradient of the *norm*, i.e. the paper's
-# $\zeta_t=\zeta'/\|y-A\hat x_0\|$ applied to the squared norm, with $\zeta=2\zeta'$. The hyper-parameter $\zeta$ must be
-# tuned per task and per number of steps.
+# $\zeta_t=\zeta'/\|y-A\hat x_0\|$ applied to the squared norm, with $\zeta=2\zeta'$.
+#
+# **What $\zeta$ means.** With $r=y-A\hat x_0$, the normalised correction is
+# $-\zeta\nabla\|r\|=-\frac{\zeta}{2\|r\|}\nabla\|r\|^2$, while the literal likelihood term is
+# $-\frac{1}{2\sigma_y^2}\nabla\|r\|^2$. The practical rule therefore **contains no $\sigma_y$**. The weight of the data
+# is set by $\zeta$ (and the current residual), so $\zeta$ acts as an inverse *likelihood temperature*. It must be
+# re-tuned whenever $\sigma_y$, the operator or the number of steps changes. Near the end of sampling, where
+# $\hat x_0(x_t)\approx x_t$, each step moves the sample a distance of about $\zeta$ along the residual direction. For a
+# pixel mask this changes $\|r\|$ by about $\zeta$ per step, so the final residual ends up somewhere between 0 and
+# $\zeta$ (about $\zeta/2$), *whatever* $\sigma_y$ is. To land at the noise level, pick
+# $\zeta\approx2\sigma_y\sqrt{\dim y}$. For other operators the factor differs. Section 4.4 checks this.
 #
 # **Gotchas:** wrap the gradient in `torch.enable_grad()`, because samplers usually run under `no_grad`. Detach
 # $x_t$ after each step so the graph does not grow across steps. Use a *per-sample* norm (summing per-sample losses
@@ -839,20 +903,21 @@ plt.show()
 # The gradient of $\|r\|$ is undefined at $r=0$, so add a tiny $\varepsilon$ inside the square root.
 
 # %%
-def dps_sample(model, schedule, A, y_meas, shape, n_steps, zeta, weighting="dps", sigma_y=None, generator=None):
+def dps_sample(model, schedule, A, y_meas, shape, n_steps, zeta, weighting="dps", sigma_y=None, generator=None,
+               x_T=None):
     """Diffusion posterior sampling for y = A(x0) + noise (Chung et al. 2023).
 
     Each step = an ordinary ancestral step + a correction from the gradient of the measurement error of x0_hat(x_t),
     obtained by backpropagating through the network.
       weighting="dps"  : x_{t-1} = x'_{t-1} - zeta * grad ||y - A x0_hat||       (the paper's practical rule)
       weighting="bayes": add zeta * grad log N(y; A x0_hat, sigma_y^2 I) to the score (zeta = 1 is the literal weight)
-    zeta is a float or a tensor of shape (B,) (one step size per sample).
+    zeta is a float or a tensor of shape (B,) (one step size per sample). x_T optionally fixes the starting noise.
     """
     dev = y_meas.device
     zeta = torch.as_tensor(zeta, dtype=torch.float32, device=dev)
     zeta = zeta.view(-1, *([1] * (len(shape) - 1))) if zeta.ndim else zeta
     ts = timesteps(schedule.T - 1, n_steps)
-    x = torch.randn(shape, device=dev, generator=generator)
+    x = x_T.to(dev) if x_T is not None else torch.randn(shape, device=dev, generator=generator)
     for i, t in enumerate(ts):
         t_next = ts[i + 1] if i + 1 < len(ts) else -1
         with torch.enable_grad():
@@ -929,6 +994,19 @@ def A_first(x):
     return x[:, :1]
 
 
+def gmm_x1_given_y(gmm, y, noise_var):
+    """Exact p(x1 | y) for y = x1 + N(0, noise_var): per component a Gaussian update, weights as in gmm_x2_given_x1."""
+    s11 = gmm.covs[:, 0, 0]
+    weights = gmm_x2_given_x1(gmm, y, noise_var)[0]
+    gain = s11 / (s11 + noise_var)
+    return weights, gmm.means[:, 0] + gain * (y - gmm.means[:, 0]), s11 * (1 - gain)
+
+
+# How tightly should x1 fit the observation? The exact posterior answers it.
+exact_x1 = gmm1d_sample(100_000, *gmm_x1_given_y(gmm, C_OBS, SIGMA_Y_TOY ** 2), seed=8)
+print(f"exact posterior: mean |y - x1| = {(exact_x1 - C_OBS).abs().mean():.3f}")
+
+
 dps_toy_runs = {"DPS, Bayes weight (zeta = 1)": dict(weighting="bayes", zeta=1.0, n_steps=10 * TOY_STEPS),
                 "DPS, normalised rule (zeta = 0.3)": dict(weighting="dps", zeta=0.3, n_steps=TOY_STEPS)}
 dps_toy = {}
@@ -943,9 +1021,10 @@ print(f"(replacement inpainting, which assumes sigma_y = 0, had W1 = {toy_result
       f"{time.time() - t0:.0f}s)")
 
 fig, axes = plt.subplots(1, 2, figsize=(10, 3.3), sharey=True)
+x2_grid = torch.linspace(-3, 3.5, 400, dtype=torch.float64)
 for ax, (name, out) in zip(axes, dps_toy.items()):
     ax.hist(out[:, 1].numpy(), bins=70, range=(-3, 3.5), density=True, color=COL["DPS"], alpha=0.6, label=name)
-    ax.plot(z, gmm1d_pdf(z, pw, pm, pv), color=COL["exact"], lw=1.5, label=r"exact $p(x_2\mid y)$")
+    ax.plot(x2_grid, gmm1d_pdf(x2_grid, pw, pm, pv), color=COL["exact"], lw=1.5, label=r"exact $p(x_2\mid y)$")
     ax.set(title=f"{name}\n$W_1$ = {w1(out[:, 1], exact_post):.2f}", xlabel="$x_2$")
     ax.legend(loc="upper left")
 axes[0].set_ylabel("density")
@@ -958,15 +1037,21 @@ plt.show()
 # mechanism is the Jensen gap. At high noise, $\hat x_0(x_t)$ averages the wrong components at $x_1=0$ and $x_1=-2.2$,
 # and that *average* is perfectly consistent with $y=-1$, so the likelihood gradient does not push the particle away.
 # The practical normalised rule lands somewhat closer here, but it is biased too: the spurious mode survives and the
-# main mode is slightly displaced. Tuning $\zeta$ moves the error around; it does not make DPS exact. Despite this bias, DPS is
-# very effective in practice, because it needs nothing but a differentiable $A$.
+# main mode is slightly displaced. The observed coordinate tells the same story from the other side. Compare each
+# rule's mean $|y-x_1|$ with the exact posterior's value printed above. The literal Bayes weight pulls $x_1$ *tighter*
+# to $y$ than the posterior does: the point estimate $\hat x_0$ is over-confident, so it over-fits the observation.
+# The normalised rule with $\zeta=0.3$ is looser than the posterior: it trusts the data less than Bayes would. Tuning
+# $\zeta$ moves the error around; it does not make DPS exact. Despite this bias, DPS is very effective in practice,
+# because it needs nothing but a differentiable $A$.
 #
 # ### 4.2 4× super-resolution of MNIST (7×7 → 28×28)
 #
 # $A$ averages 4×4 blocks and $\sigma_y=0.05$. For each measurement we draw several posterior samples. We compare
 # them with bicubic upsampling, a naive baseline that knows nothing about digits. The measurement residual
-# $\|y-Ax\|$ is reported relative to its expected value for the *true* image, $\sigma_y\sqrt{\dim y}$: values near 1
-# mean "consistent with $y$ up to the noise".
+# $\|y-Ax\|$ is reported relative to its expected value for the *true* image, $\sigma_y\sqrt{\dim y}$. For an *exact*
+# posterior sampler this ratio should be about 1, not 0. Given $y$, the truth $x$ and a posterior sample $x'$ are two
+# draws from the same distribution $p(x\mid y)$, so $\mathbb E\|y-Ax'\|^2=\mathbb E\|y-Ax\|^2=\sigma_y^2\dim y$. A value
+# well below 1 means the sample fits the noise; well above 1, it ignores the data.
 
 # %%
 SIGMA_Y = 0.05
@@ -1067,24 +1152,33 @@ plt.show()
 # %% [markdown]
 # With 85% of the pixels missing, local interpolation produces disconnected blobs. DPS produces complete digits that
 # pass through the observed pixels. Where the observations leave room, the samples disagree, and they sometimes even
-# disagree about which digit it is: that is honest posterior uncertainty. (Section 2's RePaint solves the same
-# noise-free problem by a different route. Exercise 5 compares the two.)
+# disagree about which digit it is: that is honest posterior uncertainty. (Section 2's RePaint solves the noise-free
+# version of this problem by a different route: hard replacement requires $\sigma_y=0$. Exercise 5 compares the two.)
 #
 # ### 4.4 The step size $\zeta$
 #
 # $\zeta$ is DPS's most important knob. Since `dps_sample` accepts one $\zeta$ per sample, one batch can sweep it. We
-# use two sparse-pixel measurements and record the residual relative to the noise level.
+# use two sparse-pixel measurements and record the residual relative to the noise level. To isolate $\zeta$, every
+# $\zeta$ sees the *same* noisy measurement and the *same* starting noise $x_T$ for a given digit (common random
+# numbers). Only the per-step sampler noise differs. The dotted line is the rule of thumb from section 4: a final
+# residual of about $\zeta/2$.
 
 # %%
 ZETAS = [0.0, 1.0] if FAST else [0.0, 0.3, 1.0, 3.0, 10.0]
 SWEEP_IDX = torch.tensor([3, 7])                                    # digits 0 9
-x_sw = x_test[SWEEP_IDX].repeat_interleave(len(ZETAS), 0).to(device)
-y_sw = A_px(x_sw + SIGMA_Y * torch.randn(x_sw.shape, device=device, generator=make_gen(60)))
+x_one = x_test[SWEEP_IDX].to(device)
+y_one = A_px(x_one + SIGMA_Y * torch.randn(x_one.shape, device=device, generator=make_gen(60)))  # one y per digit
+x_T_one = torch.randn(x_one.shape, device=device, generator=make_gen(61))                         # one x_T per digit
+y_sw = y_one.repeat_interleave(len(ZETAS), 0)                       # ... shared by every zeta
 zeta_vec = torch.tensor(ZETAS * len(SWEEP_IDX), device=device)
 t0 = time.time()
-sweep = dps_sample(model, schedule, A_px, y_sw, x_sw.shape, DPS_STEPS, zeta=zeta_vec, generator=make_gen(61)).cpu()
+sweep = dps_sample(model, schedule, A_px, y_sw, y_sw.shape, DPS_STEPS, zeta=zeta_vec, generator=make_gen(62),
+                   x_T=x_T_one.repeat_interleave(len(ZETAS), 0)).cpu()
 resid_sw = ((y_sw.cpu() - A_px(sweep)).flatten(1).norm(dim=1) / noise_px).view(len(SWEEP_IDX), len(ZETAS))
-print(f"{len(sweep)} samples in {time.time() - t0:.0f}s")
+print(f"{len(sweep)} samples in {time.time() - t0:.0f}s;  rule of thumb for a mask: zeta = 2 sigma_y sqrt(m) = "
+      f"{2 * noise_px:.2f};  residual / noise level:")
+for i, idx in enumerate(SWEEP_IDX):
+    print(f"  digit {y_test[idx].item()}: " + ", ".join(f"ζ={z:g}: {r:.2f}" for z, r in zip(ZETAS, resid_sw[i])))
 
 fig = plt.figure(figsize=(12, 2.9))
 ax_img = fig.add_axes([0.06, 0.05, 0.52, 0.85])
@@ -1095,6 +1189,8 @@ for i, idx in enumerate(SWEEP_IDX):
     ax_c.plot([max(z, 0.05) for z in ZETAS], resid_sw[i].numpy(), "o-", color=COL["DPS"], alpha=0.5 + 0.5 * i,
               label=f"digit {y_test[idx].item()}")
 ax_c.axhline(1.0, ls="--", color=COL["exact"], lw=1, label="noise level (truth)")
+z_line = np.geomspace(0.3, max(ZETAS), 50)
+ax_c.plot(z_line, z_line / (2 * noise_px), ":", color=COL["baseline"], lw=1.5, label="rule of thumb ζ / 2")
 ax_c.set(xscale="log", xlabel="ζ  (ζ = 0 plotted at 0.05)", ylabel="‖y − Ax‖ / (σ_y √m)", yscale="log",
          title="measurement consistency vs. step size")
 ax_c.legend()
@@ -1102,12 +1198,14 @@ plt.show()
 
 # %% [markdown]
 # With $\zeta=0$ DPS is plain unconditional sampling: some digit, unrelated to $y$, with a residual far above the noise
-# level. Too small a $\zeta$ is not enough to pull the sample to the measurement. A moderate $\zeta$ brings the
-# residual to about the noise level (slightly below it means the sample has started to fit the noise) with clean
-# digits. Very large steps overshoot: the residual rises again and the image degrades, up to complete breakdown,
-# because a fixed-length step that is fine early in sampling is far too large late in sampling, when $x_t$ is almost
-# clean. The best $\zeta$ depends on the operator,
-# the noise level and the number of steps. In practice it is tuned on a few validation measurements.
+# level. Too small a $\zeta$ is not enough to pull the sample to the measurement. A moderate $\zeta$, near the rule of
+# thumb printed above, gives clean digits with a residual near or even *below* the noise level. Below means the sample
+# has started to fit the noise, which an exact posterior sampler would not do (section 4.2). Once $\zeta$ is large
+# enough to reach the data, the residual follows the dotted $\zeta/2$ line rather than the noise level: the last steps
+# move the sample by about $\zeta$, whatever $\sigma_y$ is. At the largest $\zeta$ the image degrades, up to complete
+# breakdown, because a fixed-length step that is fine early in sampling is far too large late in sampling, when $x_t$
+# is almost clean. The best $\zeta$ depends on the operator, the noise level and the number of steps. In practice it
+# is tuned on a few validation measurements, aiming for a residual of about the noise level.
 #
 # ## 5 · Denoising: the one inverse problem diffusion models solve exactly
 #
@@ -1118,7 +1216,8 @@ plt.show()
 # $p(x_0\mid y)=p(x_0\mid x_{t^\star}=\sqrt{\bar\alpha_{t^\star}}\,y)$, and no approximation of the likelihood is needed:
 # - **(a) Tweedie / MMSE:** $\hat x_0(\sqrt{\bar\alpha_{t^\star}}y,t^\star)=\mathbb E[x_0\mid y]$, with one network
 #   evaluation. It is the estimate with the smallest mean squared error.
-# - **(b) Posterior sampling:** run the reverse process from $t^\star$. Each run gives a sample from $p(x_0\mid y)$.
+# - **(b) Posterior sampling:** run the reverse process from $t^\star$. Each run gives a sample from $p(x_0\mid y)$:
+#   exactly for a perfect model in the limit of fine steps, approximately in practice (section 1.1's gotcha).
 #
 # **A sanity check from probability.** Let $X$ be the truth and $X'$ a posterior sample. Given $y$ they are two
 # independent draws from the same posterior, so
@@ -1157,6 +1256,7 @@ def mse_to_clean(a):
     return ((a.cpu() - x_dn.cpu()) ** 2).mean().item()
 
 
+DN_STRIDE = 50 if FAST else 10      # one reverse step per DN_STRIDE time units (= 100 steps over [0, T))
 t0 = time.time()
 for sigma in SIGMAS:
     ts_ = t_star_for(sigma)
@@ -1165,25 +1265,74 @@ for sigma in SIGMAS:
     x_t = ab.sqrt() * y_noisy
     with torch.no_grad():
         tweedie = predict(model, schedule, x_t, ts_)[1]
-    n_steps = max(2, ts_ // (50 if FAST else 10))           # same step density as 100 steps over [0, T)
+    n_steps = max(2, ts_ // DN_STRIDE)
     samples = reverse_process(model, schedule, x_t.repeat(K_DN, 1, 1, 1), timesteps(ts_, n_steps),
                               generator=make_gen(71)).view(K_DN, N_DN, 1, 28, 28)
-    dn[sigma] = dict(t=ts_, y=y_noisy.cpu(), tweedie=tweedie.cpu(), samples=samples.cpu(),
+    dn[sigma] = dict(t=ts_, n_steps=n_steps, y=y_noisy.cpu(), tweedie=tweedie.cpu(), samples=samples.cpu(),
                      mse_tweedie=mse_to_clean(tweedie), mse_sample=mse_to_clean(samples),
                      mse_mean=mse_to_clean(samples.mean(0)),
+                     spread=samples.cpu().var(0, unbiased=True).mean().item(),   # sample variance around their mean
                      ge_tweedie=gradient_energy(tweedie) / ge_clean, ge_sample=gradient_energy(samples) / ge_clean)
     d = dn[sigma]
-    print(f"sigma={sigma:3.1f}: t*={ts_:3d} (sqrt((1-abar)/abar) = {((1 - ab) / ab).sqrt().item():.3f}) | PSNR: "
-          f"noisy {psnr(y_noisy, x_dn):5.1f}, Tweedie {psnr(tweedie, x_dn):5.1f}, sample "
-          f"{10 * math.log10(4 / d['mse_sample']):5.1f}, mean of {K_DN} samples {10 * math.log10(4 / d['mse_mean']):5.1f} dB"
-          f" | MSE(sample)/MSE(Tweedie) = {d['mse_sample'] / d['mse_tweedie']:.2f} (theory: 2)")
+    print(f"sigma={sigma:3.1f}: t*={ts_:3d} (sqrt((1-abar)/abar) = {((1 - ab) / ab).sqrt().item():.3f}), "
+          f"{n_steps} steps | PSNR: noisy {psnr(y_noisy, x_dn):5.1f}, Tweedie {psnr(tweedie, x_dn):5.1f}, sample "
+          f"{10 * math.log10(4 / d['mse_sample']):5.1f}, mean of {K_DN} samples "
+          f"{10 * math.log10(4 / d['mse_mean']):5.1f} dB")
+    print(f"           relative to MSE(Tweedie): MSE(sample) {d['mse_sample'] / d['mse_tweedie']:.2f} (theory 2), "
+          f"MSE(mean of {K_DN}) {d['mse_mean'] / d['mse_tweedie']:.2f} (theory {1 + 1 / K_DN:.2f}), "
+          f"spread of the samples {d['spread'] / d['mse_tweedie']:.2f} (theory 1)")
 print(f"({time.time() - t0:.0f}s)")
 
 # %% [markdown]
-# The PSNR ordering matches the theory: the Tweedie estimate (posterior mean) beats a single posterior sample, and the
-# mean of a few samples comes close to Tweedie. The ratio MSE(sample)/MSE(Tweedie) should be 2 for a perfect model
-# and an infinite test set. The printed values come from a few digits and an imperfect model, so they only roughly
-# approach 2. Now the images and the sharpness side of the trade-off:
+# The PSNR ordering matches the theory: the Tweedie estimate (posterior mean) beats a single posterior sample. The
+# three ratios, however, miss the theory in the same direction at every $\sigma$. A single sample's MSE is below
+# twice Tweedie's. The mean of $K$ samples is about as good as Tweedie instead of $(1+1/K)$ times worse. And the
+# samples' spread around their own mean is below Tweedie's error. All three say one thing: **the samples are less
+# diverse than the posterior they should represent.** Using only a few digits adds noise to these numbers, but it
+# would not push all of them the same way. Two systematic causes remain: the imperfect model, and the strided
+# sampler of section 1.1. The second can be isolated exactly. With a Gaussian prior $\mathcal N(0,v_0)$ the denoiser
+# is known in closed form and every step is linear-Gaussian, so the sampler's output given $x_{t^\star}$ is
+# "gain $\times\,x_{t^\star}$ + Gaussian noise", and we can compare both parts with the exact posterior.
+
+# %%
+def strided_spread(v0, t_start, n_steps):
+    """Our eta = 1 sampler with the EXACT denoiser of a Gaussian prior N(0, v0), started from a fixed x_{t_start}.
+
+    The output is gain * x_{t_start} + Gaussian noise. Returns (gain, noise variance), each divided by its exact
+    posterior value (the coefficient of E[x0 | x_t] and Var[x0 | x_t]).
+    """
+    gain, var = 1.0, 0.0
+    ts = timesteps(t_start, n_steps)
+    for i, t in enumerate(ts):
+        t_next = ts[i + 1] if i + 1 < len(ts) else -1
+        ab, ab_next = float(abar_at(schedule, t)), float(abar_at(schedule, t_next))
+        k = math.sqrt(ab) * v0 / (ab * v0 + 1 - ab)               # exact denoiser: x0_hat = k * x_t
+        e = (1 - math.sqrt(ab) * k) / math.sqrt(1 - ab)            # the matching eps_hat = e * x_t
+        s2 = (1 - ab_next) / (1 - ab) * (1 - ab / ab_next)         # eta = 1 step variance, as in ddim_step
+        a = math.sqrt(ab_next) * k + math.sqrt(max(1 - ab_next - s2, 0.0)) * e
+        gain, var = a * gain, a * a * var + s2
+    ab0 = float(abar_at(schedule, t_start))
+    return gain / (math.sqrt(ab0) * v0 / (ab0 * v0 + 1 - ab0)), var / (v0 * (1 - ab0) / (ab0 * v0 + 1 - ab0))
+
+
+t_s = t_star_for(1.0)
+n_used = max(2, t_s // DN_STRIDE)
+print(f"Gaussian prior, exact denoiser, reverse process from t* = {t_s} (sigma = 1):")
+print("  sampler variance / exact posterior variance (the mean is exact in every case)")
+for v0 in [1.0, 0.25]:
+    row = []
+    for n_s in [n_used, 2 * n_used, 4 * n_used, t_s + 1]:
+        gain_ratio, var_ratio = strided_spread(v0, t_s, n_s)
+        assert abs(gain_ratio - 1) < 1e-4, gain_ratio              # the conditional MEAN is right at any stride
+        row.append(f"{n_s:4d} steps: {var_ratio:.2f}")
+    print(f"  prior variance {v0:4.2f} | " + "   ".join(row) + f"   (used above: {n_used} steps)")
+
+# %% [markdown]
+# Even with a perfect denoiser, the step count used above leaves the samples with noticeably too little variance,
+# and the deficit shrinks as the steps get finer. This accounts for part of the measured shortfall; the imperfect
+# model accounts for the rest. (Exercise 4 lets you check it on MNIST by refining the steps.) For the
+# perception–distortion picture below this is a detail, since the samples are still far more diverse than the single
+# Tweedie estimate. Now the images and the sharpness side of the trade-off:
 
 # %%
 S_SHOW = SIGMAS[-2] if len(SIGMAS) > 1 else SIGMAS[0]
@@ -1339,17 +1488,18 @@ plt.show()
 # latents from 6.1.
 
 # %%
-n_swap = min(3, N_INV)
-z_sw = inv[n_hi]["z"][:n_swap]
+SWAP_IDX = [0, 4, 5] if N_INV >= 6 else list(range(min(3, N_INV)))   # contrasting styles: a bold slanted 9,
+n_swap = len(SWAP_IDX)                                                # a thin upright 4 and a wide, round 0
+z_sw = inv[n_hi]["z"][SWAP_IDX]
 targets = torch.arange(10, device=device)
 t0 = time.time()
 swapped = dm.ddim_sample(model, schedule, (10 * n_swap, 1, 28, 28), n_steps=n_hi,
                          x_T=z_sw.repeat_interleave(10, 0), y=targets.repeat(n_swap)).cpu()
 acc_swap = (classify(swapped) == targets.cpu().repeat(n_swap)).float().mean()
 print(f"{len(swapped)} decodes in {time.time() - t0:.0f}s; classified as the target label: {acc_swap:.2f}")
-rows = [torch.cat([x_inv[i:i + 1].cpu(), swapped[10 * i:10 * (i + 1)]]) for i in range(n_swap)]
+rows = [torch.cat([x_inv[i:i + 1].cpu(), swapped[10 * r:10 * (r + 1)]]) for r, i in enumerate(SWAP_IDX)]
 image_grid(rows, col_labels=["original"] + [f"→ {k}" for k in range(10)], size=0.85,
-           row_labels=[f"inverted as {lab_inv[i].item()}" for i in range(n_swap)],
+           row_labels=[f"inverted as {lab_inv[i].item()}" for i in SWAP_IDX],
            title="Class swap: invert with the true label, decode with labels 0–9")
 plt.tight_layout()
 plt.show()
@@ -1363,13 +1513,20 @@ plt.show()
 # ## Exercises
 #
 # **Exercise 1 (when is replacement good enough?).** In the 2-D lab (section 2.3), change `C_OBS` to `0.0` and then
-# to `1.8`. Before running, look at the mixture and predict whether replacement will be close to exact. Then vary the
-# RePaint `jump` length (1, 5, 20) at a fixed `n_resample`.
+# to `1.8`. Before running, look at the mixture and predict how large replacement's error will be, compared with
+# $x_1=-1$ and with the printed noise floor. Then vary the RePaint `jump` length (1, 5, 20) at a fixed `n_resample`.
 # <details><summary>Hint / solution</summary>
-# Replacement fails when the noisy observation cannot distinguish the correct components from wrong ones that imply
-# a different $x_2$. At $x_1=0$ the competing components have similar $x_2$ (small error). Where several far-apart
-# components sit at nearby $x_1$, the error is large. Longer jumps let the resampling revisit higher noise levels, where
-# the coarse decision is made. That usually helps for multi-modal conditionals but costs more NFE per resampling.
+# Replacement errs when, at the noise levels where $x_2$ commits to a mode, the noisy $x_1$ cannot rule out components
+# that carry prior weight, are excluded by the exact conditional, and imply a different $x_2$ (section 2.1). At
+# $x_1=-1$ the exact conditional sits almost entirely on $(-1,2)$, a light component (weight 1/9). Heavier or nearby
+# mass, the class-1 component at $(0,-0.3)$ (weight 1/6) and the class-0 component at $(-2.2,-0.6)$, has $x_2$ far
+# below, so the error is large. At $x_1=0$ the exact conditional is almost all on the heavy component $(0,-0.3)$, but
+# its neighbours $(-1,2)$ and $(0.9,0.6)$ still attract mass: a clearly smaller error that is still far above the
+# floor. At $x_1=1.8$ the nearby components are the ones in the conditional anyway (the class-2 cluster, which is
+# isolated from the rest), so only their relative weights come out wrong. This gives the smallest error of the three,
+# but it is still well above the floor. RePaint helps in all three cases. Jump length barely matters in this lab: 1 and
+# 5 are about equal, and 20 was slightly worse in our runs. What reduces the error is the number of resampling passes
+# $r$, and that costs NFE.
 # </details>
 #
 # **Exercise 2 (your own sketch).** Use `draw_strokes` to draw a "1", a "0" (several short segments) or a "2", and find
@@ -1382,30 +1539,40 @@ plt.show()
 # </details>
 #
 # **Exercise 3 (DPS knobs).** For super-resolution (4.2), raise `SIGMA_Y` to 0.2 (both when making `y_sr` and when
-# judging the residual). How do the diversity of the samples and the posterior-std map change? Then run the 2-D lab's
-# `weighting="bayes"` rule on MNIST super-resolution with `zeta=1.0, sigma_y=SIGMA_Y` and 100 steps.
+# judging the residual) and keep `ZETA_SR`. A noisier measurement is less informative, so the true posterior is wider.
+# Does DPS's diversity grow accordingly? Check the residual/noise ratio and the posterior-std map. Then lower `ZETA_SR`
+# until the residual is about the noise level, and look again. Finally, run the 2-D lab's `weighting="bayes"` rule on
+# MNIST super-resolution with `zeta=1.0, sigma_y=0.05` and 100 steps.
 # <details><summary>Hint / solution</summary>
-# A noisier measurement is less informative, so the posterior is wider: the samples vary more (even in identity) and
-# the std map brightens. With the literal Bayes weight and $\sigma_y=0.05$, the correction
-# $\propto 1/\sigma_y^2=400$ is far too large for 100 strided steps, and the samples blow up or saturate. This is why
-# DPS normalises the step.
+# At fixed $\zeta$ the diversity grows only a little, and the residual/noise ratio drops below 1. The normalised rule
+# does not know $\sigma_y$ (section 4), so it keeps pulling the sample towards $y$ and fits the extra noise instead of
+# widening. Lowering $\zeta$ (roughly halving it) brings the ratio back to about 1. Now the std map brightens clearly
+# and identities can start to vary: $\zeta$ is a likelihood temperature that must follow $\sigma_y$. With the literal
+# Bayes weight and $\sigma_y=0.05$, the correction $\propto 1/\sigma_y^2=400$ is far too large for 100 strided steps,
+# and the samples blow up to NaN. This is why DPS normalises the step.
 # </details>
 #
-# **Exercise 4 (the wrong σ).** In section 5, denoise $\sigma=1.0$ images but choose $t^\star$ for $\sigma=0.5$
-# (too little) and for $\sigma=2.0$ (too much). Predict what each output looks like, then check, and compare the PSNR
-# of the Tweedie estimates.
+# **Exercise 4 (denoising knobs).** (a) In section 5, denoise $\sigma=1.0$ images but choose $t^\star$ for
+# $\sigma=0.5$ (too little) and for $\sigma=2.0$ (too much). Predict what each output looks like, then check, and
+# compare the PSNR of the Tweedie estimates. (b) Set `DN_STRIDE = 2` (five times finer steps, and five times slower)
+# and re-run the denoising cell. Predict how the three printed ratios move.
 # <details><summary>Hint / solution</summary>
-# Underestimating $\sigma$ means the model assumes less noise than there is: residual noise survives, or is turned
+# (a) Underestimating $\sigma$ means the model assumes less noise than there is: residual noise survives, or is turned
 # into spurious little strokes. Overestimating means it assumes more noise: the Tweedie estimate gets over-smoothed
 # (blurrier, more "average digit"), and the samples hallucinate more freely. The PSNR peaks near the true $\sigma$.
+# (b) Finer steps remove most of the sampler's under-dispersion (the closed-form check says how much), so the spread
+# ratio and MSE(sample)/MSE(Tweedie) should move towards 1 and 2. What remains is the model's own error. With six
+# digits the change can be partly hidden by noise; raise `N_DN` for cleaner numbers.
 # </details>
 #
 # **Exercise 5 (inpainting with DPS).** Solve the bottom-half and 85%-random inpainting tasks of section 2.4 with
-# `dps_sample`, using `A = lambda x: x * mask` and `y = mask * x_true` (a tiny $\sigma_y$). Compare with RePaint on
-# the classifier metric and on the exact agreement with the known pixels, $\|m\odot(x-y)\|$.
+# `dps_sample`, using `A = lambda x: x * mask` and `y = mask * x_true` (no noise; the normalised rule does not use
+# $\sigma_y$ anyway). Compare with RePaint on the classifier metric and on the exact agreement with the known pixels,
+# $\|m\odot(x-y)\|$.
 # <details><summary>Hint / solution</summary>
 # RePaint copies the known pixels exactly at the last step, so its agreement is perfect by construction. DPS only
-# *pushes* towards them, so its residual is small but non-zero. In exchange DPS works for any differentiable $A$,
+# *pushes* towards them. With a fixed $\zeta$ its final residual is of order $\zeta/2$ (section 4), small but
+# non-zero: a smaller $\zeta$ fits more tightly at the end but pulls less early on. In exchange DPS works for any differentiable $A$,
 # where RePaint needs $A$ to be a pixel mask. Which one completes digits more coherently depends on $\zeta$ and the
 # number of steps; on a GPU try both with 250+ steps.
 # </details>
@@ -1424,24 +1591,31 @@ plt.show()
 # - A trained diffusion model is a **reusable prior**. Its denoiser $\hat x_0=\mathbb E[x_0\mid x_t]$ and its scores
 #   can be combined with a measurement at sampling time, with no retraining.
 # - Posterior sampling needs $\nabla\log p_t(y\mid x_t)$, which is intractable in general. Methods differ in how they
-#   approximate or side-step it, and the 2-D lab with a *perfect* model shows that replacement and DPS are biased
-#   **even with a perfect prior**.
-# - **Inpainting:** replacement is cheap but conditions on noisy known pixels, which gives seams and incoherence.
-#   **RePaint**'s noise-up/denoise-down resampling harmonises the completion at a cost of about $r\times$ more NFE.
+#   approximate or side-step it. The 2-D lab shows that replacement, RePaint (less so) and DPS are all biased
+#   **even with a perfect prior**: their errors are method errors, not model errors.
+# - **Inpainting:** replacement is cheap but conditions on noisy known pixels, which gives seams and incoherence, and
+#   more steps do not fix it. **RePaint**'s noise-up/denoise-down resampling reduces the bias at a cost of about
+#   $r\times$ more NFE, but slowly, with no exactness guarantee.
 # - **SDEdit:** noise the guide to $t_0$ and denoise. The strength $t_0/T$ trades faithfulness against realism.
 #   Changing the conditioning during the reverse pass edits the content while keeping the layout.
 # - **DPS:** $p(y\mid x_t)\approx p(y\mid\hat x_0(x_t))$ and a gradient through the network make *any*
-#   differentiable linear (or nonlinear) operator usable. The step size $\zeta$ is the key knob, and each step costs a
-#   backward pass.
+#   differentiable linear (or nonlinear) operator usable. The step size $\zeta$ is the key knob. In the normalised
+#   rule it replaces $\sigma_y$ (a likelihood temperature) and must be re-tuned when the noise level changes. Aim for
+#   a residual of about the noise level. Each step costs a backward pass.
 # - **Denoising** with known Gaussian noise is exact: rescale and start at $t^\star$. The posterior mean (Tweedie)
 #   minimises MSE but is blurry; posterior samples are sharp but have about twice the MSE (perception–distortion).
-# - **DDIM inversion** gives real images Gaussian-looking latent codes for reconstruction, slerp interpolation and
-#   class swaps. More steps mean better inversion, and guidance makes it worse.
+#   Coarse ancestral samplers under-disperse even with a perfect model, so their samples fall short of that factor.
+# - **DDIM inversion** gives real images latent codes with roughly Gaussian summary statistics (but visibly atypical
+#   structure) that support reconstruction, slerp interpolation and class swaps. More steps mean better inversion,
+#   and guidance makes it worse.
 #
 # ## Further reading
 #
 # * Lugmayr, Danelljan, Romero, Yu, Timofte, Van Gool (2022). *RePaint: Inpainting using Denoising Diffusion
 #   Probabilistic Models.* CVPR. arXiv:2201.09865.
+# * Wu, Trippe, Naesseth, Blei, Cunningham (2023). *Practical and Asymptotically Exact Conditional Sampling in
+#   Diffusion Models.* NeurIPS. arXiv:2306.17775. Twisted sequential Monte Carlo: conditional sampling from a
+#   diffusion prior that becomes exact as the number of particles grows.
 # * Song, Sohl-Dickstein, Kingma, Kumar, Ermon, Poole (2021). *Score-Based Generative Modeling through Stochastic
 #   Differential Equations.* ICLR. arXiv:2011.13456. Includes imputation by replacement and solving inverse problems
 #   with a score model.
@@ -1453,6 +1627,9 @@ plt.show()
 #   Kautz (2023). *Pseudoinverse-Guided Diffusion Models for Inverse Problems.* ICLR. These use better approximations
 #   of $p(y\mid x_t)$ for linear problems.
 # * Efron (2011). *Tweedie's formula and selection bias.* Journal of the American Statistical Association.
+# * Bao, Li, Zhu, Zhang (2022). *Analytic-DPM: an Analytic Estimate of the Optimal Reverse Variance in Diffusion
+#   Probabilistic Models.* ICLR. arXiv:2201.06503. Why the reverse variance must include the uncertainty of
+#   $\hat x_0$, which matters most for samplers with few steps.
 # * Blau & Michaeli (2018). *The Perception-Distortion Tradeoff.* CVPR.
 # * Song, Meng, Ermon (2021). *Denoising Diffusion Implicit Models.* ICLR. arXiv:2010.02502. Deterministic sampling,
 #   inversion and latent interpolation.
