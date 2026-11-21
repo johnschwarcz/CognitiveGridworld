@@ -193,7 +193,7 @@ Flow matching:
 - Lipman et al. (2023), *Flow matching for generative modeling*, arXiv:2210.02747
 - Liu, Gong & Liu (2023), *Flow straight and fast: rectified flow*, arXiv:2209.03003
 - Albergo & Vanden-Eijnden (2023), *Building normalizing flows with stochastic interpolants*, arXiv:2209.15571
-- Tong et al. (2024), *Improving and generalizing flow-based generative models with minibatch optimal transport*,
+- Tong et al. (TMLR 2024; arXiv 2023), *Improving and generalizing flow-based generative models with minibatch optimal transport*,
   arXiv:2302.00482
 
 Architectures and control:

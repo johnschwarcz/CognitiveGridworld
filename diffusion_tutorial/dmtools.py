@@ -266,7 +266,7 @@ def labelled_gmm():
     """
     means = torch.tensor([
         [-2.0, 1.0], [-1.0, 2.0], [-2.2, -0.6],   # class 0 (left / top-left)
-        [0.0, -0.3], [0.9, 0.6],                   # class 1 (centre, overlaps others)
+        [0.0, -0.3], [0.9, 0.6],                   # class 1 (centre, overlaps class 2)
         [2.0, 1.2], [1.6, -1.6], [2.4, -0.2],     # class 2 (right)
     ], dtype=torch.float64)
     comp_class = np.array([0, 0, 0, 1, 1, 2, 2, 2])

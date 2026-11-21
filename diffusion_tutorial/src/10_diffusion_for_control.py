@@ -484,10 +484,11 @@ plt.show()
 # %% [markdown]
 # Exactly as predicted: BC plans (red) end at the goal, lean a little towards the start's side
 # (that is $\pi(s)$ at work), and drive through the obstacle in the large majority of cases (see
-# the collision rate printed above). They are also somewhat rougher than the experts' curves. More data or a bigger network cannot fix the
-# collisions; the *loss* asks for the mean. (Classical fixes are mixture-density outputs, discretised actions, or energy-based
-# "implicit" policies. Diffusion has proved one of the most effective, especially for
-# high-dimensional action chunks.)
+# the collision rate printed above). They are also somewhat rougher than the experts' curves.
+# More data or a bigger network cannot fix the collisions; the *loss* asks for the mean.
+# (Classical fixes are mixture-density outputs, discretised actions, or energy-based "implicit"
+# policies. Diffusion has proved one of the most effective, especially for high-dimensional
+# action chunks.)
 #
 # ## 3 · Diffusion policy: sample from $p(\tau\mid s)$
 #
@@ -590,10 +591,11 @@ class TrajectoryDenoiser(nn.Module):
 # * *Few noise levels.* Like Diffusion Policy we train with only $T=100$ noise levels and sample
 #   with 10–20 steps, because a controller has to answer in milliseconds.
 # * *Schedule.* The cosine schedule clamps its last $\beta$ at 0.999, which makes $\bar\alpha_{T-1}$
-#   tiny. With $\varepsilon$-prediction the first sampling step then computes
-#   $\hat\tau_0=(\tau_T-\sqrt{1-\bar\alpha}\,\hat\varepsilon)/\sqrt{\bar\alpha}$, amplifying the
-#   network's error by $1/\sqrt{\bar\alpha_{T-1}}$ (printed below, about ten times more than for the
-#   linear schedule). Without clipping (next bullet) that can throw plans far outside the
+#   tiny (in this notebook $t$ is the code's array index, $t=0,\dots,T-1$). With
+#   $\varepsilon$-prediction the first sampling step then computes
+#   $\hat\tau_0=(\tau_{T-1}-\sqrt{1-\bar\alpha_{T-1}}\,\hat\varepsilon)/\sqrt{\bar\alpha_{T-1}}$,
+#   amplifying the network's error by $1/\sqrt{\bar\alpha_{T-1}}$ (printed below, about ten times
+#   more than for the linear schedule). Without clipping (next bullet) that can throw plans far outside the
 #   workspace; clipping hides the symptom but not the cause. The problem is specific to
 #   $\varepsilon$-prediction: with $v$-prediction $\hat\tau_0=\sqrt{\bar\alpha_t}\,\tau_t-\sqrt{1-\bar\alpha_t}\,\hat v$
 #   stays well-conditioned as $\bar\alpha\to0$, which is why "zero terminal SNR" schedules are
@@ -1176,9 +1178,11 @@ plt.show()
 # are the teleport at step 12. The open-loop BC agents crash before the push even happens: their
 # mean plans run straight into the obstacle. After the push, the open-loop diffusion agents steer
 # straight back towards their stale plans, through the obstacle. The closed-loop agent notices it
-# is off-plan, replans from where it actually is, and
-# usually just continues along the route on its new side: the multimodal policy offers a good plan
-# from either side. Let's quantify over many starts, with and without the push.
+# is off-plan, replans from where it actually is, and usually just continues along the route on
+# its new side: the multimodal policy offers a good plan from either side. (With $k=4$ the push at
+# step 12 also falls on a scheduled replanning step, so this experiment does not separate the
+# early-replanning rule from the schedule; Exercise 1 does.) Let's quantify over many starts, with
+# and without the push.
 
 # %%
 roll_starts = eval_starts[: (64 if FAST else 300)]
@@ -1704,9 +1708,8 @@ plt.show()
 #   $\varepsilon$ neglects the low-SNR levels where the route is chosen and $\tau_0$ neglects the
 #   high-SNR levels where diversity lives; $v$ balances the two. Check diversity, not only safety.
 # - About 20 sampling steps suffice for control here; with only a few, the route decision cannot be
-#   resolved. Clip $\hat\tau_0$ to the workspace, decay the
-#   learning rate, and avoid schedules whose $\bar\alpha_{T-1}$ is nearly zero when predicting
-#   $\varepsilon$ with few noise levels.
+#   resolved. Clip $\hat\tau_0$ to the workspace, decay the learning rate, and avoid schedules
+#   whose $\bar\alpha_{T-1}$ is nearly zero when predicting $\varepsilon$ with few noise levels.
 # - Receding-horizon execution (sample a chunk, execute part of it, replan, and replan early when
 #   knocked off the plan) gives robustness to perturbations that open-loop plans lack; the chunk
 #   length trades reactivity against compute and temporal consistency.
