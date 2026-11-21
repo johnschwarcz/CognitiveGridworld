@@ -32,7 +32,7 @@
 # **Prerequisites:** 01 · The forward process ($q(x_t\mid x_0)$, noised marginals, VP vs VE); 02 · DDPM from scratch
 # (the $\epsilon$-prediction loss, ancestral sampling, MMD as a sample-quality metric).
 #
-# **Runtime:** about 3–6 min on a laptop CPU (three small MLPs of about 30 s each, plus many exact-score computations);
+# **Runtime:** about 3 min on a 4-core laptop CPU (three small MLPs of about 20 s each, plus many exact-score computations);
 # about 2–3 min on a GPU (the exact Gaussian-mixture computations stay on the CPU).
 
 # %% [markdown]
@@ -251,8 +251,8 @@ plt.tight_layout()
 plt.show()
 
 # %% [markdown]
-# Particles initialised uniformly on the square are pulled into the components within a few dozen steps (the drift is
-# strong far from the data) and then jitter around inside them. The paths on the right show the two regimes: a nearly
+# Particles initialised uniformly on the square are pulled into the components within about a hundred steps (the drift is
+# strong far from the data; compare steps 20 and 100) and then jitter around inside them. The paths on the right show the two regimes: a nearly
 # straight fall into the nearest basin, then a random walk confined to it.
 #
 # **Does it sample the right distribution?** We measure the squared MMD (notebook 02) between the particles and fresh
@@ -317,7 +317,8 @@ plt.show()
 # goes there, and a learned score is least accurate there (3b). So this is a mixing-time problem, not an information
 # problem, but in practice the information is lost either way.)
 #
-# The 8-component mixture above shows this mildly. Below is a stark version: two well-separated modes with weights
+# The 8-component mixture above already shows this: the left panel below gives its per-component occupation, the
+# cause of the stalled MMD in §2. The other two panels show a cleaner version: two well-separated modes with weights
 # 0.8 and 0.2, and particles started uniformly on a square.
 
 # %%
@@ -347,7 +348,7 @@ plt.tight_layout()
 plt.show()
 
 # %% [markdown]
-# In the 8-component mixture (left), the light outer components end up over-populated: they sit further out, so a
+# In the 8-component mixture (left), the light outer components end up over-populated, at roughly twice their weight: they sit further out, so a
 # uniform start puts more particles into their basins than their weight warrants. In the two-mode example the fraction
 # is fixed by the geometry of the start (about half the square lies on each side) and stays there for the whole run.
 # Each mode is sampled perfectly well internally. The chain simply never discovers that one mode is four times heavier.
@@ -503,6 +504,8 @@ plt.show()
 # $q^\text{VP}_t(x)\propto q^\text{VE}_{\sigma_t}(x/\sqrt{\bar\alpha_t})$ and
 # $\nabla\log q^\text{VP}_t(x)=\nabla\log q^\text{VE}_{\sigma_t}(x/\sqrt{\bar\alpha_t})\,/\sqrt{\bar\alpha_t}$.
 # The next cell checks this and places our $\sigma$ ladder on DDPM's time axis. From here on we use DDPM's (VP) notation.
+# (As in `dmtools`, the $t$ in code, printouts and plot titles is the array index $0,\dots,T-1$, one less than the maths'
+# $t$: `ABAR[t]` is $\bar\alpha_{t+1}$; notebook 02, §1.)
 
 # %%
 sched = dm.NoiseSchedule(1000, "linear", device=device)   # DDPM's linear schedule, T = 1000, used from here on
@@ -522,8 +525,8 @@ for s in [sigmas[0], sigmas[len(sigmas) // 2], sigmas[-1]]:
 print(f"DDPM's own range: sigma_t from {SIGMA_T[0]:.3f} (t=0) to {SIGMA_T[-1]:.0f} (t={sched.T - 1})")
 
 # %% [markdown]
-# Our hand-made ladder covers only the middle of DDPM's range. DDPM starts from far more noise (at $t=T-1$ the rescaled
-# $x_t$ is essentially pure $\mathcal N(0,I)$) and ends at a smaller $\sigma$. What remains is to *learn* the noised
+# Our hand-made ladder covers only the middle of DDPM's range. DDPM starts from far more noise (at its last index $t=T-1$,
+# $\sigma_t\approx157$, so $x_t$ itself is essentially pure $\mathcal N(0,I)$) and ends at a smaller $\sigma$. What remains is to *learn* the noised
 # scores from data.
 #
 # ## 5 · Learning the score: from explicit to denoising score matching
@@ -555,8 +558,8 @@ print(f"DDPM's own range: sigma_t from {SIGMA_T[0]:.3f} (t=0) to {SIGMA_T[-1]:.0
 # $$J_\text{DSM}(s;t)=\mathbb E_{x_0,\epsilon}\,\|s(x_t)-\nabla\log q(x_t\mid x_0)\|^2,\qquad
 # J_\text{ESM}(s;t)=\mathbb E_{x_t\sim q_t}\,\|s(x_t)-s^*(x_t)\|^2,\qquad s^*=\nabla\log q_t .$$
 # For any function $s$, add and subtract $s^*$ inside the first:
-# $$J_\text{DSM}(s;t) = J_\text{ESM}(s;t) + \underbrace{\mathbb E\,\|s^*(x_t)-\nabla\log q(x_t\mid x_0)\|^2}_{C_t,\ \text{independent of } s}
-# + 2\,\mathbb E\big[(s-s^*)(x_t)\cdot\underbrace{\mathbb E[s^*(x_t)-\nabla\log q(x_t\mid x_0)\mid x_t]}_{=\,0\ \text{by the identity}}\big].$$
+# $$J_\text{DSM}(s;t) = J_\text{ESM}(s;t) + \underbrace{\mathbb E\,\|s^*(x_t)-\nabla\log q(x_t\mid x_0)\|^2}_{C_t,\ \text{independent of } s} +
+# 2\,\mathbb E\big[(s-s^*)(x_t)\cdot\underbrace{\mathbb E[s^*(x_t)-\nabla\log q(x_t\mid x_0)\mid x_t]}_{=\,0\ \text{by the identity}}\big].$$
 # So $J_\text{DSM}=J_\text{ESM}+C_t$: **minimising the denoising objective minimises the distance to the true marginal score.**
 # This is the familiar fact that least-squares regression onto a noisy target recovers its conditional mean.
 #
@@ -616,8 +619,9 @@ for x_t, t in queries:
 print("E[conditional score | x_t] == marginal score (within Monte Carlo error)  ✓")
 
 # %% [markdown]
-# The Monte Carlo averages agree with the exact scores to within a few standard errors at every query, in a gap
-# between components, near a mode, and far out in the tails. A picture makes the identity concrete. Multiply
+# The Monte Carlo averages agree with the exact scores to within a few standard errors (last column) at every query:
+# between two components, at high noise, at the low-density edge of an inner component (where the score is large), and
+# far out in the tails. A picture makes the identity concrete. Multiply
 # everything by $1-\bar\alpha_t$: the conditional score then becomes the vector *from $x_t$ to $\sqrt{\bar\alpha_t}\,x_0$*, and the
 # marginal score becomes the vector from $x_t$ to the posterior average of those points.
 
@@ -701,6 +705,7 @@ ax.bar(names, [r[2] for r in rows], color=C["learned"], label=r"$J_\mathrm{ESM}$
 ax.bar(names, gaps, bottom=[r[2] for r in rows], color="0.8", hatch="//", edgecolor="0.5",
        label=r"gap $J_\mathrm{DSM}-J_\mathrm{ESM}$")
 ax.set(ylabel=r"loss ($\epsilon$-units, per coordinate)", title=f"denoising = explicit score matching + constant  (t={t_chk})")
+ax.set_ylim(0, 1.35 * max(r[1] for r in rows))   # head-room for the legend
 ax.legend(loc="upper left")
 plt.tight_layout()
 plt.show()
@@ -861,7 +866,8 @@ plt.show()
 # %% [markdown]
 # The arrow fields look alike almost everywhere: the network has learned the right *directions*. The error maps show where the
 # *magnitudes* go wrong. Inside the contours, where the noised training data actually live, the error is a small fraction of the
-# typical score. Outside them it grows, most of all at small $t$ and far from the data, where the network has to extrapolate into
+# typical score, at least in the cores of the components (at $t=5$ it already reaches a few tens of per cent near the outer
+# contour). Outside them it grows, most of all at small $t$ and far from the data, where the network has to extrapolate into
 # the empty space of §3b. As $t$ grows, $q_t$ spreads out, the contours widen and the well-learned region grows with them. This is
 # failure mode 3b made visible, and the reason sampling starts at high noise: there, the score is accurate everywhere the sampler can be.
 #
@@ -1044,7 +1050,7 @@ plt.show()
 # $$\mathbb E_{\hat p}[x_0\mid x_t] \approx \sum_i w_i(x_t)\,x^{(i)},\qquad w_i(x_t)=\operatorname{softmax}_i\Big(-\frac{\|x_t-\sqrt{\bar\alpha_t}\,x^{(i)}\|^2}{2v_t}\Big).$$
 # As the noise level goes to zero the softmax becomes a hard nearest-neighbour assignment, so a sampler driven by this score
 # **can only output training points**. A perfectly optimised diffusion model is a lookup table. (With a finite smallest noise
-# level, DDPM's $\sqrt{1-\bar\alpha_0}=0.01$ here, "hard" needs the training points to be much further apart than that; otherwise the
+# level, DDPM's $\sqrt{1-\bar\alpha_1}=0.01$ here (array index 0), "hard" needs the training points to be much further apart than that; otherwise the
 # last step returns local averages of very close neighbours. We will see both.) Yet trained networks produce new samples.
 # Let us compare the two on the same training sets.
 
@@ -1150,14 +1156,15 @@ for row, n_tr in enumerate(N_SIZES):
         ax.hist(nn_dist(r[key], r["train"]).clamp(min=1e-7).log10().numpy(), bins=bins, color=colr, alpha=0.55,
                 label=lab)
     ax.set(xlabel=r"$\log_{10}$ distance to nearest training point", ylabel="count", title=f"N={n_tr}: novelty of samples")
+    ax.set_ylim(top=1.35 * ax.get_ylim()[1])   # head-room for the legend
     ax.legend(loc="upper left")
 plt.tight_layout()
 plt.show()
 
 # %% [markdown]
 # **The exact empirical score memorises at both sizes.** For $N=32$ essentially every sample is a copy of a training point: the
-# orange histogram sits far to the left, at about the width $\tau$ of the tiny Gaussians, orders of magnitude closer than fresh
-# data. For $N=1000$ the mechanism shows through. The training points are only about twice as far apart as the sampler's
+# orange histogram sits far to the left, around $10^{-4}$, orders of magnitude closer than fresh data and even closer than the
+# width $\tau=10^{-3}$ of the tiny Gaussians (the last step returns a posterior mean, which shrinks towards the training point). For $N=1000$ the mechanism shows through. The training points are only about twice as far apart as the sampler's
 # smallest noise level (printed above). DDPM's last step returns the posterior mean *at* that noise level, so it acts like a kernel
 # smoother with a bandwidth of about $0.01$. Only a minority of samples are exact copies (the small left-hand orange peak); most
 # are weighted averages of two or three neighbouring training points (the main orange peak). They still hug the training set,

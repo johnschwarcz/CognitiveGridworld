@@ -32,7 +32,7 @@
 #
 # **Prerequisites:** 01 (forward process), 02 (DDPM), 03 (score matching, Tweedie), 04 (DDIM / probability-flow ODE), 05 (training loop, EMA); 06 (guidance) for the last section.
 #
-# **Runtime:** about 5–10 min on a laptop CPU (five small MLPs of 0.5–1.5 min each, plus sampling); about 2–4 min on a GPU (tiny MLPs, so a GPU helps less than usual).
+# **Runtime:** about 5–7 min on a laptop CPU (five small MLPs of roughly 15 s to 1 min each, plus sampling and the exact-velocity computations); about 2–4 min on a GPU (tiny MLPs, so a GPU helps less than usual).
 
 # %%
 import copy
@@ -332,7 +332,7 @@ plt.show()
 # At $t=1$ the field is radial: there $\hat x_0 = \mathbb E[x_0]$ for every $x$, so
 # $v = x - \mathbb E[x_0]$ and every particle first heads to the data mean. As $t$ decreases,
 # the posterior commits to components, the field splits into basins, and near $t=0$ it points
-# sharply onto the (thin, anisotropic) mixture components.
+# sharply onto the thin mixture components (round on the inner ring, elongated on the outer one).
 
 # %% [markdown]
 # ## 3 · Training a flow-matching model
@@ -415,8 +415,10 @@ print(f"final loss (last 500 steps): {fm_losses[-500:].mean():.3f}   floor C/d: 
 
 # %% [markdown]
 # The loss approaches the floor computed from the exact velocity, but never reaches zero:
-# the remaining gap is the model's FM error $\mathcal L_{\rm FM}$, which is invisible in the raw loss
-# unless you know $C$ — a good reason to always keep a toy problem with ground truth around.
+# the remaining gap is, up to minibatch noise, the FM error of the raw (non-EMA) training weights (per
+# coordinate, i.e. $\mathcal L_{\rm FM}/d$, like the plotted floor $C/d$), which is invisible in the raw loss unless
+# you know $C$ — a good reason to always keep a toy problem with ground truth around. (The EMA weights we sample with typically do better; the last figure of this
+# section measures their error directly.)
 #
 # ### Sampling: Euler and Heun from $t=1$ to $t=0$
 #
@@ -540,19 +542,21 @@ plt.show()
 #
 # * The **exact-velocity** curve isolates pure *discretisation* error (no model error): it falls
 #   steadily with NFE towards the noise floor and, even at 64 Euler steps, has not quite reached it.
-#   The learned flow tracks it closely; the small gap at large NFE is the model error, while both curves
-#   still carry some discretisation error. Model and discretisation errors *interact* rather than simply
-#   add, so do not be surprised if the learned flow occasionally beats the exact one at coarse NFE: a
-#   slightly smoother field can incur less Euler error than the exact, sharper one.
+#   The learned flow tracks it closely. It falls behind only at the largest budgets (32–64 NFE in the
+#   MMD table), where the small gap is the model error, while both curves still carry some discretisation error.
+#   At coarser NFE it is in fact slightly *ahead* of the exact field in this run: model and discretisation
+#   errors *interact* rather than simply add, and a slightly smoother field can incur less Euler error than
+#   the exact, sharper one.
 # * With one Euler step every sampler collapses towards the data mean — the first step uses
 #   $v(x,1)=x-\mathbb E[x_0]$, so $x_0 = x_1 - v = \mathbb E[x_0]$. Curved paths need several steps.
-# * Heun is better per *step*, but compare at equal NFE: it typically wins only once the step is small enough for the second-order correction to help.
+# * Heun is better per *step*, but compare at equal NFE: it typically wins only once the step is small enough for the second-order correction to help (here from about 4–8 NFE on, depending on the metric, until at 32–64 NFE both are limited by the model's own error).
 # * With 1–2 NFE every sampler here is poor, and MMD cannot rank such samples: an RBF-kernel MMD is
 #   bounded, so it *saturates* for grossly wrong samples (e.g. DDIM's 2-NFE samples, many far outside the
 #   plotted window), and differences above roughly 0.1 mean little. The unbounded sliced Wasserstein distance
 #   in the second table keeps ranking them.
-#   From a handful of steps on, the flow model beats the DDPM model sampled with DDIM at equal NFE, and
-#   both converge to similar quality at large NFE. Section 5 shows that this is **not** because flow
+#   From a handful of steps on, the flow model beats the DDPM model sampled with DDIM at equal NFE. The gap
+#   narrows as NFE grows: at 64 NFE the two MMDs are close, although the sliced Wasserstein distance still
+#   puts DDIM clearly behind. Section 5 shows that this is **not** because flow
 #   matching is a fundamentally different model; the gap comes from the time grid (including DDIM's
 #   wasted $k=0$ evaluation) and from the combination of output parametrisation and loss weighting.
 #
@@ -601,7 +605,8 @@ print(f"E||v||^2 at t = {ts_err[i_mid]:.2f}: {v_scale[i_mid]:.3f}   (vs {v_scale
 # components, and smallest at fairly large $t$, where $p_t$ is nearly Gaussian and the field nearly linear in $x$.
 #
 # The dashed curve has a curious dip near $t=0.5$, where the whole field almost vanishes. Our data are
-# roughly standardised (mean $\approx0$, covariance $\approx I$, printed at the top). At $t=\tfrac12$, $x_t=\tfrac12(x_0+\varepsilon)$
+# roughly standardised (mean $\approx0$ and standard deviation $\approx1$ per coordinate, printed at the top; by the
+# mixture's 90° rotational symmetry the covariance is then $\approx I$). At $t=\tfrac12$, $x_t=\tfrac12(x_0+\varepsilon)$
 # is symmetric in $x_0$ and $\varepsilon$, so if $x_0$ had the same first two moments as $\varepsilon$, the best *linear*
 # guesses of $x_0$ and $\varepsilon$ from $x_t$ would coincide and their difference $v$ would be zero; only the
 # non-Gaussian structure of the data makes $v$ non-zero there. (This is also why a *relative* error,
@@ -837,7 +842,8 @@ plt.show()
 # All three samplers give good samples from the same flow-matching network: the
 # "diffusion vs flow" distinction is about *how a model is trained and parametrised*, not about
 # which sampler you may use. (The stochastic sampler costs 20× more evaluations, but its injected
-# noise can also correct some accumulated error — the usual stochastic-vs-deterministic trade-off.)
+# noise can also correct some accumulated error — in this run it has the lowest MMD of the three, close to
+# the noise floor. This is the usual stochastic-vs-deterministic trade-off.)
 #
 # **So where did the few-step gap of Section 3 come from?** Three suspects: (i) the *time grid* —
 # DDIM's grid is uniform in the integer step $k$, which for the linear schedule packs most steps at
@@ -1013,8 +1019,8 @@ plt.show()
 # Reflow fixes the coupling *after* training. Tong et al. (2023) (and Pooladian et al. 2023) choose a better
 # coupling *during* training: within each batch, re-pair noise and data to minimise the total squared
 # distance $\sum_i\|x_0^{(i)}-\varepsilon^{(\pi(i))}\|^2$ over permutations $\pi$ — a linear assignment problem
-# solved exactly by the Hungarian algorithm (`scipy.optimize.linear_sum_assignment`, $O(B^3)$, cheap for
-# $B\lesssim 10^3$).
+# solved exactly in $O(B^3)$ time by the Hungarian algorithm or, as in `scipy.optimize.linear_sum_assignment`,
+# by a Jonker–Volgenant variant (cheap for $B\lesssim 10^3$).
 #
 # * **Marginals are preserved**: the batch's noise vectors are only permuted, so a randomly chosen pair still has
 #   $x_0\sim p_{\rm data}$ and $\varepsilon\sim\mathcal N(0,I)$ — the theory of Section 1 holds for *any* coupling with these marginals.
@@ -1090,12 +1096,15 @@ for name, (_, _, p) in models.items():
 # %% [markdown]
 # Both remedies straighten the flow and make 1–2-step Euler sampling usable. Note the shape of the
 # reflow curve: once the paths are straight, extra steps buy almost nothing, and its many-step quality is
-# capped by the first model, whose samples it was trained on. The two remedies come at very different costs:
-# reflow needs a trained model, an ODE solve per training pair and a second training run, and inherits the
-# first model's errors; OT-CFM costs one assignment per batch and nothing else — but its benefit shrinks
+# capped by the first model, whose samples it was trained on. OT-CFM, trained on the real data, has no such
+# cap: in this run it has the lowest MMD of all three models from about 4 NFE on. The two remedies come at very
+# different costs: reflow needs a trained model, an ODE solve per training pair and a second training run, and
+# inherits the first model's errors; OT-CFM costs one assignment per batch and nothing else — but its benefit shrinks
 # as the dimension grows relative to the batch size, which is why large image models do not rely on it
 # alone (and why few-step distillation methods such as consistency models or adversarial diffusion
-# distillation exist). In 2-D, batches of 256 already give a good approximation of the OT plan.
+# distillation exist). In 2-D, batches of 256 already give a good approximation of the OT plan. (With a network
+# this tiny, scipy's CPU assignment is still a sizeable part of each training step, which is why OT-CFM trained
+# more slowly than the first model here: compare the printed times. For a large network it is negligible.)
 
 # %% [markdown]
 # ## 8 · Flow matching in practice
@@ -1112,7 +1121,7 @@ for name, (_, _, p) in models.items():
 #   higher resolutions they also *shift* $t$ towards noise, $t\mapsto \frac{s\,t}{1+(s-1)t}$ with $s>1$, because
 #   more pixels make the same $t$ effectively less noisy.
 # * *Sampler and steps.* Plain Euler with roughly 20–50 uniform or shifted steps is the default for large
-#   flow models; Heun / higher-order solvers help at moderate budgets (from about 8 NFE on in Section 3), but not
+#   flow models; Heun / higher-order solvers help at moderate budgets (from about 4–8 NFE on in Section 3), but not
 #   with only a handful of steps. For 1–4 steps you need a straightened or distilled model (e.g. InstaFlow,
 #   a reflowed and distilled Stable Diffusion, or Flux "schnell").
 # * *Parametrisation.* Predicting $v$ is well conditioned at both ends of the path (Section 5, Exercise 6), one reason the
@@ -1123,7 +1132,7 @@ for name, (_, _, p) in models.items():
 #   *identical* to guiding $\hat\varepsilon$ (or $\hat x_0$, or the score) with the same $w$.
 #
 # Let's train a class-conditional flow model on `dm.labelled_gmm()` (three classes; class 1 sits in
-# the middle, overlapping the others), with label dropout, and check the guidance identity against dmtools'
+# the middle, between the other two, and overlaps class 2), with label dropout, and check the guidance identity against dmtools'
 # own $\varepsilon$-space CFG implementation via the `FlowAsEps` wrapper.
 
 # %%

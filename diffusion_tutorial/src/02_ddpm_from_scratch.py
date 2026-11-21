@@ -30,7 +30,7 @@
 #
 # **Prerequisites:** 01 · The forward process (noise schedules, $q(x_t\mid x_0)$, the posterior $q(x_{t-1}\mid x_t, x_0)$).
 #
-# **Runtime:** about 7–10 min on a laptop CPU (ten small MLPs, 20–35 s each, plus sampling); roughly 2–4 min on a GPU.
+# **Runtime:** about 5–6 min on a laptop CPU (ten small MLPs, about 20 s each, plus sampling); roughly 2–4 min on a GPU.
 
 # %%
 import copy
@@ -372,10 +372,10 @@ plt.tight_layout()
 plt.show()
 
 # %% [markdown]
-# Left: each column is one feature. Fast oscillations on the left, slow drifts on the right, so every $t$ gets a unique,
-# smoothly varying code. Middle: nearby steps have similar embeddings and distant steps dissimilar ones; the similarity
-# band is narrow, so the code resolves $t$ finely. Right: with integer $t$ (solid) the fast and middle frequencies sweep
-# their full range $[-1, 1]$, and only the slowest third change partially. With $t/T$ (dashed) only the first few
+# Left: each column is one feature. Within each half (cos | sin), fast oscillations are on the left and slow drifts on
+# the right, so every $t$ gets a unique, smoothly varying code. Middle: nearby steps have similar embeddings and
+# distant steps dissimilar ones; the similarity band is narrow, so the code resolves $t$ finely. Right: with integer
+# $t$ (solid) the fast and middle frequencies sweep their full range $[-1, 1]$, and only the slowest third change partially. With $t/T$ (dashed) only the first few
 # frequencies change appreciably, and the rest of the embedding is dead weight: the gotcha above.
 #
 # ### 3b · A residual-MLP denoiser
@@ -752,7 +752,7 @@ plt.tight_layout(h_pad=1.5)
 plt.show()
 
 # %% [markdown]
-# Top row: the cloud contracts from an isotropic Gaussian onto the star, with the colours (the eventual destinations)
+# Top row: the cloud contracts from an isotropic Gaussian onto the eight blobs, with the colours (the eventual destinations)
 # sorting themselves out gradually. Bottom row: at $t=500$ every guess $\hat x_0$ sits near the data mean. A nearly
 # pure-noise observation carries little information, so the posterior mean is close to the prior mean. As $t$ falls,
 # the guesses first spread out *between* neighbouring blobs (an ambiguous $x_t$ has a posterior mean between the blobs it
@@ -760,9 +760,9 @@ plt.show()
 # early and fine detail late, much like a Bayesian observer accumulating evidence.
 #
 # > **Gotcha.** The guesses at $t=999$ are scattered for a numerical reason. $\hat x_0 = (x_t-\sqrt{1-\bar\alpha_t}\,\hat\epsilon)/\sqrt{\bar\alpha_t}$
-# > divides by $\sqrt{\bar\alpha_{999}}\approx 0.006$, which magnifies tiny errors in $\hat\epsilon$ about 160-fold. The sampler
-# > itself is unaffected (its update uses $\hat\epsilon$ directly). Anything that *uses* $\hat x_0$ at high noise, though, needs
-# > care. This is one reason image samplers clip $\hat x_0$, and it reappears in §9a.
+# > divides by $\sqrt{\bar\alpha_T}\approx 0.006$ (`alpha_bars[999]`), which magnifies tiny errors in $\hat\epsilon$ about
+# > 160-fold. The sampler itself is unaffected (its update uses $\hat\epsilon$ directly). Anything that *uses* $\hat x_0$ at
+# > high noise, though, needs care. This is one reason image samplers clip $\hat x_0$, and it reappears in §9a.
 
 # %%
 path_t = np.array([t for t, _, _ in traj])
@@ -857,8 +857,9 @@ plt.show()
 # distances work well.
 # - **MMD** (maximum mean discrepancy) compares the two sets through a kernel:
 #   $\text{MMD}^2 = \mathbb E\,k(x,x') + \mathbb E\,k(y,y') - 2\,\mathbb E\,k(x,y)$. With a sum of RBF kernels at several
-#   bandwidths it is sensitive to differences at several length scales. `dm.mmd_rbf` uses the simple *biased* estimator,
-#   which is positive even for two samples from the same distribution (a floor of order $1/n$).
+#   bandwidths it is sensitive to differences at several length scales. `dm.mmd_rbf` returns this *squared* quantity
+#   (our tables simply call it "MMD"). It uses the simple *biased* estimator, which is positive even for two samples from
+#   the same distribution (a floor of order $1/n$).
 # - **Sliced Wasserstein** projects both sets onto random directions, where Wasserstein-1 has a closed form (sort and
 #   compare), and averages. It is in data units: roughly how far mass must move.
 # - Because our data are a known mixture, we add a ground-truth diagnostic: the **average true log-density** of the
@@ -1114,8 +1115,11 @@ plt.show()
 # log-density drops far below the data's. The network trained for $T=10$ fails in the same way. The culprit is the
 # sampler's Gaussian reverse step (the four-mode kernel in §1), not the learning. At $T=50$ the damage is much milder,
 # but the oracle's blobs come out somewhat too *tight* (log-density above the data's), which points at the reverse
-# variance (§9c). At $T=1000$ the oracle sits at the floor and the trained network close to it. Reducing the number of network evaluations without this failure is the subject of
-# notebook 04 (DDIM and ODE solvers take larger *deterministic* steps) and of distillation / consistency methods.
+# variance (§9c). Network and sampler errors need not simply add up: here the trained network's slightly more diffuse
+# samples can offset part of that tightness, so its MMD may even come out a little below the oracle's (see the printout).
+# At $T=1000$ the oracle sits at the floor and the trained network close to it. Reducing the number of network
+# evaluations without this failure is the subject of notebook 04 (DDIM and ODE solvers take larger *deterministic*
+# steps) and of distillation / consistency methods.
 #
 # ### 9c · The sampler variance: $\sigma_t^2=\beta_t$ or $\tilde\beta_t$?
 #

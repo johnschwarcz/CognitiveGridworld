@@ -32,7 +32,7 @@
 # **Prerequisites:** 01 (forward process, $\bar\alpha_t$, VP vs VE), 02 (DDPM, ancestral sampling, MMD and sliced Wasserstein),
 # 03 (scores, Tweedie's formula $\hat\epsilon = -\sqrt{1-\bar\alpha_t}\,\nabla\log q_t$).
 #
-# **Runtime:** about 3–5 min on a laptop CPU (exact Gaussian-mixture maths in float64, plus one small MLP of about 30 s);
+# **Runtime:** about 3–5 min on a laptop CPU (exact Gaussian-mixture maths in float64, plus one small MLP of about 20–30 s);
 # about 2–4 min on a GPU (the exact computations stay on the CPU).
 
 # %% [markdown]
@@ -480,7 +480,7 @@ assert torch.allclose(ours, theirs, atol=1e-3)
 # Every sampler starts from the **same** noise $x_T\sim\mathcal N(0,I)$. $\mathcal N(0,I)$ is not exactly $q_1$, but here
 # $\bar\alpha(1)\approx4\cdot10^{-5}$, so the mismatch is negligible. A stochastic sampler produces a fresh random sample
 # set on every run, so its metrics fluctuate by about the width of the floor band. We therefore average them over three
-# seeds. Heun's NFE is $2n-1$ for $n$ steps, so its budgets land one below the nominal value.
+# seeds. Heun's NFE is $2n-1$ for $n$ steps, so its even budgets land one below the nominal value (9, 19, 49, ...).
 #
 # For the deterministic samplers we also record the state at $t_{\min}$ for the first `N_PATH` particles. We compare it with
 # a **reference solution** of the same ODE from the same $x_T$ (Heun with thousands of steps). The resulting **pathwise
@@ -559,8 +559,8 @@ plt.show()
 # sampler enters the floor band):
 #
 # * **At 5 NFE everything is far off, and the ranking is mixed.** **From about 10–20 NFE the first-order ODE solvers
-#   (Euler, DDIM) are clearly ahead of both stochastic samplers**, by a factor of a few in MMD$^2$. The stochastic
-#   samplers catch up only at around 50–100 NFE.
+#   (Euler, DDIM) are clearly ahead of both stochastic samplers**, by a factor of roughly 1.5 to 6 in MMD$^2$ (Euler
+#   by more than DDIM; see the table). The stochastic samplers catch up only at around 50–100 NFE.
 # * **Why the stochastic samplers need small steps.** There are two concrete reasons. First, the reverse SDE's drift
 #   carries the score with coefficient $\beta$, twice the ODE's $\beta/2$, so an explicit step is stiffer. Euler–Maruyama's
 #   drift step overshoots, and its samples come out *over*-dispersed (see the total variance printed above). Second,
@@ -572,7 +572,8 @@ plt.show()
 #   marginals. (The deterministic curves converge to one fixed sample set, the image of $x_T$ under the exact ODE map.
 #   That set is itself one random draw, which is why they settle at one particular point inside the floor band.)
 # * **Higher order is not automatically better at very low NFE.** With a handful of steps, Heun's corrector evaluates the
-#   field at a poor predicted point, and its ranking at the smallest budgets jumps around: it can do worse than Euler.
+#   field at a poor predicted point, and its ranking at the smallest budgets jumps around: it is the best of all five at
+#   5 NFE, but worse than Euler at 9 and 19 NFE.
 #   Its second-order accuracy only pays off once the steps are small. The next figure makes this precise.
 #
 # The distribution metrics saturate at the floor, so they cannot show the *rate* at which each solver converges. The
@@ -735,8 +736,8 @@ assert torch.allclose(ours_ddim, ours_ddpm, atol=1e-9)
 
 # %% [markdown]
 # CHECK 1 sums up the discretisation error of DDIM and DDPM in one line. A single huge step is exact if $x_0$ is drawn
-# from the posterior. Plugging in the posterior mean instead collapses the variance (printed above), and DDPM's added
-# noise ($\eta=1$) does not restore it. With small steps the kernel depends on $x_0$ only weakly (for $\eta=0$ the
+# from the posterior. Plugging in the posterior mean instead collapses the variance (about 0.4 instead of 2.13, printed
+# above), and DDPM's added noise ($\eta=1$) does not restore it: the variance drops further, to about 0.24. With small steps the kernel depends on $x_0$ only weakly (for $\eta=0$ the
 # coefficient of $x_0$ in its mean, $\sqrt{a_s}-\sqrt{a_t}\sqrt{(1-a_s)/(1-a_t)}$, vanishes as $s\to t$), so the mean is
 # almost as good as a sample. So both samplers become accurate once the steps are small enough. §3.2 and §6 ask how small,
 # and where.
@@ -942,7 +943,8 @@ for nfe in (10, 50):
 #   compared with the fastest time scale of the ODE, which is set by the smallest data variance. A higher order does not
 #   cure stiffness.
 # * **The last step matters.** With a plain Euler step from $t_{\min}$ to 0 (thin dashed line), Euler in $(x,t)$ leaves
-#   residual noise of order $\sigma_{\min}$ in every low-variance direction, many times the true std. In $(\tilde x,\sigma)$
+#   residual noise of order $\sigma_{\min}$ in every low-variance direction, several times the true std for the smallest
+#   $\lambda$ (printed above). In $(\tilde x,\sigma)$
 #   this cannot happen: the Euler step to $\sigma=0$ *is* the denoiser $\hat x_0$. DDIM gets the right last step for free;
 #   in $(x,t)$ it has to be special-cased, as all our samplers do.
 # * **DDIM never overshoots.** Its generated std is never larger than the truth, because each step is a convex combination
@@ -950,12 +952,13 @@ for nfe in (10, 50):
 #   flow.) Its failure mode is the opposite: **over-smoothing**. With few steps, the long last step of the uniform-$t$ grid
 #   (at NFE 10, from $\sigma\approx0.4$ straight down to $\sigma_{\min}$) collapses a narrow component towards its
 #   posterior mean.
-#   For tiny $\lambda$ every sampler is limited by the final denoising at $t_{\min}$ (dotted line), and DDIM sits on that
-#   limit.
+#   For tiny $\lambda$ the final denoising at $t_{\min}$ sets the limit (dotted line): at the smallest $\lambda$ shown,
+#   even the exact ODE returns only about 0.3 of the true std, and the fraction keeps falling as $\lambda$ shrinks. DDIM
+#   sits on that limit; Euler and Heun land above it only through their own overshoot.
 #
-# This explains the §2 result. Our 2-D mixture lives in the shaded band. There all three are stable, but at NFE 10 DDIM
-# under-disperses the narrowest components several-fold, while Euler-in-$t$ stays within about 20% of the truth (printed
-# above). So on this toy Euler-in-$t$ wins. Real data is different. Images have a few directions of very large variance
+# This explains the §2 result. Our 2-D mixture lives in the shaded band. There nothing blows up, but at NFE 10 DDIM
+# under-disperses the narrowest components about three-fold and Heun-in-$t$ over-disperses them about 2.5-fold, while
+# Euler-in-$t$ stays within about 20% of the truth (printed above). So on this toy Euler-in-$t$ wins. Real data is different. Images have a few directions of very large variance
 # (the coarse layout, $\lambda\gg1$, where Euler-in-$t$ also degrades), and a vast number of directions with tiny variance
 # (fine textures, pixel-level detail), where Heun-in-$t$ blows up and Euler-in-$t$ overshoots. DDIM's errors are milder
 # and always on the safe side: a little blur, never noise or blow-up. Its trajectories are close to straight lines
@@ -1015,7 +1018,8 @@ plt.show()
 
 # %% [markdown]
 # The ODE paths (top left) are smooth. They barely move while $t\gtrsim0.5$ and then glide into a mode. The SDE paths (top
-# right) jitter all the way down, yet the printed check shows that both clouds have the same marginal $q_t$ at every time.
+# right) jitter all the way down, yet the printed check shows that both clouds match the marginal $q_t$ at every checked
+# time, up to roughly the sampling noise (compare with the "exact vs exact" column).
 # The bottom row shows the difference that matters. The ODE is a **smooth, deterministic map** from noise to data:
 # neighbouring noise vectors land next to each other, so the colours form coherent regions, and each mode receives a
 # contiguous wedge of noise space. That map is invertible (run the ODE backwards), so it is a **continuous normalising
@@ -1089,11 +1093,13 @@ plt.tight_layout()
 plt.show()
 
 # %% [markdown]
-# The ODE carries the corruption into the output, whenever it happens: too much mass ends up in the outer components
-# (middle), and the modes come out too wide (right). The SDE **erases** corruption made at high noise. There the Langevin
-# part runs at rate $\beta(t)/2$, which is large, and $p_t$ is nearly Gaussian, so the chain mixes fast. Corruption made at
-# low noise is only partly repaired. The SDE still repairs much of the shape *within* each mode (right; fully down to
-# $t_p\approx0.2$), but no longer the mode weights (middle), which stay as wrong as the ODE's. Once the modes have separated, Langevin dynamics cannot move mass
+# The ODE carries the corruption into the output, whenever it happens: the modes come out too wide (right), and too much
+# mass ends up in the outer components (middle; except at $t_p=0.05$, when the modes are already so far apart that the
+# scaling moves samples within their modes rather than between them). The SDE **erases** corruption made at high noise.
+# There the Langevin part runs at rate $\beta(t)/2$, which is large, and $p_t$ is nearly Gaussian, so the chain mixes
+# fast. Corruption made at low noise is only partly repaired. The SDE still repairs much of the shape *within* each mode
+# (right; fully down to $t_p\approx0.2$), but not the mode weights (middle): at $t_p=0.35$ it removes only part of the
+# excess, and from $t_p\approx0.2$ on its outer fraction is nearly as wrong as the ODE's. Once the modes have separated, Langevin dynamics cannot move mass
 # between them in any reasonable time: this is the metastability of notebook 03, §3a. Whatever split of mass between modes
 # exists by then is final.
 #
@@ -1295,8 +1301,9 @@ plt.show()
 # %% [markdown]
 # **Spacing matters a lot.** Uniform-in-$\sigma$ is a disaster at every budget we tried: it spends almost all of its steps
 # at enormous noise levels where nothing happens. Between the two sensible grids, though, the outcome is less clear-cut than
-# EDM's reputation suggests. On this toy, uniform-in-$t$ (for the linear VP schedule) is about as good as Karras $\rho=7$,
-# and often a bit better at small budgets, for both solvers.
+# EDM's reputation suggests. On this toy, uniform-in-$t$ (for the linear VP schedule) is at least as good as Karras
+# $\rho=7$ at every budget except the smallest (5 NFE): better for Euler at 10–20 NFE (by roughly a third in sliced $W_1$),
+# and much better for Heun at 9–19 NFE (printed above). From about 50 NFE on, the two grids agree.
 #
 # **Second order pays off only with small steps.** The most visible feature of the left panel is that on both sensible
 # grids EDM's Heun (solid) is *worse* than Euler = DDIM (dashed) at the same NFE, until the two tie at a few tens of NFE
@@ -1358,7 +1365,7 @@ plt.show()
 # $\hat x_0$ moved in §3). Outside it, a step costs little accuracy. A good grid concentrates its steps in this band. The
 # printed fractions show that both sensible grids spend a large share of their steps *above* the band, where they are
 # nearly free. For our 2-D mixture, uniform-in-$t$ puts more of its steps inside the band, while $\rho=7$ puts more of
-# them above and below it. That is why uniform-in-$t$ does slightly better here.
+# them above and below it. That is why uniform-in-$t$ does better here, especially for Heun.
 #
 # The lesson is not "uniform-in-$t$ is better". **The right spacing depends on the range of scales present in the data.**
 # Natural images have structure at *every* scale, from the global layout down to pixel noise (their power spectrum is a
@@ -1450,9 +1457,10 @@ plt.tight_layout()
 plt.show()
 
 # %% [markdown]
-# The ODE likelihood matches `dm.GaussianMixture.log_prob` to within a small fraction of a nat, including the two points
-# in the low-density gaps between modes. Putting the steps where the ODE is stiff (quadratic spacing near $t=0$) is
-# worth more than an order of magnitude in accuracy at the same cost: the lesson of §6 again. Replacing the exact $q_1$ by
+# The ODE likelihood matches `dm.GaussianMixture.log_prob` to about $10^{-5}$ nats with 1600 quadratic steps (printed
+# above), including the two points in the low-density gaps between modes. Putting the steps where the ODE is stiff
+# (quadratic spacing near $t=0$) is worth about an order of magnitude in accuracy at the same cost (roughly 8× at 25–100
+# steps, 30× at 400–1600): the lesson of §6 again. Replacing the exact $q_1$ by
 # $\mathcal N(0,I)$ changes nothing visible, since $\bar\alpha(1)$ is tiny.
 #
 # With a trained network the same procedure gives the exact likelihood of the **ODE model**: the distribution obtained
@@ -1581,8 +1589,9 @@ plt.show()
 # kernels barely notice a percent of misplaced samples, while a transport distance like $W_1$ does. Look at more than one
 # metric, and look at the tails.
 #
-# **DDPM behaves differently.** It typically strands fewer samples, and its $W_1$ keeps falling towards its exact-score
-# counterpart (see the printout; the exact numbers depend on the trained network). This is §4.1 at work. The Langevin part
+# **DDPM behaves differently.** At large budgets it typically strands fewer samples, and its $W_1$ comes down into the
+# floor band, close to its exact-score counterpart, instead of levelling off above it (see the printout; the exact
+# numbers depend on the trained network). This is §4.1 at work. The Langevin part
 # of the reverse SDE pulls stranded samples back towards high-density regions. These are regions of the *model's*
 # $\hat p_t$, not of the true $p_t$, but the model is accurate exactly where most of the data is. There is a clean theory
 # behind this. For the SDE sampler,
@@ -1715,8 +1724,9 @@ plt.show()
 #     print(nfe, quality(heun_sigma_sampler(eps_exact, x_T, equidistributed_sigmas(n, err_heun, 2)))[1],
 #           quality(euler_sigma_sampler(eps_exact, x_T, equidistributed_sigmas(nfe, err_euler, 1)))[1])
 # ```
-# Both beat Karras $\rho=7$ at the same NFE, and at these budgets the Euler version is the best grid-and-solver
-# combination in this notebook. This is a hand-made adaptive schedule.
+# Both beat Karras $\rho=7$ at the same NFE, and the Euler version also beats uniform-in-$t$, making it the best
+# $\sigma$-space (DDIM-type) sampler in this notebook at these budgets. (Plain Euler in $(x,t)$ from §2 is still a little
+# better on this toy, for the reasons of §3.2.) This is a hand-made adaptive schedule.
 # </details>
 #
 # **Exercise 4 (better inversion).** Improve `ddim_invert` with a fixed-point iteration. In each step, first compute
@@ -1767,7 +1777,7 @@ plt.show()
 #   for the reverse-time SDE $dx=[-\tfrac12\beta x-\beta\nabla\log p_t]dt+\sqrt\beta\,d\bar W$. The **probability-flow ODE**
 #   $\dot x=-\tfrac12\beta(x+\nabla\log p_t)$ has the same marginals, by Fokker–Planck.
 # * The **reverse SDE = ODE + Langevin corrector**. Its noise erases errors made at high noise levels, but it cannot move
-#   mass between modes once they have separated, and it needs many steps. Deterministic solvers are far better per NFE
+#   mass between modes once they have separated, and it needs many steps. Deterministic solvers are clearly better per NFE
 #   from about 10–20 NFE up to the point where everything converges.
 # * **DDIM** follows from a non-Markovian forward process with DDPM's marginals, so it needs no retraining. Each step is
 #   exact if fed a posterior *sample* of $x_0$; using the posterior *mean* is its (and DDPM's) discretisation error. With
@@ -1776,13 +1786,14 @@ plt.show()
 #   failure mode at low NFE is over-smoothing, never noise or blow-up, which makes it the robust default.
 # * **Finish with a denoising step**: a plain Euler step to $t=0$ in $(x,t)$ leaves residual noise.
 # * Orders of convergence are real (Euler/DDIM $\propto$ NFE$^{-1}$, Heun $\propto$ NFE$^{-2}$) but only once steps are
-#   small. Below a few tens of NFE, a 2-NFE Heun step loses to two Euler steps, and *where* the steps go and *which
+#   small. Below a few tens of NFE, a 2-NFE Heun step usually loses to two Euler steps, and *where* the steps go and *which
 #   variables* you integrate in matter more.
 # * The ODE is a **bijection** between noise and data, a continuous normalising flow. It gives DDIM **inversion** (an
 #   $O(h)$ approximation) and **exact likelihoods** via $\log p_0=\log p_1+\int\nabla\!\cdot f\,dt$.
 # * **Step spacing** should concentrate on the noise levels where the denoiser's output changes. That depends on the
-#   data's range of scales: Karras $\rho=7$ suits images, but on our toy uniform-in-$t$ does as well. Uniform-in-$\sigma$ is
-#   always bad. Equidistributing the measured local error (density $\propto$ error$^{1/(p+1)}$) beats both.
+#   data's range of scales: Karras $\rho=7$ suits images, but on our toy uniform-in-$t$ does at least as well from 10 NFE up. Uniform-in-$\sigma$ is
+#   always bad. Equidistributing the measured local error (density $\propto$ error$^{1/(p+1)}$) beats both with the Euler
+#   (= DDIM) solver (Exercise 3).
 # * With a trained network, **model error sets a floor** for deterministic samplers. Use just enough NFE to reach it, and
 #   count NFE, including CFG's 2×. The floor hides in a few samples stranded where the network is poorly trained; $W_1$
 #   sees them, MMD barely does. At large budgets, a stochastic sampler can partially correct it.

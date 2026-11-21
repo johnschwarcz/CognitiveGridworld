@@ -40,7 +40,8 @@
 # **Prerequisites:** 01–04 (forward process, DDPM, Tweedie, DDIM), 06 (conditioning, guidance),
 # 07 (inpainting with the replacement trick).
 #
-# **Runtime:** about 4–8 min on a 4-core CPU (mostly training three small MLPs), 1–3 min on a GPU.
+# **Runtime:** about 4 min on a 4-core CPU (mostly training three small diffusion MLPs, about a
+# minute each), 1–3 min on a GPU.
 
 # %%
 import time
@@ -482,8 +483,8 @@ plt.show()
 
 # %% [markdown]
 # Exactly as predicted: BC plans (red) end at the goal, lean a little towards the start's side
-# (that is $\pi(s)$ at work), and drive through the obstacle nearly every time. They are also
-# somewhat rougher than the experts' curves. More data or a bigger network cannot fix the
+# (that is $\pi(s)$ at work), and drive through the obstacle in the large majority of cases (see
+# the collision rate printed above). They are also somewhat rougher than the experts' curves. More data or a bigger network cannot fix the
 # collisions; the *loss* asks for the mean. (Classical fixes are mixture-density outputs, discretised actions, or energy-based
 # "implicit" policies. Diffusion has proved one of the most effective, especially for
 # high-dimensional action chunks.)
@@ -900,7 +901,8 @@ policy = policies["v"]           # the policy we use from now on
 
 # %% [markdown]
 # The ground truth is ½ near the centre line and leans towards the near side further out. The
-# $v$-policy follows it fairly closely: it *probability-matches*, as a generative model should,
+# $v$-policy follows it fairly closely (its largest gap, printed above, is under 0.1): it
+# *probability-matches*, as a generative model should,
 # instead of always picking the more likely route. The $\varepsilon$-policy gets the proportions
 # wrong. It over-commits to the near side, behaving more like a "take the nearer route" rule than
 # like the experts. That is another symptom of poorly learned low-SNR levels, the levels where the
@@ -941,7 +943,7 @@ plt.tight_layout()
 plt.show()
 
 # %% [markdown]
-# At the highest noise level every sample's $\hat\tau_0$ lies on top of the BC plan: the noisiest
+# At the highest noise level every sample's $\hat\tau_0$ lies close to the BC plan: the noisiest
 # denoiser *is* the regression policy, mean path through the obstacle included. As the SNR grows
 # past roughly $10^{-2}$ the guesses peel away from the mean towards one route or the other, and
 # by $\mathrm{SNR}\approx 0.3$ most samples have committed and are merely being refined. The route
@@ -1029,7 +1031,8 @@ plt.tight_layout()
 plt.show()
 
 # %% [markdown]
-# Cost grows linearly with the number of steps, while quality improves quickly and then saturates.
+# Cost grows linearly with the number of steps, while quality improves quickly and then saturates
+# (for the $v$-model with $\eta=1$, at about 20 steps).
 # With very few steps most samples land *between* the routes: the route is decided over a range of
 # noise levels, and two or three big steps cannot resolve that decision (the $v$-model then returns
 # something close to the mean path, the regression answer; the $\varepsilon$-model returns
@@ -1170,9 +1173,10 @@ plt.show()
 
 # %% [markdown]
 # Black paths reached the goal, red ones crashed (×), grey ones (if any) ran out of time; the gaps
-# are the teleport at step 12. After
-# the push, the open-loop agents steer straight back towards their stale plans, through the
-# obstacle. The closed-loop agent notices it is off-plan, replans from where it actually is, and
+# are the teleport at step 12. The open-loop BC agents crash before the push even happens: their
+# mean plans run straight into the obstacle. After the push, the open-loop diffusion agents steer
+# straight back towards their stale plans, through the obstacle. The closed-loop agent notices it
+# is off-plan, replans from where it actually is, and
 # usually just continues along the route on its new side: the multimodal policy offers a good plan
 # from either side. Let's quantify over many starts, with and without the push.
 
@@ -1189,9 +1193,10 @@ for name, (fn, k) in controllers.items():
     print(f"{name:32s} {row[0]:>18s} {row[1]:>18s}   {res['n_plans']}")
 
 # %% [markdown]
-# Without perturbations, open-loop diffusion is already good, and replanning changes little.
+# Without perturbations, open-loop diffusion is already good, and replanning helps only a little.
 # With the push, open-loop controllers fail (they are executing a plan for a world that no longer
-# exists) while the receding-horizon diffusion policy recovers in most episodes.
+# exists) while the receding-horizon diffusion policy recovers in nearly every episode: its
+# success rate is about the same as without the push.
 #
 # The last row holds a surprise worth understanding: feedback rescues much of *BC* too. From an
 # off-centre start $\pi_{\text{pairs}}(s)\neq\tfrac12$ (the probability-matching plot), so the
@@ -1522,10 +1527,12 @@ plt.tight_layout()
 plt.show()
 
 # %% [markdown]
-# The unguided policy happily drives into the obstacle it has never seen; the guided one threads
-# around it, while still behaving like the experts everywhere else, with no retraining and no new
-# data. This zero-shot composition of a learned behaviour prior with new objectives is a large
-# part of why diffusion models became popular in robotics.
+# The unguided policy happily drives into the obstacle it has never seen (roughly half of its
+# episodes fail: those that take the lower route); the guided one threads around it and succeeds
+# in the large majority of episodes (see the titles), while still behaving like the experts
+# everywhere else, with no retraining and no new data. This zero-shot composition of a learned
+# behaviour prior with new objectives is a large part of why diffusion models became popular in
+# robotics.
 #
 # ## 7 · Discussion: where this goes in practice
 #
@@ -1696,7 +1703,8 @@ plt.show()
 #   weight the $\tau_0$-error by $\mathrm{SNR}_t$, $1+\mathrm{SNR}_t$ and $1$. With a small network,
 #   $\varepsilon$ neglects the low-SNR levels where the route is chosen and $\tau_0$ neglects the
 #   high-SNR levels where diversity lives; $v$ balances the two. Check diversity, not only safety.
-# - About 10–20 sampling steps suffice for control. Clip $\hat\tau_0$ to the workspace, decay the
+# - About 20 sampling steps suffice for control here; with only a few, the route decision cannot be
+#   resolved. Clip $\hat\tau_0$ to the workspace, decay the
 #   learning rate, and avoid schedules whose $\bar\alpha_{T-1}$ is nearly zero when predicting
 #   $\varepsilon$ with few noise levels.
 # - Receding-horizon execution (sample a chunk, execute part of it, replan, and replan early when

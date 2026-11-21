@@ -340,8 +340,8 @@ print(f"forgetting the shift silently changes x_t by up to {wrong.item():.4f} at
 # adds noise: the reverse posterior variance must be exactly 0 at maths $t=1$ (section 7).
 #
 # Now the real test: run the chain step by step up to $t$, sample $x_t$ in one shot from the same
-# $x_0$'s, and compare the two distributions. We compare means and covariances with the closed form
-# $\mathbb E[x_t]=\sqrt{\bar\alpha_t}\,\mathbb E[x_0]$ and
+# $x_0$'s, and compare the two distributions. We compare the means, and the variance of the first coordinate,
+# with the closed form $\mathbb E[x_t]=\sqrt{\bar\alpha_t}\,\mathbb E[x_0]$ and
 # $\operatorname{Cov}[x_t]=\bar\alpha_t\operatorname{Cov}[x_0]+(1-\bar\alpha_t)I$, and we use the kernel two-sample statistic
 # `dm.mmd_rbf` (0 means identical distributions). Even for identical distributions a finite-sample MMD is
 # positive, so we need its **noise floor**: the MMD between two *independent* one-shot draws. A single
@@ -497,15 +497,18 @@ plt.show()
 # %% [markdown]
 # - **$\beta_t$ (log scale):** the cosine schedule starts with smaller steps and ends with much larger ones (the
 #   last step is clipped at 0.999).
-# - **$\bar\alpha_t$:** under the linear schedule the per-pixel signal is essentially gone by $t/T\approx 0.6$. The last
-#   third of the steps therefore operate on what is, coordinate by coordinate, almost pure noise. That is
+# - **$\bar\alpha_t$:** under the linear schedule the per-pixel signal is essentially gone by $t/T\approx 2/3$
+#   ($\bar\alpha_t<0.01$ for the last third of the steps, see the printout). Those steps therefore operate on what is,
+#   coordinate by coordinate, almost pure noise. That is
 #   mostly wasted effort, both in training and in sampling. The cosine curve decays smoothly all the way to $T$.
 # - **log-SNR:** both curves drop steeply at first and then fall roughly linearly, but the cosine curve sits higher
-#   (it only plunges below the linear one in the last few percent of steps). It therefore spends more of its steps
+#   (it only plunges below the linear one in the last handful of steps, $t/T>0.99$). It therefore spends more of its steps
 #   in the middle range ($|\lambda|<5$, see the printout), where the data are actually being transformed
 #   (section 6), and fewer at the extremes.
 # - **Changing $T$:** the rescaled linear schedules for $T=100$ and $T=50$ follow the $T=1000$ curve closely and drift
-#   apart only at the low-SNR end. The gap comes from $\prod(1-\beta)\neq e^{-\sum\beta}$ when the steps are large.
+#   apart mainly at the low-SNR end. That gap comes from $\prod(1-\beta)\neq e^{-\sum\beta}$ when the steps are large.
+#   (The slight offset at the very first coarse steps, where the curve is steepest, has another cause: the first
+#   step's $\beta$ is $\beta(0)/T$, the rate at $\tau=0$, so it adds too little noise for its interval.)
 #   Respacing reproduces the curve exactly by construction.
 #
 # Now look at an image. Below, the same digit is noised at the same $t/T$ under both schedules, using
@@ -757,6 +760,10 @@ print(f"MAP component accuracy at log-SNR = 10: {acc:.3f};  H(K) = {H_k:.2f} bit
 
 lam_np = lams.numpy()
 lam_lin = log_snr(abar_lin[1:]).numpy()
+# t/T <-> log-SNR table for the secondary axis of the figure below. lambda_1 = 9.2 lies inside the plotted range
+# [-10, 10] and np.interp clamps outside its table, which would shift every top tick; pinning t = 0 at the
+# left edge (lambda = 10) keeps the two axes registered.
+lam_tab, tau_tab = np.concatenate([[10.0], lam_lin]), np.arange(T + 1) / T
 
 
 def half_point(kept):
@@ -798,8 +805,8 @@ ax.legend(loc="upper right", fontsize=7)
 for ax in axes:
     ax.set_xlim(10, -10)          # noise increases to the right, like t
     # secondary axis: the t/T at which the *linear* schedule reaches this log-SNR
-    sec = ax.secondary_xaxis("top", functions=(lambda l: np.interp(-l, -lam_lin, np.arange(1, T + 1) / T),
-                                               lambda f: np.interp(f, np.arange(1, T + 1) / T, lam_lin)))
+    sec = ax.secondary_xaxis("top", functions=(lambda l: np.interp(-l, -lam_tab, tau_tab),
+                                               lambda f: np.interp(f, tau_tab, lam_tab)))
     sec.set_xticks([0.02, 0.1, 0.3, 0.5, 0.7])
     sec.set_xlabel("t/T under the linear schedule", fontsize=8)
 plt.tight_layout()
@@ -972,7 +979,8 @@ print("x0-form and eps-form of mu_tilde agree")
 # trivial: a coarse 10-step schedule (respaced from the linear one) whose $\beta$'s are large. We sample
 # $x_0$ from the 1-D mixture, then $x_{t-1}\sim q(x_{t-1}\mid x_0)$, then one forward step to get $x_t$. Since
 # $(x_{t-1},x_t)$ is jointly Gaussian given $x_0$, a **least-squares regression** of $x_{t-1}$ on $(x_0,x_t)$ must
-# recover the coefficients of $\tilde\mu_t$ exactly, and its residual variance must equal $\tilde\beta_t$.
+# recover the coefficients of $\tilde\mu_t$ exactly, and its residual variance must equal $\tilde\beta_t$, up to Monte
+# Carlo error (expect agreement to two or three decimals).
 
 # %%
 betas_10, abar_10 = respace(abar_lin, 10)
@@ -1032,7 +1040,7 @@ plt.show()
 
 # %% [markdown]
 # **Left:** given $x_0$, the pairs $(x_t, x_{t-1})$ form a Gaussian cloud whose conditional mean is the
-# straight line $\tilde\mu_t$ and whose spread is $\tilde\beta_t$. **Right:** the samples whose $x_t$ falls into a
+# straight line $\tilde\mu_t$ and whose variance about that line is $\tilde\beta_t$ (grey band: $\pm2\sqrt{\tilde\beta_t}$). **Right:** the samples whose $x_t$ falls into a
 # narrow bin match the predicted posterior. The posterior lies between the prior (from $x_0$) and the
 # likelihood (from $x_t$), and is narrower than both, as in any conjugate Gaussian update.
 
@@ -1196,7 +1204,7 @@ plt.show()
 # %% [markdown]
 # **Left (noise level $t=300$). Top row, one big step ($T\approx5$):** the exact reverse conditional is clearly
 # non-Gaussian. It is multimodal or skewed, because it inherits the modes of the prior $q_{t-1}$ (green), and the
-# moment-matched Gaussian (red dashed) puts mass where the true distribution has none. A Gaussian reverse model would
+# moment-matched Gaussian (red dashed) puts mass where the true distribution has almost none. A Gaussian reverse model would
 # generate samples *between* the modes. **Bottom row, one small step ($T=1000$):** for the same $x_t$ the conditional
 # is a narrow bump that a Gaussian matches almost perfectly.
 #
