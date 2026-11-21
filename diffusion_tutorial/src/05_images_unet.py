@@ -33,8 +33,8 @@
 #
 # **Runtime:** CPU ≈ 10 min on a 4-core machine (about 9 min measured), more than half of it the in-notebook training
 # run (bfloat16 autocast; slower on a busy machine). CUDA GPU ≈ 5 min with the GPU default of 4 000 training
-# steps, plus ≈ 10 min once, only if the shipped reference checkpoint is missing and `dmtools` has to train it
-# (section 4).
+# steps. Only if the shipped reference checkpoint is missing does `dmtools` train it, once (section 4): ≈ 10 min
+# more on a GPU, about an hour on a CPU.
 
 # %%
 import contextlib
@@ -693,10 +693,10 @@ plt.show()
 # and EMA (`dm.MNIST_RECIPE`, batch 64; `dm.train_diffusion` warms up over 100 steps instead of our 200), trained for
 # 12 000 steps. It ships with the tutorial as `checkpoints/mnist_unet_uncond.pt` (made by `pretrain_checkpoints.py`),
 # and `dm.load_or_train_mnist_model` loads it. The cell prints which model it loaded and how much longer than ours it
-# was trained. (The fallback matters only if that file is missing. `dmtools` then trains and caches it: minutes on a
-# GPU, about an hour on a CPU. On a CPU the cell first looks for `06_mnist_cond.pt`, a shorter-trained conditional
-# model of the same recipe, if you have one, and calls it with `y=None`: with label dropout, that makes it an
-# unconditional model of the same digits, as notebook 06 explains.)
+# was trained. (The fallback matters only if that file is missing. On a CPU the cell then uses `06_mnist_cond.pt`, a
+# shorter-trained conditional model of the same recipe, if you have one, and calls it with `y=None`: with label
+# dropout, that makes it an unconditional model of the same digits, as notebook 06 explains. Otherwise `dmtools`
+# trains and caches the reference: minutes on a GPU, about an hour on a CPU.)
 
 # %%
 REF_CKPT = dm.CKPT_DIR / "mnist_unet_uncond.pt"   # the reference (made by pretrain_checkpoints.py, or by dm below)
@@ -915,7 +915,8 @@ t_half = next((t for t, a in zip(traj_t, agree) if a >= 0.5), None)
 print(f"class of x0_hat agrees with the final class for >= 50% of samples from t = {t_half} on")
 
 # %% [markdown]
-# The curve stays near chance for the first fifth of the chain (down to $t\approx800$), then rises steeply. The class
+# The curve stays near chance for the first fifth of the chain (down to $t\approx800$), then rises, slowly at first
+# and most steeply between $t\approx600$ and $t\approx350$. The class
 # of $\hat x_0$ matches the final class for more than half of the samples from around the middle of the chain (the
 # printed $t$), and for about 95% of them from $t\approx350$ on. The remaining steps change details, not identity. One caveat: the classifier was trained on sharp digits, so on very blurry $\hat x_0$ its
 # answer is only a rough proxy for "what the model has committed to". Section 6 explains *why* generation is
@@ -1001,9 +1002,9 @@ for (net_name, clip), xs in few.items():
 # difference here (the two grids are practically identical, and so are the printed off-manifold fractions): its
 # out-of-range $\hat x_0$ occurs only in the first steps, where $\hat x_0$ enters the update with a small weight. The
 # under-trained in-notebook model, whose $\hat x_0$ at large $t$ is far worse (section 4), is another matter. Without
-# clipping, many of its samples blow up into noise instead of a digit (about half are off-manifold in the stored
-# run). Clipping removes many of these blow-ups (the off-manifold fraction drops to under a third), although its
-# samples keep speckled backgrounds. Clipping is a cheap fix that is on by default in most DDPM code.
+# clipping, many of its samples blow up into noise instead of a digit and some fade into faint fragments (together,
+# about half are off-manifold in the stored run). Clipping removes many of these blow-ups (the off-manifold
+# fraction drops to under a third), although its samples keep speckled backgrounds. Clipping is a cheap fix that is on by default in most DDPM code.
 #
 # **Dynamic thresholding** (Imagen, Saharia et al. 2022) is a refinement. Per sample, let $s$ be the 99.5th
 # percentile of $|\hat x_0|$. If $s>1$, clip to $[-s,s]$ and divide by $s$. Static clipping saturates many pixels
@@ -1441,8 +1442,9 @@ print(f"FD of {N_EVAL} test images vs the training reference: the first {N_EVAL}
 # images in file order are therefore not a random sample of digits, and their FD to the training statistics is much
 # larger than that of a random subset of the same size. So the cell shuffled the test features once, and every
 # "test images" FD below uses random subsets. Whatever plays the role of real data in an FD comparison must be a
-# random sample from the same distribution as the reference. (Pixel-space nearest-neighbour distances and class
-# shares, used in sections 5, 7a and 7b with the first `N_EVAL` test images, are hardly affected.)
+# random sample from the same distribution as the reference. (Pixel-space nearest-neighbour distances, class shares
+# and classifier confidences, used in sections 5, 7a and 7b with the first `N_EVAL` test images, are hardly
+# affected.)
 #
 # **Pitfall 1: FD is biased upwards at small sample size.** Even two samples from the *same* distribution have
 # FD > 0, because the covariance estimated from $n$ points is noisy. A $d\times d$ covariance has $d(d+1)/2$ free
@@ -1510,8 +1512,9 @@ print(f"check of the error bars at n = {N_EVAL}: bootstrap sd of the floor {rows
 # and is conventionally computed on 50 000, with a fixed implementation.
 #
 # **Right:** two groups, each at its own common $n$ (shown in brackets). Compare bars only *within* a group, against
-# their error bars. The last printed line compares the bootstrap error bar of the floor with the spread over truly
-# independent sets of real images. Expect the bootstrap to be the larger of the two: resampling with replacement
+# their error bars. Each floor bar comes from one random subset of test images, so it can differ from the left
+# panel's average at the same $n$ by an error bar or two. The last printed line compares the bootstrap error bar
+# of the floor with the spread over truly independent sets of real images. Expect the bootstrap to be the larger of the two: resampling with replacement
 # duplicates points, which acts like a smaller $n$. So treat these error bars as generous. Three comparisons are
 # worth reading off:
 # * **reference vs in-notebook** (first group): what longer training buys. In the stored run the reference model
