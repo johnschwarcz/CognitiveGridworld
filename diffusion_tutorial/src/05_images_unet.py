@@ -31,7 +31,7 @@
 # **Prerequisites:** 01 (forward process, schedules), 02 (DDPM loss and ancestral sampling),
 # 03 (scores, Tweedie's formula), 04 (DDIM).
 #
-# **Runtime:** CPU ≈ 15–20 min on an otherwise idle 4-core machine, about half of it the in-notebook training run
+# **Runtime:** CPU ≈ 15–20 min on an otherwise idle 4-core machine, more than half of it the in-notebook training run
 # (bfloat16 autocast; much slower on a busy machine). CUDA GPU ≈ 5 min with the GPU default of 4 000 training
 # steps, plus ≈ 10 min once if `dmtools` has to train the reference checkpoint (section 4).
 
@@ -768,7 +768,7 @@ for name, (eps_mse, _) in curves.items():
 #   But it is one reason for **x0-clipping** (next section) and for alternative parameterisations such as
 #   $v$-prediction (Salimans & Ho 2022).
 # * Compare the two models: the gap between the curves shows at which noise levels the reference's longer
-#   training paid off.
+#   training paid off. Look especially at the smallest $t$, where fine detail is restored, and at the largest.
 #
 # ## 5 · Sampling images: DDPM vs DDIM, the denoising chain, x0-clipping
 #
@@ -1155,9 +1155,9 @@ for name, (td, _, _) in t_dec.items():
 # the same ordering: the boundary between "still open" (bright) and "settled" (dark) runs from low frequencies at
 # large $t$ (early in sampling) to high frequencies near the end.
 #
-# (d) condenses this into one number per frequency, the noise level at which it is decided. All three curves fall
-# with frequency: **coarse-to-fine is already a property of the Gaussian predictions**, and the trained model
-# follows it. Read the gaps between the curves as answers to separate questions. The gap from the stationary to the
+# (d) condenses this into one number per frequency, the noise level at which it is decided. Apart from the lowest
+# couple of frequencies, every curve falls with frequency: **coarse-to-fine is already a property of the Gaussian
+# predictions**, and the trained model follows it. Read the gaps between the curves as answers to separate questions. The gap from the stationary to the
 # full-covariance Gaussian is what knowing *where* digits sit (non-stationarity) is worth to a purely linear
 # denoiser. For a *perfect* model, the chain's curve would be the Bayes-optimal one for the true prior, which can only
 # lie above the full-covariance curve. Where the measured curve lies above it, the network decides a frequency band
@@ -1165,7 +1165,10 @@ for name, (td, _, _) in t_dec.items():
 # sharp stroke edges are largely implied by the coarse shape). Three caveats keep this honest. The chain is measured
 # against the model's *own* final samples, so a model that is less diverse than the data (overconfident) would also
 # look decisive. Clipping can only move $\hat x_0$ closer to the final sample, which is why the dotted, unclipped curve
-# is shown too. And the estimate is noisy: the chain was recorded every 50 steps, on `N_DDPM` samples.
+# is shown too. And the estimate is noisy: the chain was recorded every 50 steps, on `N_DDPM` samples. With these
+# caveats, read the printout: if the model's chain decides the middle and high frequencies well before the best linear
+# filter, and the unclipped curve lies on top of the clipped one, the network really is exploiting structure that no
+# Gaussian model of the digits has.
 #
 # This is the spectral explanation of the coarse-to-fine chain in section 5. It also explains several
 # practical facts: why noise schedules matter so much (they decide how many steps are spent on each frequency
@@ -1265,8 +1268,9 @@ print(f"{'random Gaussian matrix':29s}       : off-diagonal asymmetry {offdiag_a
 # proportional to the gradient of a log-density (notebook 03), and nothing in the architecture forces a symmetric
 # Jacobian. Training on the denoising objective pushes it towards that structure, and the remaining asymmetry
 # measures how far the network still is from an exact posterior mean. The negative eigenvalue mass should be
-# compared with 0, the value for an exact posterior covariance. (The untrained network passes this test trivially,
-# because its Jacobian is dominated by the $I/a$ term.) Kadkhodaie et al. (2024)
+# compared with 0, the value for an exact posterior covariance; a clearly non-zero value means the trained network's
+# Jacobian is not yet a valid covariance matrix. (The untrained network passes this test trivially, because its
+# Jacobian is dominated by the $I/a$ term.) Kadkhodaie et al. (2024)
 # build their analysis of generalisation on the eigen-decomposition of exactly these Jacobians.
 #
 # ## 7 · Evaluating image samples
@@ -1475,14 +1479,19 @@ print(f"check of the error bars at n = {N_EVAL}: bootstrap sd of the floor {rows
 # and is conventionally computed on 50 000, with a fixed implementation.
 #
 # **Right:** two groups, each at its own common $n$ (shown in brackets). Compare bars only *within* a group, against
-# their error bars; the last printed line checks that the bootstrap error bars match the spread over independent sets
-# of real images. Three comparisons are worth reading off:
+# their error bars. The last printed line compares the bootstrap error bar of the floor with the spread over truly
+# independent sets of real images. Expect the bootstrap to be the larger of the two: resampling with replacement
+# duplicates points, which acts like a smaller $n$. So treat these error bars as generous. Three comparisons are
+# worth reading off:
 # * **reference vs in-notebook** (first group): what longer training buys;
 # * **EMA vs raw weights** of the in-notebook model (first group): what weight averaging buys, even in a short run
 #   where the two sample grids looked alike by eye;
 # * **DDPM-1000 vs DDIM-50** of the reference model (second group): whether 20× fewer network calls cost measurable
 #   quality. This connects to the background speckle discussed in section 5. Here $n$ = `N_DDPM` is only about the
-#   feature dimension, so the bias is large and only a clear gap means something. On a GPU, raise `N_DDPM`.
+#   feature dimension, so the bias is large and only a clear gap means something. On a GPU, raise `N_DDPM`. Do not
+#   be surprised if DDIM's speckle barely moves the FD: features trained to recognise digits are built to ignore
+#   low-level texture. That is the flip side of using semantic features (see the pitfalls below), and a reason to
+#   look at the samples as well.
 #
 # **Further pitfalls of FID** to keep in mind:
 # * **It is blind to memorisation.** Returning the training set verbatim gives a near-floor FD. Pair it with a
