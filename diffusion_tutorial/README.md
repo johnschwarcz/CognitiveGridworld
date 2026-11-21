@@ -76,9 +76,9 @@ jupyter lab
   `cuda`, then Apple's `mps`, then `cpu` automatically (`dmtools.get_device()`).
 - MNIST (11 MB) is downloaded by torchvision into `data/` the first time it is needed.
 - **Smoke-test mode:** `DM_FAST=1 jupyter lab` (or `DM_FAST=1 python tools/build.py --execute`) shrinks every
-  training run and sample count so that each notebook runs in a minute or two. Results are then poor, but every cell runs.
-  Use it to check your environment, or when you only want to read the code paths. (`tools/build.py --execute`
-  overwrites the stored outputs of the notebooks it runs.)
+  training run and sample count so that each notebook runs in under a minute on a 4-core CPU (about 6 minutes for
+  all ten). Results are then poor, but every cell runs. Use it to check your environment, or when you only want to
+  read the code paths. (`tools/build.py --execute` overwrites the stored outputs of the notebooks it runs.)
 - **Real Stable Diffusion (notebook 09 Part B):** `pip install "transformers>=5.23" "accelerate>=1.16"`, use a CUDA GPU
   with ≥ 6 GB of memory (or an Apple-silicon Mac) and internet access to the Hugging Face Hub, and set
   `RUN_SD = True` in the notebook.
@@ -121,8 +121,9 @@ EMA 0.999), trained for 12 000 steps at batch 64 with bf16 autocast on a CPU. To
 
 If a file is missing, the classifier is simply retrained (two epochs), and notebooks 05 and 07 train the U-Net they
 need on first use and cache it. Notebook 06 does that only on a CUDA GPU; otherwise it uses the briefly trained
-model from earlier in the notebook (the MNIST results are then poor) and says so. Notebook 09 uses the unconditional U-Net only in its pixel-vs-latent comparison;
-without it, it times an untrained copy and skips the side-by-side samples.
+model from earlier in the notebook (the MNIST results are then poor) and says so. Notebook 09 uses the unconditional
+U-Net only in its pixel-vs-latent comparison; without it, it times an untrained copy and skips the side-by-side
+samples.
 
 Notebook 05 also saves the model it trains itself (`05_my_unet.pt`, to demonstrate checkpointing and resuming).
 Notebook 09 caches its autoencoder and latent model (`09_latent_mnist.pt`) and reloads them on later runs; set
