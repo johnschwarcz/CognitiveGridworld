@@ -40,8 +40,8 @@
 # **Runtime:** Part A: about 10–15 min on a 4-core CPU, most of it two short training runs (the autoencoder and the
 # latent diffusion model), and longer if other jobs share the CPU; about 2–3 min on a GPU. A full run saves both
 # trained models to `checkpoints/09_latent_mnist.pt`, and later runs reload them, so a restart costs only a few
-# minutes. Part B (optional) needs a CUDA GPU with ≥ 6 GB of memory (or an Apple-silicon Mac) and a one-off download of several GB of weights per
-# model; after that, a few minutes.
+# minutes. Part B (optional) needs a CUDA GPU with ≥ 6 GB of memory (or an Apple-silicon Mac) and a one-off download
+# of several GB of weights per model; after that, a few minutes.
 
 # %%
 import copy
@@ -735,13 +735,15 @@ print(f"decoder: {1000 * t_decode:.1f} ms per batch of {B} (paid once per sample
 # its parameter count times the number of positions it is applied at, and the latent grid has 16× fewer positions.
 # Why is the FLOP ratio (printed) well below 16×? Two reasons. Our latent U-Net is twice as wide (64 base channels
 # instead of 32), which makes each of its convolutions about 4× more expensive per position. And the pixel U-Net
-# already does part of its work at 14×14 and 7×7. Compare the measured forward-pass speed-up with the FLOP ratio. If
-# the speed-up is larger, the pixel model is getting fewer FLOPs per second out of the hardware: on a CPU, narrow
-# (32-channel) convolutions over large activations, and the memory-bound normalisation and activation layers between
-# them, are typically less efficient. On a GPU the opposite is common: a batch of 4×7×7 latents is too small
-# to keep the GPU busy, so fixed per-kernel overheads cap the speed-up. The training-step speed-up is usually smaller
-# than the forward-pass one, because the optimiser update and the mixed-precision casts cost the same per parameter,
-# whatever the input size. (Timings on a shared machine are noisy; the medians above are over several repeats.)
+# already does part of its work at 14×14 and 7×7. Compare the measured forward-pass speed-up with the FLOP ratio:
+# FLOPs are what the arithmetic demands, wall-clock time is what the hardware delivers. A speed-up larger than the FLOP
+# ratio means that the pixel model gets fewer FLOPs per second out of the hardware (on a CPU, narrow 32-channel
+# convolutions over large activations, and the memory-bound normalisation and activation layers between them, are
+# typically less efficient). A smaller one means that the latent model does (on a GPU, a batch of 4×7×7 latents is too
+# small to keep the device busy, and fixed per-kernel overheads cap the speed-up). The training step adds costs that do
+# not shrink with the input at all, since the optimiser update and the mixed-precision casts cost the same per
+# parameter, and these can pull its speed-up below that of the forward pass. Timings on a shared machine are noisy, even
+# as medians over several repeats, so read these ratios to within tens of percent.
 # For Stable Diffusion the arithmetic is far more dramatic: a U-Net at 512×512 instead of 64×64 would need about 64× the compute per step
 # in its convolutions, and its self-attention layers, whose cost grows with the *square* of the number of positions,
 # far more. The one-off cost, training the autoencoder, is amortised over every diffusion model

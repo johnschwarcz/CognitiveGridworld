@@ -1,4 +1,4 @@
-# Core (everything in notebooks 01-10 except Part B of notebook 09)
+# Core: everything in notebooks 01-10 except notebook 09 §7 and Part B
 torch>=2.1
 torchvision>=0.16
 numpy
@@ -8,11 +8,14 @@ scikit-learn
 tqdm
 jupyterlab
 
-# Optional: rebuild the .ipynb files from the plain-Python sources in src/
-jupytext
+# Notebook 09 §7 (our small model under diffusers' samplers): CPU only, downloads nothing.
+# Without it, §7 prints a message and is skipped.
+diffusers>=0.43
 
-# Optional: notebook 09, Part B (Stable Diffusion via Hugging Face diffusers).
-# Needs a GPU with >= 6 GB memory and internet access to the Hugging Face Hub.
-# diffusers>=0.30
-# transformers
-# accelerate
+# Optional: notebook 09 Part B (real Stable Diffusion). Needs a GPU with >= 6 GB of memory,
+# internet access to the Hugging Face Hub, and RUN_SD = True in the notebook.
+# transformers>=5.23
+# accelerate>=1.16
+
+# Optional: rebuild the .ipynb files from the plain-Python sources in src/ (tools/build.py)
+jupytext

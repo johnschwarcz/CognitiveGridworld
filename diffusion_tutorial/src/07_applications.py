@@ -637,11 +637,12 @@ plt.show()
 # Look at how the completions connect to the known pixels. Replacement often produces strokes that do not continue
 # the observed ones (kinks and crossings at the border of the mask, an extra loop), and on the sparse mask it mostly
 # draws scribbles that ignore the scattered known pixels. Giving it as many steps as RePaint spends NFE does not cure
-# this, just as in the 2-D lab: the problem is the method, not the step count. RePaint's completions are coherent
-# digits more often, most clearly on the sparse mask, and the pooled row of the table agrees. Read the per-mask rows
-# with their standard errors in mind: with `N_EVAL` digits per mask, differences of one or two digits are noise. RePaint
-# is not seamless either. Some of its completions still have strokes that stop or kink at the mask border, as the
-# 2-D lab predicts for $r=5$. Note also that "coherent" does not mean "the original digit": the upper half of a 2 or
+# this, just as in the 2-D lab: the problem is the method, not the step count. RePaint's completions look like
+# coherent digits more often. The classifier agrees only weakly: pooled over the masks RePaint is ahead, but by
+# about one standard error, and with `N_EVAL` digits per mask a per-mask difference of one or two digits is noise
+# (the ordering can even flip for a mask). The classifier checks identity, not seams, so it is a blunt instrument
+# here. The 2-D lab, where the exact answer is known, is the cleaner evidence. RePaint is not seamless either. Some
+# of its completions still have strokes that stop or kink at the mask border, as the 2-D lab predicts for $r=5$. Note also that "coherent" does not mean "the original digit": the upper half of a 2 or
 # a 9 is genuinely compatible with other digits, and a correct posterior sampler *should* sometimes complete it
 # differently. The sparse mask is the hardest case at this step budget. Section 4.3 attacks a similar problem with
 # DPS.
@@ -903,21 +904,17 @@ plt.show()
 # The gradient of $\|r\|$ is undefined at $r=0$, so add a tiny $\varepsilon$ inside the square root.
 
 # %%
-def dps_sample(model, schedule, A, y_meas, shape, n_steps, zeta, weighting="dps", sigma_y=None, generator=None,
-               x_T=None):
+def dps_sample(model, schedule, A, y_meas, shape, n_steps, zeta, weighting="dps", sigma_y=None, generator=None):
     """Diffusion posterior sampling for y = A(x0) + noise (Chung et al. 2023).
 
     Each step = an ordinary ancestral step + a correction from the gradient of the measurement error of x0_hat(x_t),
     obtained by backpropagating through the network.
       weighting="dps"  : x_{t-1} = x'_{t-1} - zeta * grad ||y - A x0_hat||       (the paper's practical rule)
       weighting="bayes": add zeta * grad log N(y; A x0_hat, sigma_y^2 I) to the score (zeta = 1 is the literal weight)
-    zeta is a float or a tensor of shape (B,) (one step size per sample). x_T optionally fixes the starting noise.
     """
     dev = y_meas.device
-    zeta = torch.as_tensor(zeta, dtype=torch.float32, device=dev)
-    zeta = zeta.view(-1, *([1] * (len(shape) - 1))) if zeta.ndim else zeta
     ts = timesteps(schedule.T - 1, n_steps)
-    x = x_T.to(dev) if x_T is not None else torch.randn(shape, device=dev, generator=generator)
+    x = torch.randn(shape, device=dev, generator=generator)
     for i, t in enumerate(ts):
         t_next = ts[i + 1] if i + 1 < len(ts) else -1
         with torch.enable_grad():
@@ -1157,32 +1154,31 @@ plt.show()
 #
 # ### 4.4 The step size $\zeta$
 #
-# $\zeta$ is DPS's most important knob. Since `dps_sample` accepts one $\zeta$ per sample, one batch can sweep it. We
-# use two sparse-pixel measurements and record the residual relative to the noise level. To isolate $\zeta$, every
-# $\zeta$ sees the *same* noisy measurement and the *same* starting noise $x_T$ for a given digit (common random
-# numbers). Only the per-step sampler noise differs. The dotted line is the rule of thumb from section 4: a final
+# $\zeta$ is DPS's most important knob. We sweep it on two sparse-pixel measurements and record the residual relative
+# to the noise level. To isolate $\zeta$, every value sees the *same* noisy measurement and the *same* random numbers
+# (common random numbers): one call per $\zeta$, each with the same generator seed, so the starting noise $x_T$ *and*
+# all per-step noise are identical. Sharing only $x_T$ would not be enough, because the ancestral sampler's fresh
+# per-step noise quickly washes out the starting point. The dotted line is the rule of thumb from section 4: a final
 # residual of about $\zeta/2$.
 
 # %%
 ZETAS = [0.0, 1.0] if FAST else [0.0, 0.3, 1.0, 3.0, 10.0]
 SWEEP_IDX = torch.tensor([3, 7])                                    # digits 0 9
-x_one = x_test[SWEEP_IDX].to(device)
-y_one = A_px(x_one + SIGMA_Y * torch.randn(x_one.shape, device=device, generator=make_gen(60)))  # one y per digit
-x_T_one = torch.randn(x_one.shape, device=device, generator=make_gen(61))                         # one x_T per digit
-y_sw = y_one.repeat_interleave(len(ZETAS), 0)                       # ... shared by every zeta
-zeta_vec = torch.tensor(ZETAS * len(SWEEP_IDX), device=device)
+x_sw = x_test[SWEEP_IDX].to(device)
+y_sw = A_px(x_sw + SIGMA_Y * torch.randn(x_sw.shape, device=device, generator=make_gen(60)))   # one y per digit
 t0 = time.time()
-sweep = dps_sample(model, schedule, A_px, y_sw, y_sw.shape, DPS_STEPS, zeta=zeta_vec, generator=make_gen(62),
-                   x_T=x_T_one.repeat_interleave(len(ZETAS), 0)).cpu()
-resid_sw = ((y_sw.cpu() - A_px(sweep)).flatten(1).norm(dim=1) / noise_px).view(len(SWEEP_IDX), len(ZETAS))
-print(f"{len(sweep)} samples in {time.time() - t0:.0f}s;  rule of thumb for a mask: zeta = 2 sigma_y sqrt(m) = "
-      f"{2 * noise_px:.2f};  residual / noise level:")
+sweep = torch.stack([dps_sample(model, schedule, A_px, y_sw, y_sw.shape, DPS_STEPS, zeta=z,
+                                generator=make_gen(61)).cpu()       # same seed for every zeta
+                     for z in ZETAS], 1)                            # (digit, zeta, 1, 28, 28)
+resid_sw = (y_sw.cpu()[:, None] - A_px(sweep)).flatten(2).norm(dim=2) / noise_px      # (digit, zeta)
+print(f"{sweep.shape[0] * sweep.shape[1]} samples in {time.time() - t0:.0f}s;  rule of thumb for a mask: "
+      f"zeta = 2 sigma_y sqrt(m) = {2 * noise_px:.2f};  residual / noise level:")
 for i, idx in enumerate(SWEEP_IDX):
     print(f"  digit {y_test[idx].item()}: " + ", ".join(f"ζ={z:g}: {r:.2f}" for z, r in zip(ZETAS, resid_sw[i])))
 
 fig = plt.figure(figsize=(12, 2.9))
 ax_img = fig.add_axes([0.06, 0.05, 0.52, 0.85])
-image_grid([sweep.view(len(SWEEP_IDX), len(ZETAS), 1, 28, 28)[i] for i in range(len(SWEEP_IDX))], ax=ax_img,
+image_grid([sweep[i] for i in range(len(SWEEP_IDX))], ax=ax_img,
            col_labels=[f"ζ = {z:g}" for z in ZETAS], row_labels=[f"digit {y_test[i].item()}" for i in SWEEP_IDX])
 ax_c = fig.add_axes([0.64, 0.17, 0.34, 0.7])
 for i, idx in enumerate(SWEEP_IDX):
@@ -1201,7 +1197,7 @@ plt.show()
 # level. Too small a $\zeta$ is not enough to pull the sample to the measurement. A moderate $\zeta$, near the rule of
 # thumb printed above, gives clean digits with a residual near or even *below* the noise level. Below means the sample
 # has started to fit the noise, which an exact posterior sampler would not do (section 4.2). Once $\zeta$ is large
-# enough to reach the data, the residual follows the dotted $\zeta/2$ line rather than the noise level: the last steps
+# enough to reach the data, the residual roughly follows the dotted $\zeta/2$ line rather than the noise level: the last steps
 # move the sample by about $\zeta$, whatever $\sigma_y$ is. At the largest $\zeta$ the image degrades, up to complete
 # breakdown, because a fixed-length step that is fine early in sampling is far too large late in sampling, when $x_t$
 # is almost clean. The best $\zeta$ depends on the operator, the noise level and the number of steps. In practice it

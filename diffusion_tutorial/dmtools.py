@@ -30,6 +30,10 @@ Conventions used everywhere in the tutorial
       eps = eps_uncond + w * (eps_cond - eps_uncond)
   so w = 0 is unconditional, w = 1 is plain conditional, w > 1 is "guided".
 * Images live in [-1, 1].
+* Exact (float64) work happens on the CPU: GaussianMixture keeps its
+  parameters as CPU float64 tensors, and NoiseSchedule stores float32 copies on
+  its device. For a float64 copy write `schedule.alpha_bars.cpu().double()`
+  (in that order: Apple's MPS backend has no float64).
 """
 
 from __future__ import annotations
@@ -39,6 +43,7 @@ import copy
 import math
 import os
 import time
+import warnings
 from pathlib import Path
 from typing import Callable, Optional, Sequence
 
@@ -91,6 +96,11 @@ def seed_everything(seed: int = 0) -> None:
 
 
 def count_params(model: nn.Module) -> int:
+    """Number of *trainable* parameters (requires_grad=True).
+
+    Returns 0 for a frozen copy such as `EMA.model`; count those with
+    `sum(p.numel() for p in model.parameters())`.
+    """
     return sum(p.numel() for p in model.parameters() if p.requires_grad)
 
 
@@ -157,6 +167,12 @@ class GaussianMixture:
     This is the tutorial's "ground truth" laboratory: because a Gaussian
     convolved with a Gaussian is Gaussian, the noised marginals q_t(x_t) of a
     GMM are again GMMs, so we know the exact score \nabla log q_t at every t.
+
+    Parameters live on the CPU in float64. Inputs may be on any device:
+    `component_log_probs` returns a CPU float64 tensor, `log_prob` and
+    `responsibilities` return float32 on the input's device (for float64 work use
+    `torch.logsumexp(gmm.component_log_probs(x), 1)`), and `score` returns the
+    input's dtype and device.
     """
 
     def __init__(self, weights, means, covs):
@@ -185,27 +201,27 @@ class GaussianMixture:
 
     # -- density ---------------------------------------------------------------
     def component_log_probs(self, x: torch.Tensor) -> torch.Tensor:
-        """log w_k + log N(x; mu_k, Sigma_k), shape (n, K)."""
-        x = x.to(torch.float64)
+        """log w_k + log N(x; mu_k, Sigma_k), shape (n, K), CPU float64."""
+        x = x.to("cpu", torch.float64)
         diff = x[:, None, :] - self.means[None]                     # (n,K,d)
         maha = torch.einsum("nki,kij,nkj->nk", diff, self._prec, diff)
         log_norm = -0.5 * (self.d * math.log(2 * math.pi) + self._logdet)
         return torch.log(self.weights)[None] + log_norm[None] - 0.5 * maha
 
     def log_prob(self, x: torch.Tensor) -> torch.Tensor:
-        return torch.logsumexp(self.component_log_probs(x), dim=1).float()
+        return torch.logsumexp(self.component_log_probs(x), dim=1).float().to(x.device)
 
     def responsibilities(self, x: torch.Tensor) -> torch.Tensor:
         """Posterior p(k | x) over mixture components, shape (n, K)."""
-        return torch.softmax(self.component_log_probs(x), dim=1).float()
+        return torch.softmax(self.component_log_probs(x), dim=1).float().to(x.device)
 
     def score(self, x: torch.Tensor) -> torch.Tensor:
         r"""Exact score \nabla_x log p(x) = sum_k r_k(x) Sigma_k^{-1} (mu_k - x)."""
-        x64 = x.to(torch.float64)
+        x64 = x.to("cpu", torch.float64)
         r = torch.softmax(self.component_log_probs(x64), dim=1)     # (n,K)
         diff = self.means[None] - x64[:, None, :]                   # (n,K,d)
         per_comp = torch.einsum("kij,nkj->nki", self._prec, diff)   # (n,K,d)
-        return (r[..., None] * per_comp).sum(1).to(x.dtype)
+        return (r[..., None] * per_comp).sum(1).to(x.dtype).to(x.device)
 
     # -- noising ---------------------------------------------------------------
     def noised(self, alpha_bar: float) -> "GaussianMixture":
@@ -271,6 +287,15 @@ class NoiseSchedule:
 
     kind='linear': beta_t linearly spaced in [beta_start, beta_end] (Ho et al. 2020)
     kind='cosine': abar_t = cos^2(((t/T + s)/(1 + s)) * pi/2) (Nichol & Dhariwal 2021)
+
+    The linear betas are rescaled by 1000/T so that every T approximates the same
+    continuous process. This breaks down for small T: at T <= 20 some beta_t >= 1,
+    which is not a valid schedule (a warning is raised). To view the T=1000
+    process at fewer steps, subsample its alpha_bars instead ("respacing", see
+    notebooks 01 and 02). The cosine schedule clamps beta_t at 0.999, so for small T
+    its last alpha_bar is tiny and 1/sqrt(alpha_bar) is large.
+
+    All coefficients are computed in float64 and stored as float32 on `device`.
     """
 
     def __init__(self, T: int = 1000, kind: str = "linear", beta_start: float = 1e-4,
@@ -287,6 +312,10 @@ class NoiseSchedule:
             betas = (1 - abar[1:] / abar[:-1]).clamp(0, 0.999)
         else:
             raise ValueError(kind)
+        if (betas >= 1).any():
+            warnings.warn(f"NoiseSchedule(T={T}, kind={kind!r}): max beta = {betas.max().item():.2f} >= 1, so "
+                          "alpha_bar hits 0 or goes negative (NaNs downstream). Use a larger T, or respace the "
+                          "T=1000 schedule.", stacklevel=2)
         alphas = 1.0 - betas
         abar = torch.cumprod(alphas, 0)
         abar_prev = torch.cat([torch.ones(1, dtype=torch.float64), abar[:-1]])
@@ -515,6 +544,10 @@ class EMA:
     """Exponential moving average of model weights -- the weights you sample with.
 
     Usage:  ema = EMA(model); ...; opt.step(); ema.update(model); ...; ema.model(x, t)
+
+    Warm-up: update n uses d_n = min(decay, (1 + n) / (10 + n)), so decay=0.999 is
+    reached only after ~9000 updates. In shorter runs the warm-up sets the
+    effective averaging window (d ~ 0.998 after 4000 updates), not 1/(1 - decay).
     """
 
     def __init__(self, model: nn.Module, decay: float = 0.999):
@@ -691,6 +724,11 @@ def ddpm_sample(model, schedule: NoiseSchedule, shape, *, y=None, guidance_scale
 
 
 def _ddim_timesteps(T: int, n_steps: int):
+    """The 'linspace' grid {T-1, ..., 0} (descending). Its last network call is at t=0,
+    so n_steps calls give n_steps-1 real denoising moves; diffusers calls this spacing
+    'linspace' and also offers 'leading' and 'trailing' (see notebooks 04 and 09)."""
+    if n_steps <= 1:
+        return [T - 1]
     ts = np.linspace(0, T - 1, n_steps).round().astype(int)
     return list(np.unique(ts))[::-1]  # descending, unique
 
@@ -745,8 +783,13 @@ def ddim_invert(model, schedule: NoiseSchedule, x0, *, n_steps: int = 50, y=None
 
 def mmd_rbf(x: torch.Tensor, y: torch.Tensor, bandwidths=(0.05, 0.1, 0.2, 0.5, 1.0, 2.0),
             max_n: int = 4000) -> float:
-    """(Biased) squared maximum mean discrepancy with a sum of RBF kernels. 0 = identical."""
-    x, y = x[:max_n].double(), y[:max_n].double()
+    """(Biased) squared maximum mean discrepancy with a sum of RBF kernels. 0 = identical.
+
+    Computed on the CPU in float64 (inputs may live on any device). Uses the first
+    `max_n` points of each set; the (2n x 2n) kernel matrices need ~0.5 GB at n=4000,
+    so pass a smaller max_n on a small machine.
+    """
+    x, y = x[:max_n].detach().to("cpu", torch.float64), y[:max_n].detach().to("cpu", torch.float64)
     z = torch.cat([x, y])
     d2 = torch.cdist(z, z).pow(2)
     k = sum(torch.exp(-d2 / (2 * h ** 2)) for h in bandwidths)
@@ -834,13 +877,17 @@ MNIST_RECIPE = dict(base_ch=32, ch_mults=(1, 2, 2), n_res=1, attn_levels=(2,), d
 
 
 def load_or_train_mnist_model(conditional: bool = True, steps: int = None, device=None,
-                              force: bool = False, batch_size: int = 128, lr: float = 2e-4,
+                              force: bool = False, batch_size: int = 64, lr: float = 2e-4,
                               p_uncond: float = 0.1, amp=None, verbose: bool = True):
     """Return (ema_model, schedule) for MNIST, training (and caching) it if needed.
 
-    The cached checkpoints are produced by notebooks 05 (unconditional) and 06
-    (class-conditional with classifier-free-guidance dropout). Both use the
-    same recipe (`MNIST_RECIPE`, linear schedule, T=1000, eps-prediction).
+    checkpoints/mnist_unet_uncond.pt (used from notebook 05 on) and
+    checkpoints/mnist_unet_cond.pt (class-conditional with 10% label dropout for
+    classifier-free guidance, notebooks 06-07) are made by `pretrain_checkpoints.py`:
+    the recipe of notebook 05 (`MNIST_RECIPE`, linear schedule, T=1000,
+    eps-prediction, EMA 0.999) trained for 12 000 steps at batch 64. If a file is
+    missing it is trained here with the same settings and cached (a few minutes on
+    a GPU, about an hour on a CPU).
     """
     device = device or get_device()
     name = "mnist_unet_cond.pt" if conditional else "mnist_unet_uncond.pt"
@@ -855,7 +902,7 @@ def load_or_train_mnist_model(conditional: bool = True, steps: int = None, devic
             print(f"loaded {path.name} (trained {ck.get('steps', '?')} steps)")
         return model.eval(), schedule
     if steps is None:
-        steps = 300 if fast_mode() else (20000 if device.type == "cuda" else 4000)
+        steps = 300 if fast_mode() else 12000
     x, y = load_mnist(train=True)
     model = UNet(n_classes=10 if conditional else None, **MNIST_RECIPE).to(device)
     if verbose:
