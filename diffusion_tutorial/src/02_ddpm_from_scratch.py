@@ -95,8 +95,8 @@ print(f"FAST={FAST}: {STEPS} training steps per model, {N_SAMPLE} samples per ev
 # three step sizes of our ablation in §9b.
 #
 # > **Gotcha: changing $T$.** To compare step sizes we need the *same* noising process cut into $T$ steps. The usual trick of
-# > scaling the linear schedule ($\beta_t \to \beta_t\cdot 1000/T$) is only a first-order approximation. It gives $\beta_t>1$
-# > (an invalid schedule, with NaNs) once $T<20$. `make_schedule(T)` below instead takes the $T{=}1000$ process and observes it at $T$
+# > scaling the linear schedule ($\beta_t \to \beta_t\cdot 1000/T$) is only a first-order approximation. It gives $\beta_t\ge1$
+# > (an invalid schedule, with NaNs) once $T\le20$. `make_schedule(T)` below instead takes the $T{=}1000$ process and observes it at $T$
 # > evenly spaced times. This keeps $\bar\alpha$ correct at every $T$.
 # >
 # > **Gotcha: off-by-one.** Maths (Ho et al.) numbers the latents $x_1,\dots,x_T$, with $x_0$ the data. Python arrays start at 0,
@@ -251,6 +251,7 @@ plt.show()
 # \quad\Longrightarrow\quad
 # L_{t-1} = \underbrace{\frac{\beta_t^2}{2\sigma_t^2\,\alpha_t\,(1-\bar\alpha_t)}}_{\lambda_t}\;
 # \mathbb E_{x_0,\epsilon}\big\|\epsilon-\epsilon_\theta(\sqrt{\bar\alpha_t}x_0+\sqrt{1-\bar\alpha_t}\,\epsilon,\ t)\big\|^2 + \text{const}.$$
+# (Here $\lambda_t$ is a loss weight, not the log-SNR $\lambda_t=\log\mathrm{SNR}(t)$ of notebook 01.)
 #
 # **Step 4: drop the weights.** Sampling $t$ uniformly and setting $\lambda_t\equiv 1$ gives Ho et al.'s
 # $$L_\text{simple} = \mathbb E_{t\sim\mathcal U,\;x_0,\;\epsilon}\,\big\|\epsilon-\epsilon_\theta(\sqrt{\bar\alpha_t}x_0+\sqrt{1-\bar\alpha_t}\,\epsilon,\ t)\big\|^2 .$$

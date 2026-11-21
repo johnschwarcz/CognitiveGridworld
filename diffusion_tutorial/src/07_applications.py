@@ -93,7 +93,8 @@ COL = {"exact": "black", "replacement": "tab:red", "RePaint": "tab:blue", "DPS":
 # (notebook 06) splits it into two terms:
 # $$\nabla_{x_t}\log p_t(x_t\mid y)=\underbrace{\nabla_{x_t}\log p_t(x_t)}_{\text{the network}}+\nabla_{x_t}\log p_t(y\mid x_t),
 # \qquad p_t(y\mid x_t)=\int p(y\mid x_0)\,p(x_0\mid x_t)\,dx_0 .$$
-# The second term is the hard part. It averages the likelihood over the *denoising posterior* $p(x_0\mid x_t)$, which
+# The second term is the hard part. It averages the likelihood over the *denoising posterior* $p(x_0\mid x_t)$ (the
+# exact posterior of the forward process, written $q(x_0\mid x_t)$ in notebooks 01, 03 and 06), which
 # we never have in closed form. The methods below differ in how they deal with it:
 #
 # | task | measurement $y$ | method | how it handles $p_t(y\mid x_t)$ |
@@ -259,7 +260,7 @@ def reverse_process(model, schedule, x, ts, y=None, w=1.0, eta=1.0, generator=No
 
 
 # %% [markdown]
-# **Check.** Our blocks must reproduce `dmtools` (notebooks 03–04): the same predictions, with and without guidance,
+# **Check.** Our blocks must reproduce `dmtools` (notebooks 02, 04 and 06): the same predictions, with and without guidance,
 # and the same deterministic ($\eta=0$) and stochastic ($\eta=1$) samplers when given the same random numbers.
 
 # %%

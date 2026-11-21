@@ -4,7 +4,6 @@ torchvision>=0.16
 numpy
 scipy
 matplotlib
-scikit-learn
 tqdm
 jupyterlab
 

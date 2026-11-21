@@ -323,7 +323,7 @@ def decode(z, bs=1000):
     return torch.cat([decoder(z[i:i + bs].to(device)) for i in range(0, len(z), bs)])
 
 
-clf = dm.load_or_train_classifier(device)            # the small CNN of notebook 05 (~99% test accuracy)
+clf = dm.load_or_train_classifier(device)            # the small CNN of notebook 05 (~98.5% test accuracy)
 
 
 @torch.no_grad()
@@ -378,7 +378,9 @@ plt.show()
 # schedule). With $s\gg1$, every step is less noisy than intended: training effort goes to noise levels where the latent
 # is barely perturbed, and at $t=T-1$ the latent still carries signal, while sampling starts from pure
 # $\mathcal N(0,I)$. That is a train/test mismatch at the very first step. With $s\ll1$, the signal is destroyed
-# early and the interesting part of the schedule is crammed into a few small $t$.
+# early and the interesting part of the schedule is crammed into a few small $t$. (Here and below, $t$ is the
+# `dmtools`/`diffusers` array index $0,\dots,T-1$, with $t=T-1=999$ the pure-noise end: one less than notebook 01's
+# maths $t$.)
 #
 # The fix is one number. Compute the standard deviation of the training latents once and multiply by
 # $c=1/s$: train the diffusion model on $c\,E(x)$, and decode generated latents with $D(z/c)$. Stable Diffusion's
@@ -404,7 +406,7 @@ def log_snr_eff(alpha_bars, s):
     return np.log(s ** 2 * ab / (1 - ab))
 
 
-schedule = dm.NoiseSchedule(1000, "linear", device=device)      # the schedule of notebooks 02-06
+schedule = dm.NoiseSchedule(1000, "linear", device=device)      # the T=1000 linear schedule of notebooks 02-07
 abar_ours = schedule.alpha_bars.cpu().double().numpy()        # .cpu() first: MPS has no float64
 # Stable Diffusion's "scaled_linear" schedule: betas linear in sqrt-space between 0.00085 and 0.012
 abar_sd = np.cumprod(1 - np.linspace(0.00085 ** 0.5, 0.012 ** 0.5, 1000) ** 2)
@@ -697,7 +699,8 @@ pixel_trained = PIXEL_CKPT.exists()
 if pixel_trained:
     pixel_unet, _ = dm.load_or_train_mnist_model(conditional=False, device=device)
 else:
-    print("notebook 05's checkpoint not found: timing an untrained U-Net with the same architecture")
+    print("checkpoints/mnist_unet_uncond.pt not found: timing an untrained U-Net with the same architecture "
+          "(create it with `python pretrain_checkpoints.py --only uncond`)")
     pixel_unet = dm.UNet(**dm.MNIST_RECIPE).to(device).eval()
 
 B, REPS = 64, (2 if FAST else 7)
@@ -765,7 +768,8 @@ if pixel_trained:
     plt.tight_layout()
     plt.show()
 else:
-    print("skipping the side-by-side samples: run notebook 05 to create its reference checkpoint")
+    print("skipping the side-by-side samples: create checkpoints/mnist_unet_uncond.pt with "
+          "`python pretrain_checkpoints.py --only uncond`")
 
 # %% [markdown]
 # (When notebook 05's reference checkpoint is available, the cell above shows unconditional samples of the two

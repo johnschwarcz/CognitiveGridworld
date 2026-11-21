@@ -468,7 +468,7 @@ for name, ab in [("linear", abar_lin), ("cosine", abar_cos)]:
           f"{log_snr(ab[1:]).max():.1f}], fraction of steps with abar_t < 0.01 (almost pure noise): "
           f"{(ab[1:] < 0.01).double().mean():.0%}, with |log-SNR| < 5: {(log_snr(ab[1:]).abs() < 5).double().mean():.0%}")
 print(f"gotcha: dm.NoiseSchedule(10, 'linear').betas.max() = {dm.NoiseSchedule(10, 'linear').betas.max():.2f} "
-      f"(> 1 is invalid: rescaling by 1000/T breaks down for T <= 20, use respacing instead)")
+      f"(>= 1 is invalid: rescaling by 1000/T breaks down for T <= 20, use respacing instead)")
 
 # %%
 tau = torch.arange(T + 1) / T
@@ -535,7 +535,7 @@ plt.show()
 # Under the linear schedule (top) the digit is barely readable by $t/T\approx 0.4$ and gone by $0.5$. Every
 # later column is pure noise to the eye, yet half of the 1000 steps live there. The cosine schedule
 # (bottom) keeps the digit recognisable for much longer and destroys it more gradually. The linear schedule is
-# nonetheless what DDPM and our MNIST models (notebooks 05–07) use: it works, it just wastes steps.
+# nonetheless what DDPM and our MNIST models (notebooks 05–07, and the latent model of 09) use: it works, it just wastes steps.
 # For small $28\times28$ images this "destroys too early" effect is strongest, which was a main motivation
 # for the cosine schedule.
 #
@@ -1251,7 +1251,7 @@ x0_ve = gmm2d.sample(N)
 eps_ve = torch.randn_like(x0_ve)
 pts = torch.randn(500, 2, dtype=torch.float64) * 2
 # (For samples the identity VP / sqrt(abar) == VE with the same eps holds by construction, so it is no test.)
-# --- CHECK: exact densities obey the change of variables (dm.noised vs dm.noised_ve) at matched SNR ---
+# --- CHECK: exact densities obey the change of variables (GaussianMixture.noised vs .noised_ve) at matched SNR ---
 for s in sigmas[1:]:
     a = 1 / (1 + s ** 2)                                  # abar with the same SNR as sigma
     lp_vp = log_density64(gmm2d.noised(a), pts)

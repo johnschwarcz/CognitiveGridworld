@@ -10,11 +10,12 @@ optional real Stable Diffusion part of notebook 09.
 
 ## Why this tutorial is built the way it is
 
-- **There is always a ground truth.** Notebooks 01–04, 06–08 and 10 do most of their work in 2-D, on Gaussian
-  mixtures whose noised densities, scores, velocities and posteriors are known exactly
-  (`dmtools.GaussianMixture`). This lets you separate *model error* (the network learned the wrong score) from
-  *sampler error* (the ODE/SDE solver took too few steps) from *finite-sample noise*. Most tutorials cannot make
-  that distinction.
+- **There is always a ground truth.** Notebooks 01–04 and 08 do most of their work in 2-D, on Gaussian mixtures
+  whose noised densities, scores, velocities and posteriors are known exactly (`dmtools.GaussianMixture`). Notebook
+  06 tests guidance, and notebook 07 inpainting and posterior sampling, on such a mixture before applying them to
+  MNIST, and notebook 10 checks its policies against the expert's known mode proportions. This lets you separate
+  *model error* (the network learned the wrong score) from *sampler error* (the ODE/SDE solver took too few steps)
+  from *finite-sample noise*. Most tutorials cannot make that distinction.
 - **Bayesian inference throughout.** The denoiser is a posterior mean, E[x₀ | xₜ] (Tweedie's formula). The reverse
   step is a Kalman-like update. Guidance is Bayes' rule for scores. Inpainting and super-resolution are posterior
   sampling. A diffusion policy samples p(action chunk | state) instead of regressing to its mean. The notebooks make
@@ -31,19 +32,20 @@ optional real Stable Diffusion part of notebook 09.
 
 | # | Notebook | What you will be able to do | CPU time* |
 |---|----------|-----------------------------|-----------|
-| 01 | [The forward process](01_forward_process.ipynb) | Derive q(xₜ\|x₀) and the reverse posterior q(xₜ₋₁\|xₜ,x₀). Compare linear and cosine schedules through their SNR curves. See *what* noise destroys first (fine detail before coarse structure), why the reverse step is Gaussian only for small βₜ, and how VP and VE relate. No networks. | ~2 min |
-| 02 | [DDPM from scratch (2-D)](02_ddpm_from_scratch.ipynb) | Go from the ELBO to L_simple. Write the time embedding, an MLP denoiser, the training loop, EMA and ancestral sampling by hand. Compare with a Bayes-optimal oracle denoiser. Run ε/x₀/v ablations, change T, and evaluate samples with MMD. | ~6 min |
+| 01 | [The forward process](01_forward_process.ipynb) | Derive q(xₜ\|x₀) and the reverse posterior q(xₜ₋₁\|xₜ,x₀). Compare linear and cosine schedules through their SNR curves. See *what* noise destroys first (fine detail before coarse structure), why the reverse step is Gaussian only for small βₜ, and how VP and VE relate. No networks. | ~1 min |
+| 02 | [DDPM from scratch (2-D)](02_ddpm_from_scratch.ipynb) | Go from the ELBO to L_simple. Write the time embedding, an MLP denoiser, the training loop, EMA and ancestral sampling by hand. Compare with a Bayes-optimal oracle denoiser. Run ε/x₀/v, T and sampler-variance ablations, and evaluate samples with MMD and sliced Wasserstein. | ~5 min |
 | 03 | [The score-function view](03_score_matching.ipynb) | Scores, Langevin dynamics and its failure modes, annealed Langevin, denoising score matching (= DDPM), Tweedie's formula, learned vs exact scores, and why the *exact* score of a training set only memorises. | ~3 min |
-| 04 | [Samplers](04_samplers.ipynb) | The VP-SDE, the reverse SDE and the probability-flow ODE. DDPM, Euler, Heun and DDIM, with their convergence orders. DDIM derived as Euler in the right coordinates, and DDIM inversion. Karras/EDM step placement, exact likelihoods via the ODE, and practical sampler guidance. | ~4 min |
+| 04 | [Samplers](04_samplers.ipynb) | The VP-SDE, the reverse SDE and the probability-flow ODE. DDPM, Euler–Maruyama, Euler, Heun and DDIM, with their convergence orders. DDIM derived as Euler in the right coordinates, and DDIM inversion. Karras/EDM step placement, exact likelihoods via the ODE, the floor set by model error, and practical sampler guidance. | ~4 min |
 | 05 | [A U-Net on MNIST](05_images_unet.ipynb) | Build the U-Net piece by piece (FiLM ResBlocks, GroupNorm, attention) and train it with the full recipe (AdamW, warm-up, clipping, EMA, bf16). Sample with DDPM and DDIM, and see why x₀-clipping is needed. Cover diffusion as spectral autoregression, the denoiser Jacobian as an adaptive filter, and evaluation (nearest neighbours, Fréchet distance and its pitfalls). | ~15 min |
 | 06 | [Guidance](06_guidance.ipynb) | Conditional models, Bayes' rule for scores, and classifier guidance with an exact noise-aware classifier. Derive classifier-free guidance, see why guidance does *not* sample p(x)p(y\|x)ʷ, trace the fidelity–diversity trade-off on MNIST, and try guidance intervals, CFG-rescale and negative prompts. | ~10 min |
 | 07 | [Applications](07_applications.ipynb) | Use a trained model as a prior: inpainting (replacement vs RePaint, against an exact 2-D posterior), SDEdit, diffusion posterior sampling for super-resolution and sparse recovery, denoising, the perception–distortion trade-off, and DDIM inversion for interpolation and class swaps. | ~5 min |
-| 08 | [Flow matching](08_flow_matching.ipynb) | Go from continuity equation to the CFM loss, and compute the exact velocity field of a mixture. Train a flow-matching model, and see why it is diffusion in disguise (DDIM = Euler). Straighten trajectories with rectified flow (reflow) and minibatch OT couplings, then apply CFG to velocities. | ~7 min |
+| 08 | [Flow matching](08_flow_matching.ipynb) | Go from the continuity equation to the CFM loss, and compute the exact velocity field of a mixture. Train a flow-matching model, and see why it is diffusion in disguise (DDIM = Euler). Straighten trajectories with rectified flow (reflow) and minibatch OT couplings, then apply CFG to velocities. | ~5 min |
 | 09 | [Latent diffusion and Stable Diffusion](09_latent_and_stable_diffusion.ipynb) | **A:** a KL autoencoder, the latent scale factor as a log-SNR shift, a miniature class-conditional "Stable Diffusion", pixel vs latent cost, img2img `strength`, and our model under `diffusers` schedulers. **B (GPU, optional):** take real SD apart: a hand-written sampling loop, schedulers, guidance, negative prompts, img2img, inpainting, memory tricks, and one-step SD-Turbo. | ~15 min (A) |
 | 10 | [Diffusion for control](10_diffusion_for_control.ipynb) | Diffusion policies vs behaviour cloning on a bimodal expert, the noisiest denoiser as the BC regressor, closed-loop receding-horizon control, planning as inpainting (Diffuser), and test-time guidance around a new obstacle. | ~4 min |
 
-\* Measured on a 4-core CPU with nothing else running. A CUDA GPU cuts notebooks 05–09 to a few minutes each. The
-2-D notebooks use tiny networks and gain little from a GPU. Each notebook states its own runtime at the top.
+\* Wall time of a full run (without `DM_FAST`) on a 4-core CPU that was shared with other jobs at the time, so a
+dedicated machine may be faster. A CUDA GPU cuts notebooks 05–09 to a few minutes each. The 2-D notebooks use tiny
+networks and gain little from a GPU. Each notebook states its own runtime at the top.
 
 Each notebook ends with **exercises** (with hints and solutions), **key takeaways** and **further reading**.
 
@@ -53,7 +55,8 @@ Each notebook ends with **exercises** (with hints and solutions), **key takeaway
   modern extensions.
 - **"I want to understand it properly, fast":** 01 §3, §5 and §7, then 02, 03, 04, then 06 §1–3.
 - **"I want to generate images":** 02 (skim), 05, 06, 07, 09.
-- **"I work on RL and control":** 01 (skim), 02, 04 §1–3, 06 §1–3, 10, then 08.
+- **"I work on RL and control":** 01 (skim), 02, 03 §6, 04 §1–3, 06 §1–3, 07 §2.1–2.2 and §4 (inpainting, DPS), 10,
+  then 08.
 - **Bayesian and neuroscience angles:** 01 §6 (a Bayesian observer of noised data), 01 §7 (the Kalman analogy), 03 §6
   (Tweedie), 05 §6 (spectral autoregression, the denoiser as an adaptive filter), 07 §1 (a model as a prior), 08 §4
   (posterior-mean paths as evidence accumulation).
@@ -63,7 +66,7 @@ Each notebook ends with **exercises** (with hints and solutions), **key takeaway
 ```bash
 cd diffusion_tutorial
 python -m venv .venv && source .venv/bin/activate      # or a conda env with Python >= 3.10
-pip install -r requirements.txt                          # torch, numpy, scipy, matplotlib, scikit-learn, jupyterlab, diffusers, ...
+pip install -r requirements.txt                          # torch, numpy, scipy, matplotlib, jupyterlab, diffusers, ...
 jupyter lab
 ```
 
@@ -72,9 +75,11 @@ jupyter lab
 - MNIST (11 MB) is downloaded by torchvision into `data/` the first time it is needed.
 - **Smoke-test mode:** `DM_FAST=1 jupyter lab` (or `DM_FAST=1 python tools/build.py --execute`) shrinks every
   training run and sample count so that each notebook runs in a minute or two. Results are then poor, but every cell runs.
-  Use it to check your environment, or when you only want to read the code paths.
-- **Real Stable Diffusion (notebook 09 Part B):** `pip install "transformers>=5.23" "accelerate>=1.16"`, use a GPU
-  with ≥ 6 GB of memory and internet access to the Hugging Face Hub, and set `RUN_SD = True` in the notebook.
+  Use it to check your environment, or when you only want to read the code paths. (`tools/build.py --execute`
+  overwrites the stored outputs of the notebooks it runs.)
+- **Real Stable Diffusion (notebook 09 Part B):** `pip install "transformers>=5.23" "accelerate>=1.16"`, use a CUDA GPU
+  with ≥ 6 GB of memory (or an Apple-silicon Mac) and internet access to the Hugging Face Hub, and set
+  `RUN_SD = True` in the notebook.
 
 ## What is in this folder
 
@@ -92,8 +97,10 @@ diffusion_tutorial/
 
 **Editing.** The `.py` files in `src/` are the sources of truth, in jupytext's "percent" format. You can open them
 directly in VS Code or PyCharm as runnable cells, or diff them in git. After editing one, rebuild its notebook with
-`python tools/build.py 05` (convert only) or `python tools/build.py 05 --execute` (convert and run). You can also
-just edit the `.ipynb` directly if you do not care about keeping the two in sync.
+`python tools/build.py 05` (convert only; this drops the stored outputs) or `python tools/build.py 05 --execute`
+(convert and run). To keep the outputs, use `jupytext --update --to ipynb --output 05_images_unet.ipynb
+src/05_images_unet.py` instead. You can also just edit the `.ipynb` directly if you do not care about keeping the
+two in sync.
 
 ### Checkpoints
 
@@ -108,14 +115,21 @@ for an hour on a CPU:
 
 Both U-Nets use the recipe of notebook 05 (linear schedule with T = 1000, ε-prediction, AdamW at 2e-4 with warm-up,
 EMA 0.999), trained for 12 000 steps at batch 64 with bf16 autocast on a CPU. To re-create them, run
-`python pretrain_checkpoints.py` (a few minutes per model on a GPU, about an hour on a CPU). If a file is missing, the
-notebooks train it on first use and cache it. Notebook 05 also saves the model it trains itself (`05_my_unet.pt`, to
-demonstrate checkpointing and resuming). Notebook 09 caches its autoencoder and latent model (`09_latent_mnist.pt`)
-and reloads them on later runs; set `RETRAIN = True` there to train them again.
+`python pretrain_checkpoints.py` (a few minutes per model on a GPU; on a CPU about an hour per model with `--amp`).
+
+If a file is missing, the classifier is simply retrained (two epochs), and notebooks 05 and 07 train the U-Net they
+need on first use and cache it. Notebook 06 does that only on a CUDA GPU; otherwise it falls back to a
+shorter-trained model and says so. Notebook 09 uses the unconditional U-Net only in its pixel-vs-latent comparison;
+without it, it times an untrained copy and skips the side-by-side samples.
+
+Notebook 05 also saves the model it trains itself (`05_my_unet.pt`, to demonstrate checkpointing and resuming).
+Notebook 09 caches its autoencoder and latent model (`09_latent_mnist.pt`) and reloads them on later runs; set
+`RETRAIN = True` there to train them again.
 
 ## `dmtools` at a glance
 
 ```python
+import torch
 import dmtools as dm
 device = dm.get_device()
 
@@ -148,7 +162,9 @@ Conventions (also in the docstring of `dmtools.py`):
 
 ## Cheat sheet
 
-Here t = 1…T, αₜ = 1 − βₜ and $\bar\alpha_t=\prod_{s\le t}\alpha_s$.
+Here t = 1…T is the maths index (the code's array index is t − 1), αₜ = 1 − βₜ, $\bar\alpha_t=\prod_{s\le t}\alpha_s$
+and $\bar\alpha_0=1$. The VP-SDE and probability-flow rows use continuous t ∈ [0, 1] (notebook 04), and the
+flow-matching row its own continuous t ∈ [0, 1] (notebook 08); both have data at t = 0.
 
 | | |
 |---|---|
@@ -156,17 +172,17 @@ Here t = 1…T, αₜ = 1 − βₜ and $\bar\alpha_t=\prod_{s\le t}\alpha_s$.
 | any t in one shot | $x_t=\sqrt{\bar\alpha_t}\,x_0+\sqrt{1-\bar\alpha_t}\,\varepsilon,\quad \varepsilon\sim\mathcal N(0,I)$; $\ \mathrm{SNR}(t)=\bar\alpha_t/(1-\bar\alpha_t)$ |
 | reverse posterior | $q(x_{t-1}\mid x_t,x_0)=\mathcal N\big(\tfrac{\sqrt{\bar\alpha_{t-1}}\beta_t}{1-\bar\alpha_t}x_0+\tfrac{\sqrt{\alpha_t}(1-\bar\alpha_{t-1})}{1-\bar\alpha_t}x_t,\ \tilde\beta_t I\big)$, $\ \tilde\beta_t=\tfrac{1-\bar\alpha_{t-1}}{1-\bar\alpha_t}\beta_t$ |
 | training loss | $L_\text{simple}=\mathbb E_{t,x_0,\varepsilon}\,\lVert\varepsilon-\varepsilon_\theta(x_t,t)\rVert^2$ (minimiser: $\varepsilon_\theta=\mathbb E[\varepsilon\mid x_t]$) |
-| other targets | $x_0$-prediction; $v=\sqrt{\bar\alpha_t}\,\varepsilon-\sqrt{1-\bar\alpha_t}\,x_0$ |
-| score | $\nabla_x\log q_t(x_t)=-\,\mathbb E[\varepsilon\mid x_t]/\sqrt{1-\bar\alpha_t}\approx-\varepsilon_\theta(x_t,t)/\sqrt{1-\bar\alpha_t}$ |
-| Tweedie (denoiser) | $\hat x_0=\mathbb E[x_0\mid x_t]=\big(x_t+(1-\bar\alpha_t)\nabla\log q_t(x_t)\big)/\sqrt{\bar\alpha_t}=\big(x_t-\sqrt{1-\bar\alpha_t}\,\varepsilon_\theta\big)/\sqrt{\bar\alpha_t}$ |
-| DDPM step | $x_{t-1}=\tfrac{1}{\sqrt{\alpha_t}}\big(x_t-\tfrac{\beta_t}{\sqrt{1-\bar\alpha_t}}\varepsilon_\theta\big)+\sigma_t z$, $\ \sigma_t^2\in\{\beta_t,\tilde\beta_t\}$ |
+| other targets | $x_0$-prediction; $v=\sqrt{\bar\alpha_t}\,\varepsilon-\sqrt{1-\bar\alpha_t}\,x_0$, so $\hat x_0=\sqrt{\bar\alpha_t}\,x_t-\sqrt{1-\bar\alpha_t}\,\hat v$ |
+| score | $\nabla_{x_t}\log q_t(x_t)=-\,\mathbb E[\varepsilon\mid x_t]/\sqrt{1-\bar\alpha_t}\approx-\varepsilon_\theta(x_t,t)/\sqrt{1-\bar\alpha_t}$ |
+| Tweedie (denoiser) | $\hat x_0=\mathbb E[x_0\mid x_t]=\big(x_t+(1-\bar\alpha_t)\nabla\log q_t(x_t)\big)/\sqrt{\bar\alpha_t}\approx\big(x_t-\sqrt{1-\bar\alpha_t}\,\varepsilon_\theta\big)/\sqrt{\bar\alpha_t}$ |
+| DDPM step | $x_{t-1}=\tfrac{1}{\sqrt{\alpha_t}}\big(x_t-\tfrac{\beta_t}{\sqrt{1-\bar\alpha_t}}\varepsilon_\theta\big)+\sigma_t z$, $\ \sigma_t^2\in\lbrace\beta_t,\tilde\beta_t\rbrace$ |
 | DDIM step (η = 0) | $x_{s}=\sqrt{\bar\alpha_{s}}\,\hat x_0+\sqrt{1-\bar\alpha_{s}}\,\varepsilon_\theta$ for any earlier $s<t$ |
-| VP-SDE | $dx=-\tfrac12\beta(t)x\,dt+\sqrt{\beta(t)}\,dw$; reverse: $dx=\big[-\tfrac12\beta x-\beta\nabla\log p_t\big]dt+\sqrt\beta\,d\bar w$ |
+| VP-SDE | $dx=-\tfrac12\beta(t)x\,dt+\sqrt{\beta(t)}\,dw$; reverse ($dt<0$): $dx=\big[-\tfrac12\beta x-\beta\nabla\log p_t\big]dt+\sqrt\beta\,d\bar w$ |
 | probability-flow ODE | $\dfrac{dx}{dt}=-\tfrac12\beta(t)\big[x+\nabla\log p_t(x)\big]$ (same marginals, deterministic) |
-| classifier guidance | $\nabla\log p_t(x\mid y)=\nabla\log p_t(x)+w\,\nabla\log p_t(y\mid x)$ |
-| classifier-free guidance | $\tilde\varepsilon=\varepsilon_\theta(x_t,\varnothing)+w\big(\varepsilon_\theta(x_t,y)-\varepsilon_\theta(x_t,\varnothing)\big)$ |
-| flow matching | $x_t=(1-t)x_0+t\varepsilon$, $\ L=\mathbb E\lVert v_\theta(x_t,t)-(\varepsilon-x_0)\rVert^2$, sample $\dot x=v_\theta$ from $t=1$ to $0$ |
-| DPS (inverse problems) | after each reverse step: $x_{t-1}\leftarrow x_{t-1}-\zeta\,\nabla_{x_t}\lVert y-A\,\hat x_0(x_t)\rVert$ |
+| classifier guidance | $\tilde s_t(x_t,y)=\nabla\log q_t(x_t)+w\,\nabla\log p_t(y\mid x_t)$; $w=1$ is Bayes' rule, $\tilde s_t=\nabla\log q_t(x_t\mid y)$ |
+| classifier-free guidance | $\tilde\varepsilon=\varepsilon_\theta(x_t,\varnothing)+w\big(\varepsilon_\theta(x_t,y)-\varepsilon_\theta(x_t,\varnothing)\big)$; $w=0$ unconditional, $w=1$ conditional (Ho & Salimans's $w$ is our $w-1$) |
+| flow matching | $x_t=(1-t)x_0+t\varepsilon$, $\ L=\mathbb E\lVert v_\theta(x_t,t)-(\varepsilon-x_0)\rVert^2$, $\ \hat x_0=x_t-t\,v_\theta$; sample $\dot x=v_\theta$ from $t=1$ to $0$ |
+| DPS (inverse problems) | after each ancestral step $x'_{t-1}$: $x_{t-1}=x'_{t-1}-\zeta\,\nabla_{x_t}\lVert y-A\,\hat x_0(x_t)\rVert$ (the norm, not its square) |
 
 ## References
 
@@ -178,34 +194,40 @@ The foundations:
 - Song et al. (2021), *Score-based generative modeling through stochastic differential equations*, arXiv:2011.13456
 - Song, Meng & Ermon (2021), *Denoising diffusion implicit models*, arXiv:2010.02502
 - Karras et al. (2022), *Elucidating the design space of diffusion-based generative models*, arXiv:2206.00364
+- Kingma et al. (2021), *Variational diffusion models*, arXiv:2107.00630; Salimans & Ho (2022), *Progressive
+  distillation for fast sampling of diffusion models* (introduces v-prediction), arXiv:2202.00512
 
 Guidance, latents and applications:
 
-- Nichol & Dhariwal (2021), *Improved DDPM*, arXiv:2102.09672; Dhariwal & Nichol (2021), *Diffusion models beat GANs
-  on image synthesis*, arXiv:2105.05233
+- Nichol & Dhariwal (2021), *Improved denoising diffusion probabilistic models*, arXiv:2102.09672; Dhariwal & Nichol
+  (2021), *Diffusion models beat GANs on image synthesis*, arXiv:2105.05233
 - Ho & Salimans (2022), *Classifier-free diffusion guidance*, arXiv:2207.12598
 - Rombach et al. (2022), *High-resolution image synthesis with latent diffusion models*, arXiv:2112.10752
-- Meng et al. (2022), *SDEdit*, arXiv:2108.01073; Lugmayr et al. (2022), *RePaint*, arXiv:2201.09865; Chung et al.
-  (2023), *Diffusion posterior sampling for general noisy inverse problems*, arXiv:2209.14687
+- Meng et al. (2022), *SDEdit: guided image synthesis and editing with stochastic differential equations*,
+  arXiv:2108.01073; Lugmayr et al. (2022), *RePaint: inpainting using denoising diffusion probabilistic models*,
+  arXiv:2201.09865; Chung et al. (2023), *Diffusion posterior sampling for general noisy inverse problems*,
+  arXiv:2209.14687
 
 Flow matching:
 
 - Lipman et al. (2023), *Flow matching for generative modeling*, arXiv:2210.02747
-- Liu, Gong & Liu (2023), *Flow straight and fast: rectified flow*, arXiv:2209.03003
+- Liu, Gong & Liu (2023), *Flow straight and fast: learning to generate and transfer data with rectified flow*,
+  arXiv:2209.03003
 - Albergo & Vanden-Eijnden (2023), *Building normalizing flows with stochastic interpolants*, arXiv:2209.15571
-- Tong et al. (TMLR 2024; arXiv 2023), *Improving and generalizing flow-based generative models with minibatch optimal transport*,
+- Tong et al. (2023), *Improving and generalizing flow-based generative models with minibatch optimal transport*,
   arXiv:2302.00482
 
 Architectures and control:
 
-- Peebles & Xie (2023), *Scalable diffusion models with transformers (DiT)*, arXiv:2212.09748
-- Esser et al. (2024), *Scaling rectified flow transformers for high-resolution image synthesis (SD3)*,
+- Peebles & Xie (2023), *Scalable diffusion models with transformers* (DiT), arXiv:2212.09748
+- Esser et al. (2024), *Scaling rectified flow transformers for high-resolution image synthesis* (SD3),
   arXiv:2403.03206
-- Janner et al. (2022), *Planning with diffusion for flexible behavior synthesis (Diffuser)*, arXiv:2205.09991
-- Chi et al. (2023), *Diffusion Policy*, arXiv:2303.04137
+- Janner et al. (2022), *Planning with diffusion for flexible behavior synthesis* (Diffuser), arXiv:2205.09991
+- Chi et al. (2023), *Diffusion Policy: visuomotor policy learning via action diffusion*, arXiv:2303.04137
 
 Denoisers as priors (for the Bayesian and neuroscience reader):
 
+- Efron (2011), *Tweedie's formula and selection bias*, Journal of the American Statistical Association
 - Kadkhodaie & Simoncelli (2021), *Solving linear inverse problems using the prior implicit in a denoiser*,
   arXiv:2007.13640
 - Kadkhodaie et al. (2024), *Generalization in diffusion models arises from geometry-adaptive harmonic
@@ -214,7 +236,7 @@ Denoisers as priors (for the Bayesian and neuroscience reader):
 Overviews:
 
 - Luo (2022), *Understanding diffusion models: a unified perspective*, arXiv:2208.11970
-- Lilian Weng, *What are diffusion models?* (blog, 2021); Sander Dieleman's blog (*Perspectives on diffusion*,
-  *Diffusion is spectral autoregression*, and others)
+- Lilian Weng, *What are diffusion models?* (blog, 2021); Sander Dieleman's blog (*Guidance: a cheat code for
+  diffusion models*, *Perspectives on diffusion*, *Diffusion is spectral autoregression*, and others)
 
 Each notebook's own *Further reading* section gives more targeted references.

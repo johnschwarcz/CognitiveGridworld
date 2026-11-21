@@ -37,8 +37,9 @@
 # - practical details: few-step sampling for real-time control, $\hat\tau_0$ clipping, schedule
 #   choice, learning-rate decay, RePaint resampling, and CPU threading for tiny networks.
 #
-# **Prerequisites:** 01–04 (forward process, DDPM, Tweedie, DDIM), 06 (conditioning, guidance),
-# 07 (inpainting with the replacement trick).
+# **Prerequisites:** 01–04 (forward process, DDPM and its $\varepsilon$/$x_0$/$v$ targets, Tweedie, DDIM),
+# 06 (conditioning, guidance), 07 (inpainting with the replacement trick and RePaint; DPS, which Section 6
+# builds on).
 #
 # **Runtime:** about 4 min on a 4-core CPU (mostly training three small diffusion MLPs, about a
 # minute each), 1–3 min on a GPU.
@@ -573,8 +574,10 @@ class TrajectoryDenoiser(nn.Module):
 #
 # The SNR spans about eight orders of magnitude over our schedule. **$\varepsilon$-prediction**
 # pours its effort into low-noise levels (fine detail, what matters for image quality) and barely
-# cares about high-noise levels. But for our task the important event, choosing a route, happens
-# at low SNR (we will see exactly where), and there an $\varepsilon$-network's $\hat\tau_0$ is its
+# cares about high-noise levels. (That is in units of the $\tau_0$-error. Measured against the true
+# ELBO instead, the same loss *under*-weights the lowest noise levels, notebook 02 §2; both hold.)
+# But for our task the important event, choosing a route, happens at low SNR (we will see
+# exactly where), and there an $\varepsilon$-network's $\hat\tau_0$ is its
 # output error magnified by $1/\sqrt{\bar\alpha_t}$. **$\tau_0$-prediction** has the opposite
 # bias: it under-weights low noise levels, where the fine, within-route detail is learned.
 # **$v$-prediction** weights like $\tau_0$-prediction at high noise and like
@@ -1350,7 +1353,8 @@ plt.show()
 #
 # $$\tilde p(\tau\mid s)\;\propto\;p_\theta(\tau\mid s)\,\exp\!\big(-\lambda\,C(\tau)\big),$$
 #
-# a learned prior times a hand-written "likelihood" $e^{-\lambda C}$, with
+# a learned prior times a hand-written "likelihood" $e^{-\lambda C}$ ($\lambda$ is an inverse
+# temperature here, not a log-SNR), with
 # $C(\tau)=\sum_j \mathrm{relu}\big(r+m-\lVert w_j-c\rVert\big)^2$ penalising waypoints that come
 # within $r+m$ of the new obstacle centred at $c$. This is classifier guidance (notebook 06)
 # with $-\lambda C$ playing the role of $\log p(y\mid\tau)$: the score of the noised target is
@@ -1688,7 +1692,7 @@ plt.show()
 # The early panels are dominated by noise (clipped to the workspace box). An
 # $\varepsilon$-network's $\hat\tau_0=(\tau_t-\sqrt{1-\bar\alpha_t}\,\hat\varepsilon)/\sqrt{\bar\alpha_t}$
 # divides by $\sqrt{\bar\alpha_t}$ ($\approx 0.005$ at $t=99$, $\approx 0.08$ at $t=68$), so small
-# errors in $\hat\varepsilon$ are magnified 10–200 times. The sampler copes, because the next step
+# errors in $\hat\varepsilon$ are magnified roughly 10–200 times (221 at $t=99$, printed in Section 3). The sampler copes, because the next step
 # multiplies $\hat\tau_0$ by $\sqrt{\bar\alpha_{t'}}$ again, but anything that *reads*
 # $\hat\tau_0$ at high noise (a visualisation, the cost guidance of Section 6) sees mostly noise.
 # With $v$-prediction, $\hat\tau_0=\sqrt{\bar\alpha_t}\,\tau_t-\sqrt{1-\bar\alpha_t}\,\hat v$ is

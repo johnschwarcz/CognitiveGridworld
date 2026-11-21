@@ -118,8 +118,9 @@ print(f"FAST={FAST}  USE_AMP={USE_AMP}")
 # * $q_t(x_t,y=c)=\sum_{k\in c}\pi_k\,\mathcal N(x_t;\sqrt{\bar\alpha_t}\mu_k,\bar\alpha_t\Sigma_k+(1-\bar\alpha_t)I)$, where the weights $\pi_k$ already include $p(y)$;
 # * $p_t(y=c\mid x_t)=\operatorname{softmax}_c\,\log q_t(x_t,c)$, the exact noise-aware classifier.
 #
-# All 2-D experiments use a $T=250$ linear schedule. `NoiseSchedule` rescales $\beta$, so this is the same
-# continuous process as $T=1000$, with 4× cheaper sampling.
+# All 2-D experiments use a $T=250$ linear schedule. `NoiseSchedule` rescales $\beta$, so this is approximately the
+# same continuous process as $T=1000$ (notebook 01 §4), with 4× cheaper sampling. As in `dmtools`, $t$ in code,
+# printouts and plots is the array index $0,\dots,T-1$; "at $t=0$" in the maths means the clean data.
 
 # %%
 if device.type == "cpu":
@@ -621,7 +622,7 @@ print(f"loss: mine {mine.item():.6f} | dmtools {ref.item():.6f};   "
 assert torch.allclose(mine, ref) and torch.allclose(cfg_eps(cfg_mlp, xb, tb, yb, 4.0), eps_ref, atol=1e-5)
 
 # %% [markdown]
-# Now train one network with label dropout. When `dm.train_diffusion` (notebook 05) receives `labels` and
+# Now train one network with label dropout. When `dm.train_diffusion` (notebooks 03–05) receives `labels` and
 # `p_uncond`, its loss is exactly our `cfg_training_loss` (via `dm.diffusion_loss`, checked above).
 
 # %%
@@ -1148,7 +1149,8 @@ plt.show()
 #   universal value. Class-conditional ImageNet models typically use $w$ around 1.5–4. Stable Diffusion's default
 #   is 7.5, with 5–9 common. Text conditioning is a much weaker signal per pixel, so larger scales are needed.
 # * **Over-saturation** at large $w$ comes from $\hat x_0$ leaving the data range. Clipping $\hat x_0$ to $[-1,1]$
-#   (notebook 05) or Imagen's dynamic thresholding (Saharia et al. 2022) limits it.
+#   (notebook 05) keeps the prediction in range but saturates every out-of-range pixel (the "burnt" look);
+#   Imagen's dynamic thresholding (Saharia et al. 2022) rescales instead and works better at large $w$.
 # * **Guidance interval / schedule.** Guidance at high noise mostly reduces diversity (it decides the global layout
 #   early, as Section 4 showed), and at low noise it is mostly unnecessary. Kynkäänniemi et al. (2024) apply
 #   it only in a middle range of noise levels. That also saves NFEs, because outside the interval one pass suffices.

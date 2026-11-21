@@ -427,8 +427,10 @@ unet.zero_grad(set_to_none=True)
 # * **The noise schedule assumes data of unit scale.** The forward process ends at
 #   $x_{T-1}=\sqrt{\bar\alpha_{T-1}}\,x_0+\sqrt{1-\bar\alpha_{T-1}}\,\epsilon$, and the sampler *starts* from
 #   $\mathcal{N}(0,I)$. That is only consistent if $\sqrt{\bar\alpha_{T-1}}\,x_0$ is negligible, which holds when
-#   $x_0=O(1)$. The signal-to-noise ratio is $\mathrm{SNR}(t)=\bar\alpha_t\,\mathrm{Var}[x_0]/(1-\bar\alpha_t)$,
-#   so rescaling the data shifts *which* timesteps carry information.
+#   $x_0=O(1)$. The *effective* signal-to-noise ratio, $\mathrm{SNR}(t)\,\mathrm{Var}[x_0]=\bar\alpha_t\,\mathrm{Var}[x_0]/(1-\bar\alpha_t)$,
+#   depends on the data's scale, so rescaling the data shifts *which* timesteps carry information.
+#   (As in `dmtools`, $t$ in this notebook's formulas, printouts and plots is the array index $0,\dots,T-1$, one
+#   less than the maths $t$ of notebook 01: our $x_{T-1}$ is notebook 01's $x_T$.)
 # * **A known, bounded range** lets us clip $\hat x_0$ to $[-1,1]$ during sampling (section 5).
 #
 # "Centred" here means centred *range*. The mean pixel is not 0: most pixels are background. What matters is that the
@@ -685,18 +687,18 @@ plt.show()
 # the backgrounds and stroke edges. Section 7 measures the difference with Fréchet distances, which detect it more
 # reliably than the eye.
 #
-# **From here on we use a longer-trained reference model** with the same architecture and recipe
-# (`dm.MNIST_RECIPE`, batch 64, the same loss and noise schedule). Normally that is
-# `checkpoints/mnist_unet_uncond.pt`, which `dm.load_or_train_mnist_model` loads, or trains and caches if it is
-# missing (minutes on a GPU, most of an hour on a CPU). On a CPU without that file we fall back to the model saved
-# by notebook 06 (`06_mnist_cond.pt`). It was trained with the same recipe, except that it was also given each
-# digit's class label, replaced by a special "no label" token 10% of the time. Called with `y=None` it receives that
-# token and is an *unconditional* model of the same digits (notebook 06 explains why). The cell prints which model
-# it loaded and how much longer than ours it was trained.
+# **From here on we use a longer-trained reference model**: the same architecture, loss, noise schedule, optimiser
+# and EMA (`dm.MNIST_RECIPE`, batch 64; `dm.train_diffusion` warms up over 100 steps instead of our 200), trained for
+# 12 000 steps. It ships with the tutorial as `checkpoints/mnist_unet_uncond.pt` (made by `pretrain_checkpoints.py`).
+# `dm.load_or_train_mnist_model` loads it, or trains and caches it if the file is missing (minutes on a GPU, about an
+# hour on a CPU). Only on a CPU without that file do we fall back, if present, to `06_mnist_cond.pt`, a
+# shorter-trained *conditional* model of the same recipe made while notebook 06 was written. Called with `y=None`,
+# a conditional model trained with label dropout is an unconditional model of the same digits (notebook 06 explains
+# why). The cell prints which model it loaded and how much longer than ours it was trained.
 
 # %%
 REF_CKPT = dm.CKPT_DIR / "mnist_unet_uncond.pt"   # the reference (made by pretrain_checkpoints.py, or by dm below)
-ALT_CKPT = dm.CKPT_DIR / "06_mnist_cond.pt"       # same U-Net and recipe, saved while writing notebook 06
+ALT_CKPT = dm.CKPT_DIR / "06_mnist_cond.pt"       # optional fallback: shorter-trained conditional model (not shipped)
 if REF_CKPT.exists() or GPU or not ALT_CKPT.exists():
     # loads the reference; if it is missing, dmtools trains and caches it first
     ref_model, ref_schedule = dm.load_or_train_mnist_model(conditional=False, device=device, batch_size=BATCH,

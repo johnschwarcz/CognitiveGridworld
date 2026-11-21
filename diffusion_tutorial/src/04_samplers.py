@@ -114,7 +114,8 @@ print(f"stranded fraction of {n_big} exact samples: "
 #
 # In the DDPM paper's notation (1-based: step $k\in\{1,\dots,T\}$ produces latent $x_k$), one forward step is
 # $x_k=\sqrt{1-\beta_k}\,x_{k-1}+\sqrt{\beta_k}\,z$ with $z\sim\mathcal N(0,I)$. Now read the
-# integer step $k$ as continuous time $t=k/T\in[0,1]$ with step $\Delta t=1/T$, and define a rate
+# integer step $k$ as continuous time $t=k/T\in[0,1]$ (notebook 01 §2 called it $\tau$; in this notebook $t$ is continuous and
+# $k$ is the integer step) with step $\Delta t=1/T$, and define a rate
 # $\beta(t)$ by $\beta_k=\beta(t)\,\Delta t$, that is $\beta(t)\approx T\beta_k$. Since $\sqrt{1-\beta(t)\Delta t}=1-\tfrac12\beta(t)\Delta t+O(\Delta t^2)$:
 #
 # $$x_{t+\Delta t}-x_t \;\approx\; -\tfrac12\beta(t)\,x_t\,\Delta t+\sqrt{\beta(t)\Delta t}\;z .$$
@@ -221,7 +222,8 @@ for t, xt in snaps.items():
 # has **exactly the same marginals $p_t$** as the SDE, at every $t$. It is *not* the same process: individual paths differ,
 # and only the distribution at each time agrees. Integrating it backwards from noise is a deterministic sampler.
 #
-# **The whole family.** Combining the two, for any $\lambda\ge0$,
+# **The whole family.** Combining the two, for any $\lambda\ge0$ (here just a knob for the amount of noise, not the log-SNR of
+# notebook 01),
 # $dx=\big[f-\tfrac{1+\lambda^2}{2}g^2\nabla\log p_t\big]dt+\lambda g\,d\bar W$ also has marginals $p_t$. With $\lambda=0$ it
 # is the ODE and with $\lambda=1$ the reverse SDE. Written in reverse time $\tau=-t$, the difference between them,
 # $\tfrac{\lambda^2}{2}g^2\nabla\log p_t\,d\tau+\lambda g\,dW_\tau$, is precisely **Langevin dynamics** targeting $p_t$
@@ -294,7 +296,8 @@ plt.show()
 # ## 2 · Five samplers, one exact score
 #
 # All samplers below walk down a time grid $1=t_0>t_1>\dots>t_{n-1}=t_{\min}>t_n=0$ and call the noise predictor once per
-# step. Heun calls it twice, except on the last step. Writing $a_t=\bar\alpha(t)$ and
+# step. Heun calls it twice, except on the last step. Writing $a_t=\bar\alpha(t)$ ($\bar\alpha$ itself, whereas the $a$ of notebook
+# 02 §9a was $\sqrt{\bar\alpha}$) and
 # $\hat x_0=(x_t-\sqrt{1-a_t}\,\hat\epsilon)/\sqrt{a_t}$ (Tweedie), one step from $t$ to $s<t$ is:
 #
 # | sampler | update $x_t\to x_s$ | NFE / step |
@@ -872,7 +875,8 @@ plt.show()
 # $0.1\lesssim\sigma\lesssim5$, measured in §6). There $\hat x_0$ commits to a mode and then to a point within it, and that
 # window is where DDIM's error comes from. §6 asks where the steps should go.
 #
-# **Consequence 2: stability.** The cleanest test is one-dimensional Gaussian data $x_0\sim\mathcal N(0,\lambda)$. Every
+# **Consequence 2: stability.** The cleanest test is one-dimensional Gaussian data $x_0\sim\mathcal N(0,\lambda)$ (in this
+# subsection $\lambda$ is the data variance, not a log-SNR). Every
 # quantity is then available in closed form: $\hat\epsilon(x,t)=\sqrt{1-a_t}\,x/(\lambda a_t+1-a_t)$, and the exact ODE maps
 # $x_T=1$ to $\sqrt\lambda/\sqrt{\lambda a_1+1-a_1}$. Since the ODE is linear, the sampler's output from $x_T=1$ *is* the
 # standard deviation of the distribution it generates. We vary the data variance $\lambda$ over seven orders of magnitude.
@@ -1378,8 +1382,8 @@ plt.show()
 # > (2024) found two related flaws in widely used setups. First, many schedules do not reach zero terminal SNR
 # > ($\bar\alpha_T$ is not tiny), so the model never sees pure noise during training, yet sampling starts from pure noise.
 # > Samples then have a restricted range of brightness. Second, the popular "leading" timestep spacing does not even start
-# > at $t=T-1$, which makes the mismatch worse. Their fixes: rescale the schedule to zero terminal SNR (and switch to
-# > $v$-prediction, since $\epsilon$-prediction is degenerate at zero SNR), always start at $t=T-1$ ("trailing" spacing),
+# > at the last index $k=T-1$, which makes the mismatch worse. Their fixes: rescale the schedule to zero terminal SNR (and switch to
+# > $v$-prediction, since $\epsilon$-prediction is degenerate at zero SNR), always start at $k=T-1$ ("trailing" spacing),
 # > and rescale classifier-free guidance. Our schedule has $\bar\alpha(1)\approx4\cdot10^{-5}$, and our grids start exactly
 # > at $t=1$.
 #

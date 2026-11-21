@@ -7,18 +7,24 @@ notebooks can `import dmtools` instead of re-typing a U-Net or a sampler.
 
 Where each piece is introduced:
 
-    NoiseSchedule, GaussianMixture.noised ......... 01_forward_process
-    MLPDenoiser, diffusion_loss, ddpm_sample ...... 02_ddpm_from_scratch
-    GaussianMixture.score, Tweedie ................ 03_score_matching
-    ddim_sample, ddim_invert ...................... 04_samplers
-    UNet, EMA, train_diffusion .................... 05_images_unet
-    classifier-free guidance (guidance_scale) ..... 06_guidance
+    NoiseSchedule (linear and cosine schedules),
+      GaussianMixture.noised / .noised_ve / .responsibilities ... 01_forward_process
+    SinusoidalEmbedding, MLPDenoiser, diffusion_loss, EMA,
+      train_diffusion (the loop), ddpm_sample, model_predictions,
+      mmd_rbf, sliced_wasserstein, make_toy ..................... 02_ddpm_from_scratch
+    GaussianMixture.score, Tweedie's formula .................... 03_score_matching
+    ddim_sample, ddim_invert .................................... 04_samplers
+    UNet, the full training recipe (AdamW, warm-up, bf16 `amp`),
+      load_mnist, MNISTClassifier, load_or_train_* .............. 05_images_unet
+    classifier-free guidance (guidance_scale), labelled_gmm ..... 06_guidance
     (flow matching lives entirely in 08_flow_matching)
 
 Conventions used everywhere in the tutorial
 -------------------------------------------
-* Discrete time t is an integer in {0, ..., T-1}. `schedule.alpha_bars[t]` is
-  \bar\alpha_t = prod_{s<=t} (1 - beta_s).  t = T-1 is (almost) pure noise.
+* Discrete time t is an integer array index in {0, ..., T-1}, one less than
+  the maths' t in {1, ..., T}: `schedule.alpha_bars[t]` is
+  prod_{s=0..t} (1 - betas[s]), i.e. the maths' abar_{t+1}, and
+  `alpha_bars_prev[0]` = 1 belongs to the data.  t = T-1 is (almost) pure noise.
 * Forward process ("variance preserving"):
       x_t = sqrt(abar_t) * x_0 + sqrt(1 - abar_t) * eps,   eps ~ N(0, I)
 * Every model has the signature `model(x, t, y=None)`; `t` is a float or long
@@ -28,7 +34,10 @@ Conventions used everywhere in the tutorial
   'v' (v = sqrt(abar) * eps - sqrt(1-abar) * x0).
 * guidance_scale w follows the diffusers convention:
       eps = eps_uncond + w * (eps_cond - eps_uncond)
-  so w = 0 is unconditional, w = 1 is plain conditional, w > 1 is "guided".
+  so w = 0 is unconditional, w = 1 is plain conditional, w > 1 is "guided"
+  (Ho & Salimans 2022 write 1 + w for this w).
+* Flow matching (notebook 08 only) uses continuous t in [0, 1] with data at
+  t = 0 and noise at t = 1: x_t = (1 - t) x_0 + t eps. Its MLPs are fed 1000 t.
 * Images live in [-1, 1].
 * Exact (float64) work happens on the CPU: GaussianMixture keeps its
   parameters as CPU float64 tensors, and NoiseSchedule stores float32 copies on
@@ -286,7 +295,8 @@ class NoiseSchedule:
     r"""Precomputes every coefficient of the DDPM forward / reverse process.
 
     kind='linear': beta_t linearly spaced in [beta_start, beta_end] (Ho et al. 2020)
-    kind='cosine': abar_t = cos^2(((t/T + s)/(1 + s)) * pi/2) (Nichol & Dhariwal 2021)
+    kind='cosine': abar_t = f(t)/f(0), f(t) = cos^2(((t/T + s)/(1 + s)) * pi/2), with
+                   maths t = 1..T (Nichol & Dhariwal 2021)
 
     The linear betas are rescaled by 1000/T so that every T approximates the same
     continuous process. This breaks down for small T: at T <= 20 some beta_t >= 1,
@@ -829,7 +839,7 @@ def load_mnist(train: bool = True, root=None):
 
 
 class MNISTClassifier(nn.Module):
-    """A small CNN (~99% test accuracy) used to *evaluate* generated digits."""
+    """A small CNN (~98.5% test accuracy) used to *evaluate* generated digits."""
 
     def __init__(self):
         super().__init__()
@@ -887,13 +897,13 @@ def load_or_train_mnist_model(conditional: bool = True, steps: int = None, devic
                               p_uncond: float = 0.1, amp=None, verbose: bool = True):
     """Return (ema_model, schedule) for MNIST, training (and caching) it if needed.
 
-    checkpoints/mnist_unet_uncond.pt (used from notebook 05 on) and
+    checkpoints/mnist_unet_uncond.pt (notebooks 05 and 09) and
     checkpoints/mnist_unet_cond.pt (class-conditional with 10% label dropout for
     classifier-free guidance, notebooks 06-07) are made by `pretrain_checkpoints.py`:
     the recipe of notebook 05 (`MNIST_RECIPE`, linear schedule, T=1000,
     eps-prediction, EMA 0.999) trained for 12 000 steps at batch 64. If a file is
     missing it is trained here with the same settings and cached (a few minutes on
-    a GPU, about an hour on a CPU).
+    a GPU; on a CPU about an hour with amp=True, longer in float32).
     """
     device = device or get_device()
     name = "mnist_unet_cond.pt" if conditional else "mnist_unet_uncond.pt"

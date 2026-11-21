@@ -1,0 +1,5 @@
+# The repository ignores *.pt. Ship only the three small models the notebooks load;
+# everything else in this folder (models the notebooks cache, e.g. 05_my_unet.pt) stays local.
+!mnist_classifier.pt
+!mnist_unet_uncond.pt
+!mnist_unet_cond.pt

@@ -567,7 +567,8 @@ print(f"DDPM's own range: sigma_t from {SIGMA_T[0]:.3f} (t=0) to {SIGMA_T[-1]:.0
 # $$\Big\|s_\theta(x_t,t)+\frac{\epsilon}{\sqrt{1-\bar\alpha_t}}\Big\|^2 = \frac{\|\epsilon_\theta(x_t,t)-\epsilon\|^2}{1-\bar\alpha_t},
 # \qquad\text{so}\qquad L_\text{simple}=\mathbb E_t\Big[(1-\bar\alpha_t)\,J_\text{DSM}(s_\theta;t)\Big]$$
 # (`dm.diffusion_loss` also averages over the $d$ coordinates, an extra constant factor $1/d$).
-# DDPM's loss is denoising score matching summed over noise levels with the weighting $\lambda_t=1-\bar\alpha_t$. That is the
+# DDPM's loss is denoising score matching summed over noise levels with the weighting $\lambda_t=1-\bar\alpha_t$ (a loss weight, as in
+# notebook 02 §2, not the log-SNR of notebook 01). That is the
 # weighting Song et al. (2021) recommend, $\lambda_t\propto 1/\mathbb E\|\nabla\log q(x_t\mid x_0)\|^2$, which makes every level's loss $O(1)$. At the optimum,
 # $$\boxed{\ \epsilon_\theta(x_t,t)\approx-\sqrt{1-\bar\alpha_t}\;\nabla_{x_t}\log q_t(x_t)\ }$$
 #
@@ -792,7 +793,8 @@ plt.show()
 #
 # ## 7 · A learned score vs the exact score
 #
-# Now train an $\epsilon$-model exactly as in notebook 02 (`dm.MLPDenoiser` + `dm.train_diffusion`, linear schedule, $T=1000$) on the
+# Now train an $\epsilon$-model as in notebook 02, with the library versions of its parts (`dm.MLPDenoiser`, and `dm.train_diffusion`,
+# which is notebook 02's loop with Adam, gradient clipping and EMA plus a short learning-rate warm-up; linear schedule, $T=1000$) on the
 # training set of §3b, convert it into a score with $s_\theta(x,t)=-\epsilon_\theta(x,t)/\sqrt{1-\bar\alpha_t}$, and compare it with
 # the exact score of $q_t$. We use 128 hidden units instead of the default 256: in 2-D that is plenty, and it trains twice as fast.
 

@@ -30,7 +30,7 @@
 # - two ways to straighten the flow for 1–2-step sampling: **reflow** (rectified flow) and **mini-batch optimal-transport** couplings;
 # - the practical knobs used in large models: timestep distributions, step counts, guidance on velocities.
 #
-# **Prerequisites:** 01 (forward process), 02 (DDPM), 03 (score matching, Tweedie), 04 (DDIM / probability-flow ODE), 05 (training loop, EMA); 06 (guidance) for the last section.
+# **Prerequisites:** 01 (forward process), 02 (DDPM), 03 (score matching, Tweedie), 04 (DDIM / probability-flow ODE); 06 (guidance) for the last section.
 #
 # **Runtime:** about 5–7 min on a laptop CPU (five small MLPs of roughly 15 s to 1 min each, plus sampling and the exact-velocity computations); about 2–4 min on a GPU (tiny MLPs, so a GPU helps less than usual).
 
@@ -66,8 +66,9 @@ NFES = [1, 2, 8] if FAST else [1, 2, 4, 8, 16, 32, 64]   # numbers of function e
 COL = dict(data="0.75", exact="k", fm="tab:blue", ddpm="tab:orange", reflow="tab:green", ot="tab:purple")
 
 # %% [markdown]
-# **Conventions for this notebook (they differ from notebooks 01–06!).** Time is continuous,
-# $t\in[0,1]$, with **data at $t=0$ and noise at $t=1$** (the rectified-flow / SD3 convention):
+# **Conventions for this notebook (they differ from the discrete-time DDPM notebooks!).** Time is continuous,
+# $t\in[0,1]$, with **data at $t=0$ and noise at $t=1$** (the rectified-flow / SD3 convention; notebook 04's
+# continuous-time VP-SDE runs in the same direction, but along the path $\sqrt{\bar\alpha(t)}\,x_0+\sqrt{1-\bar\alpha(t)}\,\varepsilon$):
 #
 # $$x_t = (1-t)\,x_0 + t\,\varepsilon,\qquad x_0\sim p_{\rm data},\ \ \varepsilon\sim\mathcal N(0,I).$$
 #
@@ -76,8 +77,11 @@ COL = dict(data="0.75", exact="k", fm="tab:blue", ddpm="tab:orange", reflow="tab
 # velocity: always check the convention when reading papers or code.) The networks are
 # `dm.MLPDenoiser`s, whose sinusoidal time embedding was designed for the integer steps
 # $0,\dots,999$ of earlier notebooks, so **we feed them $1000\,t$**. (Gotcha: feeding
-# $t\in[0,1]$ directly "works" but the embedding then varies so slowly that the network
-# struggles to tell noise levels apart.)
+# $t\in[0,1]$ directly "works", but then all but the fastest few embedding features are almost
+# constant and the network loses fine resolution in $t$, see notebook 02 §3a. On a smooth 2-D
+# problem that costs little (notebook 02, Exercise 6), but there is no reason to give it away.)
+# In this notebook $v$ always means the flow **velocity** $\varepsilon-x_0$ (or its posterior mean), not the
+# "$v$-prediction" target $\sqrt{\bar\alpha}\,\varepsilon-\sqrt{1-\bar\alpha}\,x_0$ of notebooks 02 and 10; Section 5 relates the two.
 #
 # Our data is the 8-component 2-D Gaussian mixture `dm.default_gmm()`, chosen because every
 # quantity in this notebook (densities, posterior means, velocities) has a closed form for it.
@@ -346,7 +350,7 @@ plt.show()
 # * The pair sampler is a function argument, so the *same* loop will later train reflow (fixed
 #   pairs) and OT-CFM (re-paired batches). An optional label `y` enables classifier-free guidance (Section 8).
 # * We use the same optimiser, learning rate, warm-up, gradient clipping and **EMA** as
-#   `dm.train_diffusion` (notebook 05), and sample with the EMA weights.
+#   `dm.train_diffusion` (used since notebook 03; notebook 05 explains the recipe), and sample with the EMA weights.
 
 # %%
 def make_mlp(n_classes=None):
@@ -690,7 +694,7 @@ for name, p in [("exact ODE", exact_paths), ("learned FM ODE", fm_paths)]:
 # ## 5 · Flow matching is diffusion in disguise
 #
 # **Same family of paths.** Every model in this tutorial uses a Gaussian path
-# $x_t = \alpha_t x_0 + \sigma_t\varepsilon$: VP diffusion has $(\alpha,\sigma)=(\sqrt{\bar\alpha},\sqrt{1-\bar\alpha})$,
+# $x_t = \alpha_t x_0 + \sigma_t\varepsilon$ (here $\alpha_t$ is the signal coefficient, not DDPM's $1-\beta_t$): VP diffusion has $(\alpha,\sigma)=(\sqrt{\bar\alpha},\sqrt{1-\bar\alpha})$,
 # flow matching has $(1-t,\,t)$. What matters is the signal-to-noise ratio $\alpha/\sigma$. Divide a VP
 # state by $\alpha+\sigma$:
 #
