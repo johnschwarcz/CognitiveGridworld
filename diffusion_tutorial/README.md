@@ -65,21 +65,42 @@ Each notebook ends with **exercises** (with hints and solutions), **key takeaway
 
 ## Setup
 
+The `diffusion_tutorial` folder is self-contained: copy or unzip it anywhere, nothing else from this repository is
+needed. You need Python 3.10–3.14 (3.12 is a good choice).
+
+macOS / Linux:
+
 ```bash
 cd diffusion_tutorial
-python -m venv .venv && source .venv/bin/activate      # or a conda env with Python >= 3.10
-pip install -r requirements.txt                          # torch, numpy, scipy, matplotlib, jupyterlab, diffusers, ...
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt     # torch, numpy, scipy, matplotlib, jupyterlab, diffusers, ...
+jupyter lab                         # opens in your browser; start with 01_forward_process.ipynb
+```
+
+Windows (PowerShell):
+
+```powershell
+cd diffusion_tutorial
+py -m venv .venv
+.venv\Scripts\Activate.ps1          # if scripts are blocked: Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
+pip install -r requirements.txt
 jupyter lab
 ```
 
-- Install PyTorch with CUDA support in the usual way (see pytorch.org) if you have an NVIDIA GPU. The notebooks pick
-  `cuda`, then Apple's `mps`, then `cpu` automatically (`dmtools.get_device()`).
+With conda instead: `conda create -n diffusion python=3.12`, `conda activate diffusion`, then the `pip install` line.
+
+- **Devices.** The notebooks pick `cuda`, then Apple's `mps`, then `cpu` automatically (`dmtools.get_device()`), and
+  all of them run on a laptop CPU (the CPU times in the roadmap). NVIDIA GPU: on Linux the PyTorch that pip installs
+  already supports CUDA; on Windows it is CPU-only, so install the CUDA build from pytorch.org before the
+  `pip install` line. Apple's MPS backend has not been tested with these notebooks: if a cell fails with an MPS error,
+  add a first cell `%env DM_DEVICE=cpu` and run the notebook again from the top.
 - **Already have an environment with PyTorch?** You can use it: besides the versions the notebooks were made with,
   a quick (`DM_FAST`) run of all ten also passes with torch 2.5.1, numpy 1.26 and Python 3.12. Install only what is
   missing, for example `pip install jupyterlab`. For notebook 09 §7 with a torch older than 2.6, add
   `pip install "diffusers==0.38.0"` (later diffusers need torch ≥ 2.6; with them §7 is skipped with a message).
 - MNIST (11 MB) is downloaded by torchvision into `data/` the first time it is needed.
-- **Smoke-test mode:** `DM_FAST=1 jupyter lab` (or `DM_FAST=1 python tools/build.py --execute`) shrinks every
+- **Smoke-test mode:** `DM_FAST=1 jupyter lab`, or a first cell `%env DM_FAST=1` (works on every OS), shrinks every
   training run and sample count so that each notebook runs in under a minute on a 4-core CPU (about 6 minutes for
   all ten). Results are then poor, but every cell runs. Use it to check your environment, or when you only want to
   read the code paths. (`tools/build.py --execute` overwrites the stored outputs of the notebooks it runs.)
