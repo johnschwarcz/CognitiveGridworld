@@ -88,6 +88,14 @@ HAVE_DIFFUSERS = importlib.util.find_spec("diffusers") is not None
 HAVE_TRANSFORMERS = importlib.util.find_spec("transformers") is not None
 if not HAVE_DIFFUSERS:
     print("diffusers is not installed: §7 will be skipped. To run it: pip install diffusers")
+else:
+    # Recent diffusers (0.39 and later) need torch >= 2.6. With an older torch they switch their PyTorch backend off,
+    # and the schedulers then fail on first use, so check now. diffusers 0.38.0 is the last that supports older torch.
+    from diffusers.utils import is_torch_available as diffusers_can_use_torch
+    if not diffusers_can_use_torch():
+        HAVE_DIFFUSERS = False
+        print(f"this diffusers version cannot use torch {torch.__version__}: §7 will be skipped. To run it, upgrade "
+              "torch (>= 2.6) or install an older diffusers: pip install 'diffusers==0.38.0'")
 
 # %% [markdown]
 # # Part A · A tiny latent diffusion model, end to end
@@ -1115,7 +1123,9 @@ if HAVE_DIFFUSERS:
 # * `pip install "diffusers>=0.43" "transformers>=5.23" "accelerate>=1.16"`. This notebook's Part B was written against
 #   **diffusers 0.43.0, transformers 5.23.0 and accelerate 1.16.0**; every class, method and argument used below was
 #   checked against those versions. If a newer release breaks something, install exactly these with
-#   `pip install diffusers==0.43.0 transformers==5.23.0 accelerate==1.16.0`. The model weights could not be downloaded when this notebook was prepared, so Part B
+#   `pip install diffusers==0.43.0 transformers==5.23.0 accelerate==1.16.0`. All three need **torch ≥ 2.6**, and pip
+#   upgrades an older torch to install them: if your environment has an older torch, make a fresh one for Part B.
+#   The model weights could not be downloaded when this notebook was prepared, so Part B
 #   has not been run with the real model, and the descriptions of its outputs say what to expect, not what was
 #   measured. The code itself was run end to end on a tiny, randomly initialised pipeline built from the same
 #   component classes, where the hand-written loop of B.3 reproduced `pipe(...)` exactly.

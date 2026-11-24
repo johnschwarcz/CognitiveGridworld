@@ -8,10 +8,12 @@ tqdm
 jupyterlab
 
 # Notebook 09 §7 (our small model under diffusers' samplers): CPU only, downloads nothing.
-# Without it, §7 prints a message and is skipped.
-diffusers>=0.43
+# Without it, §7 prints a message and is skipped. diffusers 0.39 and later need torch >= 2.6:
+# with an older torch, install diffusers==0.38.0 instead.
+diffusers>=0.38
 
-# Optional: notebook 09 Part B (real Stable Diffusion). Needs a GPU with >= 6 GB of memory,
+# Optional: notebook 09 Part B (real Stable Diffusion). Needs torch >= 2.6 (pip would upgrade an
+# older torch to install these: use a fresh environment instead), a GPU with >= 6 GB of memory,
 # internet access to the Hugging Face Hub, and RUN_SD = True in the notebook.
 # transformers>=5.23
 # accelerate>=1.16

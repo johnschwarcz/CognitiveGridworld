@@ -74,6 +74,10 @@ jupyter lab
 
 - Install PyTorch with CUDA support in the usual way (see pytorch.org) if you have an NVIDIA GPU. The notebooks pick
   `cuda`, then Apple's `mps`, then `cpu` automatically (`dmtools.get_device()`).
+- **Already have an environment with PyTorch?** You can use it: besides the versions the notebooks were made with,
+  a quick (`DM_FAST`) run of all ten also passes with torch 2.5.1, numpy 1.26 and Python 3.12. Install only what is
+  missing, for example `pip install jupyterlab`. For notebook 09 §7 with a torch older than 2.6, add
+  `pip install "diffusers==0.38.0"` (later diffusers need torch ≥ 2.6; with them §7 is skipped with a message).
 - MNIST (11 MB) is downloaded by torchvision into `data/` the first time it is needed.
 - **Smoke-test mode:** `DM_FAST=1 jupyter lab` (or `DM_FAST=1 python tools/build.py --execute`) shrinks every
   training run and sample count so that each notebook runs in under a minute on a 4-core CPU (about 6 minutes for
@@ -81,7 +85,8 @@ jupyter lab
   read the code paths. (`tools/build.py --execute` overwrites the stored outputs of the notebooks it runs.)
 - **Real Stable Diffusion (notebook 09 Part B):** `pip install "transformers>=5.23" "accelerate>=1.16"`, use a CUDA GPU
   with ≥ 6 GB of memory (or an Apple-silicon Mac) and internet access to the Hugging Face Hub, and set
-  `RUN_SD = True` in the notebook.
+  `RUN_SD = True` in the notebook. These packages need torch ≥ 2.6, and pip upgrades an older torch to install them,
+  so with an older torch create a fresh environment for Part B rather than installing them into your existing one.
 
 ## What is in this folder
 
