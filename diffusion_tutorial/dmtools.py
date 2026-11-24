@@ -83,8 +83,15 @@ __all__ = [
 # ----------------------------------------------------------------------------
 
 def get_device(verbose: bool = False) -> torch.device:
-    """Best available device: CUDA GPU > Apple-silicon GPU (MPS) > CPU."""
-    if torch.cuda.is_available():
+    """Best available device: CUDA GPU > Apple-silicon GPU (MPS) > CPU.
+
+    Set the environment variable DM_DEVICE to override the choice, e.g. DM_DEVICE=cpu (in a notebook, run
+    `%env DM_DEVICE=cpu` before the setup cell).
+    """
+    forced = os.environ.get("DM_DEVICE", "").strip()
+    if forced:
+        dev = torch.device(forced)
+    elif torch.cuda.is_available():
         dev = torch.device("cuda")
     elif getattr(torch.backends, "mps", None) is not None and torch.backends.mps.is_available():
         dev = torch.device("mps")
