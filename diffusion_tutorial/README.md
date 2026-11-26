@@ -49,7 +49,9 @@ optional real Stable Diffusion part of notebook 09.
 minutes or less each; the 2-D notebooks use tiny networks and gain little from a GPU. Each notebook states its own
 runtime at the top.
 
-Each notebook ends with **exercises** (with hints and solutions), **key takeaways** and **further reading**.
+Each notebook ends with **exercises** (with hints and solutions), **key takeaways** and **further reading**. Every key
+point has a figure, and cells marked *Side note — safe to skim* only check the code (against `dmtools` or a closed
+form): skip them if you like, but keep the one rule they state, if any.
 
 ### Suggested paths
 

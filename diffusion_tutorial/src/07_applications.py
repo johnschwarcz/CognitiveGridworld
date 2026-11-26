@@ -261,7 +261,7 @@ def reverse_process(model, schedule, x, ts, y=None, w=1.0, eta=1.0, generator=No
 
 
 # %% [markdown]
-# *Side note — safe to skim: checks that our `predict` and samplers reproduce `dmtools` (to about 1e-6); the one rule: compare stochastic samplers only when they get the same random numbers.*
+# *Side note — safe to skim: checks that our `predict` and samplers reproduce `dmtools` (up to float rounding); the one rule: compare stochastic samplers only when they get the same random numbers.*
 #
 # **Check.** Our blocks must reproduce `dmtools` (notebooks 02, 04 and 06): the same predictions, with and without guidance,
 # and the same deterministic ($\eta=0$) and stochastic ($\eta=1$) samplers when given the same random numbers.
@@ -421,11 +421,12 @@ for viz_name, (viz_path, viz_colour) in viz_paths.items():
     viz_p = np.array(viz_path)
     viz_down = np.diff(viz_p) < 0                  # a denoising move = one network evaluation
     viz_nfe[viz_name] = int(viz_down.sum())
-    viz_ax.plot(np.arange(len(viz_p)), viz_p, color=viz_colour, lw=1, alpha=0.6)
-    viz_ax.plot(np.flatnonzero(viz_down) + 1, viz_p[1:][viz_down], "o", color=viz_colour, ms=4.5,
-                label=f"{viz_name}: {viz_nfe[viz_name]} denoising moves (network calls)")
+    viz_front = viz_name == "replacement"          # drawn on top and smaller: both paths start with the same moves
+    viz_ax.plot(np.arange(len(viz_p)), viz_p, color=viz_colour, lw=1, alpha=0.6, zorder=3 if viz_front else 2)
+    viz_ax.plot(np.flatnonzero(viz_down) + 1, viz_p[1:][viz_down], "o", color=viz_colour, ms=3.5 if viz_front else 6.5,
+                zorder=4 if viz_front else 2, label=f"{viz_name}: {viz_nfe[viz_name]} denoising moves (network calls)")
     if (~viz_down).any():
-        viz_ax.plot(np.flatnonzero(~viz_down) + 1, viz_p[1:][~viz_down], "^", color=viz_colour, mfc="white", ms=4.5,
+        viz_ax.plot(np.flatnonzero(~viz_down) + 1, viz_p[1:][~viz_down], "^", color=viz_colour, mfc="white", ms=5.5,
                     label=f"{viz_name}: {int((~viz_down).sum())} re-noising moves (no network call)")
 viz_ax.set_yticks(range(-1, 8))
 viz_ax.set_yticklabels(["−1 (clean)"] + [str(j) for j in range(7)] + ["7 (noise)"])
@@ -624,7 +625,7 @@ viz_g = torch.Generator().manual_seed(89)
 # the ideal: the same eta = 1 sampler, driven by the exact score of the 1-D conditional p(x2 | x1 = c)
 viz_rec_cond = VizRecorder(ExactEps(dm.GaussianMixture(cw, cm[:, None], cv), sched_cpu))
 viz_out_cond = reverse_process(viz_rec_cond, sched_cpu, torch.randn(viz_n, 1, generator=viz_g),
-                               timesteps(T - 1, TOY_STEPS), generator=viz_g)
+                               timesteps(sched_cpu.T - 1, TOY_STEPS), generator=viz_g)
 # replacement with the perfect joint model (a fresh copy of it, so nothing above changes)
 viz_rec_repl = VizRecorder(ExactEps(gmm, sched_cpu))
 viz_obs = torch.zeros(viz_n, 2)
@@ -1161,6 +1162,35 @@ plt.show()
 # $\zeta$ moves the error around; it does not make DPS exact. Despite this bias, DPS is very effective in practice,
 # because it needs nothing but a differentiable $A$.
 #
+# **The observed coordinate, as a picture.** Below are both rules' histograms of $x_1$ against the exact
+# $p(x_1\mid y)$. The Bayes weight is narrower than the posterior. The normalised rule spreads $x_1$ roughly evenly
+# over the window $y\pm\zeta$ that section 4 predicts (each late step moves the sample by about $\zeta$), so its fit is
+# set by $\zeta$ alone: the rule never sees $\sigma_y$.
+
+# %%
+viz_x1_grid = torch.linspace(C_OBS - 0.45, C_OBS + 0.45, 400, dtype=torch.float64)
+viz_x1_pdf = gmm1d_pdf(viz_x1_grid, *gmm_x1_given_y(gmm, C_OBS, SIGMA_Y_TOY ** 2))   # exact p(x1 | y)
+viz_fit_exact = (exact_x1 - C_OBS).abs().mean().item()
+viz_fig, viz_axes = plt.subplots(1, 2, figsize=(10, 3.2), sharey=True)
+for viz_ax, (viz_name, viz_out) in zip(viz_axes, dps_toy.items()):
+    viz_ax.hist(viz_out[:, 0].numpy(), bins=45, range=(C_OBS - 0.45, C_OBS + 0.45), density=True, color=COL["DPS"],
+                alpha=0.6, label=viz_name)
+    viz_ax.plot(viz_x1_grid, viz_x1_pdf, color=COL["exact"], lw=1.5, label=r"exact $p(x_1\mid y)$")
+    if dps_toy_runs[viz_name]["weighting"] == "dps":     # the window of section 4: late steps move x1 by about zeta
+        viz_zeta = dps_toy_runs[viz_name]["zeta"]
+        viz_ax.axvline(C_OBS - viz_zeta, ls="--", lw=1, color=COL["baseline"], label=r"$y\pm\zeta$")
+        viz_ax.axvline(C_OBS + viz_zeta, ls="--", lw=1, color=COL["baseline"])
+    viz_ax.set(xlabel=f"$x_1$  (observed: $y={C_OBS:g}$, $\\sigma_y={SIGMA_Y_TOY:g}$)",
+               title=f"{viz_name}\nmean $|y-x_1|$ = {(viz_out[:, 0] - C_OBS).abs().mean():.3f} "
+                     f"(exact posterior: {viz_fit_exact:.3f})")
+    viz_ax.legend(loc="upper left", fontsize=7, framealpha=1)
+viz_axes[0].set_ylabel("density")
+viz_fig.suptitle("On the observed $x_1$ neither rule matches the posterior: the Bayes weight is too tight, "
+                 "the normalised rule fills $y\\pm\\zeta$", fontsize=10)
+plt.tight_layout()
+plt.show()
+
+# %% [markdown]
 # **The Jensen gap, seen directly.** For a GMM prior the denoising posterior $p(x_0\mid x_t)$ is itself a Gaussian
 # mixture, so we can compare what DPS uses, the single point $\hat x_0(x_t)$, with the whole distribution it stands
 # for. We re-run the Bayes-weight sampler on fresh particles, take those that end in the spurious mode, and draw, at a
