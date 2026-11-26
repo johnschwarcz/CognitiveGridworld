@@ -104,6 +104,9 @@ print(f"FAST={FAST}: {STEPS} training steps per model, {N_SAMPLE} samples per ev
 # > `alpha_bars[t]` $=\bar\alpha_{t+1}$, and `alpha_bars_prev[0]` $=1$ belongs to the data. The network is fed the integer
 # > index `t`. What matters is using the same convention in training and sampling.
 
+# %% [markdown]
+# *Side note — safe to skim: bookkeeping that builds the $T$-step schedules of §1 and §9b and checks the $T{=}1000$ one against `dmtools`; the rule to remember is the first gotcha above: to use fewer steps, subsample $\bar\alpha$ of the $T{=}1000$ process, because rescaling $\beta_t$ gives $\beta_t>1$ for small $T$ (printout).*
+
 # %%
 gmm = dm.default_gmm()   # the ground-truth data distribution for most of this notebook
 
@@ -225,6 +228,54 @@ plt.show()
 #   Non-Gaussianity concentrates in the low-density gaps between modes, which few particles visit. That is why $T=50$
 #   does far better than $T=10$ in §9b, even though both kernels look bad at this point.
 #
+# The map below shows the last point: it repeats the KL computation at every $x_t$ of a grid, for the same step as above.
+
+# %%
+from matplotlib.colors import LogNorm
+from matplotlib.lines import Line2D
+
+viz_n = 13 if FAST else 35                                       # x_t grid of the map (one exact kernel per point)
+viz_n_typ = 60 if FAST else 300                                  # typical x_t ~ q_t for the share in the titles
+viz_g = torch.linspace(-2.7, 2.7, viz_n, dtype=torch.float64)
+viz_X, viz_Y = torch.meshgrid(viz_g, viz_g, indexing="xy")
+viz_pts = torch.stack([viz_X.flatten(), viz_Y.flatten()], 1)
+viz_gd = torch.linspace(-2.7, 2.7, 150, dtype=torch.float64)      # a finer grid for the density of x_t
+viz_GX, viz_GY = torch.meshgrid(viz_gd, viz_gd, indexing="xy")
+viz_fig, viz_axes = plt.subplots(1, 2, figsize=(9.4, 4.0))
+for viz_ax, viz_T in zip(viz_axes, (50, 10)):
+    viz_s = make_schedule(viz_T)
+    viz_t = round(tau * viz_T) - 1                                # the step that ends at time tau, as above
+    viz_kl = torch.tensor([true_reverse_kernel(viz_s, viz_t, p, n_grid=61)["kl"] for p in viz_pts]).view(viz_n, viz_n)
+    viz_qt = gmm.noised(float(viz_s.alpha_bars[viz_t]))           # the density of x_t
+    viz_x_typ = viz_qt.sample(viz_n_typ, generator=torch.Generator().manual_seed(2))
+    viz_kl_typ = np.array([true_reverse_kernel(viz_s, viz_t, x.double(), n_grid=61)["kl"] for x in viz_x_typ])
+    viz_cs = viz_ax.contourf(viz_X, viz_Y, viz_kl.clamp(1.01e-3, 2.99), levels=[1e-3, 3e-3, 1e-2, 3e-2, 0.1, 0.3, 1, 3],
+                             norm=LogNorm(1e-3, 3), cmap="magma")
+    # cyan lines: the smallest regions that hold 90% and 50% of the probability mass of x_t
+    viz_dens = torch.logsumexp(viz_qt.component_log_probs(torch.stack([viz_GX.flatten(), viz_GY.flatten()], 1)), 1).exp()
+    viz_sorted = viz_dens.sort(descending=True).values
+    viz_mass = viz_sorted.cumsum(0) / viz_sorted.sum()
+    viz_levels = [viz_sorted[(viz_mass < m).sum()].item() for m in (0.9, 0.5)]
+    viz_ax.contour(viz_GX, viz_GY, viz_dens.view(150, 150), levels=viz_levels, colors="cyan", linewidths=(0.8, 1.6))
+    viz_ax.plot(0, 0, "+", color=C["oracle"], ms=11, mew=2.2)
+    viz_ax.set(aspect="equal", xlabel="$x_t$, coordinate 1", ylabel="$x_t$, coordinate 2",
+               title=f"T={viz_T}: one step, $\\beta$={viz_s.betas[viz_t].item():.3f}\n"
+                     f"KL > 0.1 nats at {100 * (viz_kl_typ > 0.1).mean():.0f}% of {viz_n_typ} typical $x_t$")
+viz_fig.colorbar(viz_cs, ax=viz_axes, fraction=0.04, label="KL(true step ‖ best Gaussian), nats")
+viz_fig.legend(handles=[Line2D([], [], color="cyan", lw=1.6, label="50% of all $x_t$ lie inside"),
+                        Line2D([], [], color="cyan", lw=0.8, label="90% of all $x_t$ lie inside"),
+                        Line2D([], [], color=C["oracle"], marker="+", ls="", ms=10, mew=2, label="$x_t$ = (0, 0), as above")],
+               loc="lower center", ncol=3, bbox_to_anchor=(0.45, -0.08))
+plt.suptitle("The true reverse step is non-Gaussian mainly in the low-density gaps for T = 50, "
+             "but at most typical $x_t$ for T = 10", y=1.02)
+plt.show()
+
+# %% [markdown]
+# Dark means a Gaussian fits the true step, bright means it does not. For $T=50$ the step is essentially Gaussian
+# wherever $x_t$ is likely (dark inside the thick cyan lines), and the non-Gaussian bands run through the gaps between
+# blobs, peaking around the centre, the point of the figure above. For $T=10$ the bright colours (KL above 0.1 nats)
+# cover most of the region where $x_t$ lies, and most typical $x_t$ (titles): this is the failure of $T=10$ in §9b.
+#
 # ## 2 · The training objective: from the ELBO to "predict the noise"
 #
 # We fit $p_\theta$ by maximum likelihood. As in any latent-variable model (VAEs, or the Bayesian observers you know), the
@@ -266,6 +317,9 @@ plt.show()
 # - Crucially, the weighting does **not** change the optimum. For each $t$ separately, the minimiser of the squared error is the
 #   posterior mean $\epsilon^*(x_t,t)=\mathbb E[\epsilon\mid x_t]$. The network is an amortised Bayesian observer that infers the
 #   noise from a noisy observation. A weighting only decides where an imperfect network spends its capacity.
+
+# %% [markdown]
+# *Side note — safe to skim: a float64 check that steps 2–3 above are right (the $\epsilon$-form of $\tilde\mu_t$, and KL $=\lambda_t\|\epsilon-\epsilon_\theta\|^2$); nothing new to remember.*
 
 # %%
 # Check steps 2-3 numerically (float64 on CPU) with random data, timesteps and a deliberately wrong noise prediction.
@@ -683,6 +737,58 @@ print(f"average over t: model {err_main.mean():.4f}, oracle {err_oracle.mean():.
 # $\epsilon^*(x_t,t)$ has the finest structure (the edges of the blobs). Elsewhere it is essentially zero. Small negative
 # values are Monte-Carlo noise: both are scored on the same finite sample at each $t$.
 #
+# **The floor, seen directly.** Below, one clean point $x_0$ and one noise draw $\epsilon$ are observed at four noise
+# levels: small $t$, the dip, the bump and large $t$. For each $x_t$ we plot every noise that could have produced it:
+# the exact posterior $p(\epsilon\mid x_t)$, which our mixture gives in closed form.
+
+# %%
+viz_x0 = torch.tensor([1.25, 0.1], dtype=torch.float64)        # a clean point in the right-hand inner blob
+viz_eps = torch.tensor([-0.98, 0.83], dtype=torch.float64)     # the noise that was actually added
+viz_ts = [0, 61, 163, 510]                                     # small t, the dip, the bump, large t (all in ts_eval)
+viz_prec0 = torch.linalg.inv(gmm.covs)                         # blob precisions, (K, 2, 2)
+viz_gen = torch.Generator().manual_seed(11)
+viz_fig, viz_axes = plt.subplots(1, 5, figsize=(14, 3.2), gridspec_kw={"width_ratios": [1.5, 1, 1, 1, 1]})
+viz_axes[0].plot(ts_eval, err_oracle, "--", color=C["oracle"])
+for viz_ax, viz_t, viz_off in zip(viz_axes[1:], viz_ts, ((6, -4), (6, -11), (-8, 7), (4, 7))):
+    viz_ab = sched.alpha_bars.cpu().double()[viz_t]
+    viz_a, viz_b = viz_ab.sqrt(), (1 - viz_ab).sqrt()
+    viz_xt = viz_a * viz_x0 + viz_b * viz_eps
+    # Exact posterior of x0 given x_t: within each blob a Gaussian (conjugate update), blobs weighted by p(blob | x_t).
+    viz_r = torch.softmax(gmm.noised(float(viz_ab)).component_log_probs(viz_xt[None]), 1)[0]          # (K,)
+    viz_S = torch.linalg.inv(viz_prec0 + (viz_a / viz_b) ** 2 * torch.eye(2, dtype=torch.float64))     # (K, 2, 2)
+    viz_m = (viz_S @ (viz_prec0 @ gmm.means[..., None] + (viz_a / viz_b ** 2) * viz_xt[:, None]))[..., 0]
+    viz_k = torch.multinomial(viz_r, 1000, replacement=True, generator=viz_gen)
+    viz_z = torch.randn(1000, 2, 1, generator=viz_gen, dtype=torch.float64)
+    viz_eps_s = (viz_xt - viz_a * (viz_m[viz_k] + (torch.linalg.cholesky(viz_S)[viz_k] @ viz_z)[..., 0])) / viz_b
+    viz_m0 = (viz_r[:, None] * viz_m).sum(0)                                                           # E[x0 | x_t]
+    viz_cov0 = (viz_r[:, None, None] * (viz_S + viz_m[:, :, None] * viz_m[:, None, :])).sum(0) - torch.outer(viz_m0, viz_m0)
+    viz_mean = (viz_xt - viz_a * viz_m0) / viz_b                                                       # E[eps | x_t]
+    viz_var = ((viz_a / viz_b) ** 2 * viz_cov0.trace() / 2).item()                                    # per coordinate
+    viz_orc = oracle(viz_xt[None].float().to(device), torch.full((1,), viz_t, device=device))[0].cpu()
+    assert torch.allclose(viz_mean.float(), viz_orc, atol=1e-3)     # the posterior mean is the oracle's output
+    viz_ax.scatter(viz_eps_s[:, 0], viz_eps_s[:, 1], s=3, alpha=0.4, c=plt.cm.tab10(viz_k.numpy() % 10), linewidths=0)
+    viz_ax.plot(*viz_eps, "*", color="k", ms=12, mec="w", mew=0.8, label=r"true $\epsilon$ (the same in every panel)")
+    viz_ax.plot(*viz_mean, "x", color=C["oracle"], ms=10, mew=2.2, label=r"best guess $\mathbb{E}[\epsilon\mid x_t]$ (oracle)")
+    viz_ax.set(xlim=(-3, 3), ylim=(-3, 3), aspect="equal", xticks=[-2, 0, 2], yticks=[-2, 0, 2], xlabel=r"$\epsilon_1$",
+               title=f"t = {viz_t}: Var[$\\epsilon\\mid x_t$] = {viz_var:.2f}")
+    viz_y = np.interp(viz_t, ts_eval, err_oracle)
+    viz_axes[0].plot(viz_t, viz_y, "ko", ms=5)
+    viz_axes[0].annotate(f"t={viz_t}", (viz_t, viz_y), xytext=viz_off, textcoords="offset points", fontsize=8)
+viz_axes[0].set(xlabel="t", ylabel=r"$\epsilon$-MSE (per coordinate)", title="Bayes floor vs t (average over $x_t$)")
+viz_axes[1].set_ylabel(r"$\epsilon_2$")
+viz_axes[4].legend(loc="lower right", fontsize=7)
+plt.suptitle(r"Why the loss cannot reach 0: given only $x_t$, many noises $\epsilon$ are possible "
+             r"(exact posterior; colour: the blob $x_0$ came from)", y=1.04)
+plt.tight_layout()
+plt.show()
+
+# %% [markdown]
+# No network can beat the cloud's mean (red ×, the oracle's output), so the loss floor at each $x_t$ is the cloud's
+# spread (titles, per coordinate). At $t=0$ the cloud is the whole unit-variance prior; at $t=61$ it is one compact clump,
+# because $x_t$ pins down its blob; at $t=163$ it splits into one clump per blob that $x_t$ could have come from, with the
+# best guess stranded between them (this $x_t$ was picked to be ambiguous, so it sits above the average curve); at
+# $t=510$, where $x_t\approx\epsilon$, it has shrunk to a miniature copy of the data.
+#
 # ## 6 · Sampling: ancestral sampling, written out
 #
 # Algorithm 2 of Ho et al. starts from $x_T\sim\mathcal N(0,I)$ and applies the learned reverse step $T$ times:
@@ -914,6 +1020,45 @@ plt.tight_layout()
 plt.show()
 
 # %% [markdown]
+# The same table as a picture. Read every dot against the grey band, which shows how much each metric varies between
+# independent samples of real data: by MMD or SW, a model inside the band is as close to the data as another data sample.
+
+# %%
+viz_rows = [("fitted Gaussian", C["gauss"]), ("oracle denoiser", C["oracle"]), ("DDPM (EMA weights)", C["eps"])]
+viz_fig, viz_axes = plt.subplots(1, 3, figsize=(12, 2.6), sharey=True)
+for viz_ax, (viz_key, viz_xlab, viz_ticks) in zip(viz_axes, (
+        ("mmd", "MMD (log scale; lower = closer to the data)", [0.003, 0.01, 0.03, 0.1]),
+        ("sw", "sliced W1 (log scale; lower = closer)", [0.02, 0.05, 0.1, 0.2]),
+        ("logq", "mean log q(x) (higher = more concentrated)", None))):
+    viz_mu, viz_sd = floor[viz_key]
+    viz_ax.axvspan(viz_mu - viz_sd, viz_mu + viz_sd, color="0.85", zorder=0)
+    viz_ax.plot([r[viz_key] for r in floor_runs], [0] * len(floor_runs), "o", color=C["data"], ms=4)
+    for viz_y, (viz_name, viz_c) in enumerate(viz_rows, start=1):
+        viz_ax.plot(results[viz_name][viz_key], viz_y, "o", color=viz_c, ms=8)
+    if viz_ticks:
+        viz_vals = [r[viz_key] for r in floor_runs] + [results[n][viz_key] for n, _ in viz_rows]
+        viz_ticks = [v for v in viz_ticks if min(viz_vals) / 2 <= v <= 2 * max(viz_vals)]   # only ticks near the data
+        viz_ax.set_xscale("log")
+        viz_ax.minorticks_off()
+        viz_ax.set_xticks(viz_ticks)
+        viz_ax.set_xticklabels([f"{v:g}" for v in viz_ticks])
+    else:                                     # mean log q: zoom on the data; mark values off the scale at the edge
+        viz_close = [r[viz_key] for r in floor_runs] + [results[n][viz_key] for n, _ in viz_rows[1:]]
+        viz_lo, viz_hi = min(viz_close) - 0.3, max(viz_close) + 0.3
+        viz_ax.set_xlim(viz_lo, viz_hi)
+        for viz_y, (viz_name, viz_c) in enumerate(viz_rows, start=1):
+            if results[viz_name][viz_key] < viz_lo:
+                viz_ax.plot(viz_lo, viz_y, "<", color=viz_c, ms=9, clip_on=False)
+                viz_ax.annotate(f"{results[viz_name][viz_key]:.1f} (off scale)", (viz_lo, viz_y), xytext=(9, -3),
+                                textcoords="offset points", fontsize=8)
+    viz_ax.set(xlabel=viz_xlab, ylim=(3.6, -0.6))
+viz_axes[0].set(yticks=range(4), yticklabels=["data vs data: 5 draws\n(grey band: mean ± sd)"] + [n for n, _ in viz_rows])
+plt.suptitle("Against the data-vs-data floor, MMD and SW cannot tell the oracle from DDPM; "
+             "the true log-density can", y=1.02)
+plt.tight_layout()
+plt.show()
+
+# %% [markdown]
 # The single Gaussian scores far worse than the floor on every metric. The oracle row sits at, or very near, the floor:
 # with 1000 small steps, the sampler itself costs little. By MMD and SW, the DDPM samples also come close to the
 # floor. The mean log-density sees more, because it uses the true density. Compare the model's value with the data's and
@@ -1138,6 +1283,67 @@ plt.show()
 #   is big, and the true reverse step is much wider than $\beta_t$: this is the $T=50$ and $T=10$ panels of §1 (variances
 #   printed there). With small steps $c_t\to 0$ and the term is negligible. With large steps, no fixed isotropic variance
 #   can be right everywhere.
+#
+# For our mixture both terms are known in closed form ($\mathrm{Cov}[x_0\mid x_t]$ from the per-blob Gaussian posteriors),
+# so the figure below computes the true variance at 2000 typical $x_t$ per step, along the whole chain, as a ratio to $\beta_t$.
+
+# %%
+viz_prec0 = torch.linalg.inv(gmm.covs)                         # blob precisions, (K, 2, 2)
+
+
+def viz_true_reverse_var(s_T, t, x_t):
+    """Exact per-coordinate Var[x_{t-1} | x_t] = beta_tilde_t + c_t^2 tr Cov[x_0 | x_t] / 2 for our GMM; x_t: (n, 2)."""
+    ab = s_T.alpha_bars.cpu().double()[t]
+    a, b2 = ab.sqrt(), 1 - ab
+    r = torch.softmax(gmm.noised(float(ab)).component_log_probs(x_t), 1)                    # p(blob | x_t), (n, K)
+    S = torch.linalg.inv(viz_prec0 + a ** 2 / b2 * torch.eye(2, dtype=torch.float64))      # per-blob Cov[x_0 | x_t, blob]
+    m = (S @ (viz_prec0 @ gmm.means[..., None]))[None, ..., 0] + (a / b2) * torch.einsum("kij,nj->nki", S, x_t)
+    mean = (r[..., None] * m).sum(1)                                                       # E[x_0 | x_t]
+    tr_cov = (r * (torch.einsum("kii->k", S)[None] + (m ** 2).sum(-1))).sum(1) - (mean ** 2).sum(1)
+    c = s_T.posterior_coef_x0.cpu().double()[t]
+    return s_T.posterior_variance.cpu().double()[t] + c ** 2 * tr_cov / 2
+
+
+# the closed form reproduces the grid values that §1 printed at (0, 0)
+for viz_T in (50, 10):
+    viz_s, viz_t = make_schedule(viz_T), round(tau * viz_T) - 1
+    assert abs(viz_true_reverse_var(viz_s, viz_t, x_query[None])[0] - true_reverse_kernel(viz_s, viz_t, x_query)["var"]) < 1e-4
+
+viz_n = 500 if FAST else 2000
+viz_fig, viz_axes = plt.subplots(1, 3, figsize=(12, 3.5), sharey=True)
+for viz_ax, viz_T in zip(viz_axes, step_counts):
+    viz_s = make_schedule(viz_T)
+    viz_beta = viz_s.betas.cpu().double()
+    viz_steps = np.arange(viz_T) if viz_T <= 50 else np.unique(np.r_[np.arange(30), np.arange(0, viz_T, 10), viz_T - 1])
+    viz_q = []
+    for viz_t in viz_steps.tolist():
+        viz_xt = gmm.noised(float(viz_s.alpha_bars[viz_t])).sample(viz_n, generator=torch.Generator().manual_seed(viz_t))
+        viz_v = viz_true_reverse_var(viz_s, viz_t, viz_xt.double()) / viz_beta[viz_t]
+        viz_q.append([viz_v.quantile(0.1).item(), viz_v.quantile(0.9).item(), viz_v.mean().item()])
+    viz_q, viz_tau = np.array(viz_q), (viz_steps + 1) / viz_T
+    viz_ax.fill_between(viz_tau, viz_q[:, 0], viz_q[:, 1], color=C["oracle"], alpha=0.25, lw=0,
+                        label="true variance: 10–90% range over typical $x_t$")
+    viz_ax.plot(viz_tau, viz_q[:, 2], color=C["oracle"], lw=1.5, label="its mean = the best fixed $\\sigma_t^2$")
+    viz_ax.axhline(1.0, color="k", lw=1.2, label=r"$\sigma_t^2=\beta_t$")
+    viz_ax.plot(viz_tau[1:], (viz_s.posterior_variance.cpu().double() / viz_beta).numpy()[viz_steps[1:]], "k--", lw=1.2,
+                label=r"$\sigma_t^2=\tilde\beta_t$")
+    viz_t = round(tau * viz_T) - 1                                # §1's step, at its ambiguous point (0, 0)
+    viz_ax.plot((viz_t + 1) / viz_T, viz_true_reverse_var(viz_s, viz_t, x_query[None])[0].item() / viz_beta[viz_t].item(),
+                "+", color=C["oracle"], ms=11, mew=2.2, label="true variance at $x_t$ = (0, 0), the point of §1")
+    viz_ax.set(yscale="log", xlim=(0, 1), xlabel="continuous time (t+1)/T  (data at 0)", title=f"T = {viz_T}")
+viz_axes[0].set_ylabel(r"reverse-step variance per coord. / $\beta_t$")
+viz_axes[2].legend(fontsize=7, loc="lower right")
+plt.suptitle("With large steps the true reverse variance depends on $x_t$, so no fixed $\\sigma_t^2$ fits everywhere; "
+             "with T = 1000 one value fits all $x_t$", y=1.02)
+plt.tight_layout()
+plt.show()
+
+# %% [markdown]
+# For $T=10$ and $T=50$ the band is wide near the data end: unambiguous $x_t$ need less than $\beta_t$, ambiguous ones
+# more (the red + of §1's point sits at about 5 and 2.4 times $\beta_t$), so no fixed $\sigma_t^2$ fits every $x_t$. The
+# average over $x_t$ (solid red), which is the best fixed choice, lies roughly between $\tilde\beta_t$ and $\beta_t$. For
+# $T=1000$ the band has collapsed onto $\beta_t$ (within about 1%), so one variance fits every $x_t$; the dashed
+# $\tilde\beta_t$ departs from it visibly only over the first couple of percent of the chain, where both are below $10^{-3}$.
 #
 # Swapping the variance is free: no retraining, just a sampler argument.
 

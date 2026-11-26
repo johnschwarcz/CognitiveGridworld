@@ -207,7 +207,63 @@ for t in [0, 30, 60, 100, 200]:
 # %% [markdown]
 # Accuracy falls from near-perfect towards chance ($1/3$) as noise grows, and the reported confidence falls
 # *with* it: the ECE stays at the Monte Carlo noise level. This is what we will ask of a guidance classifier. It
-# should be uncertain exactly when the evidence is weak. Here is what that classifier looks like.
+# should be uncertain exactly when the evidence is weak.
+#
+# Below, the same check on a finer grid of noise levels, with a contrast: the *clean* classifier $p(y\mid x)$
+# evaluated directly at the noisy $x_t$, as an ordinary classifier would be. Left: both lose accuracy as the noise
+# grows, but only the noise-aware classifier lowers its confidence to match (its two curves coincide), while the
+# clean one stays about 95% sure (shaded: over-confidence). Right: at $t=60$, grouped by the confidence they
+# report, the noise-aware classifier lies on the diagonal and the clean one far below it, which is why guidance
+# needs $p_t(y\mid x_t)$ (Exercise 3 tries the clean one).
+
+# %%
+# The calibration check as a picture, plus the clean classifier p(y | x) applied directly to the noisy x_t
+viz_gen = torch.Generator().manual_seed(101)
+viz_ts = [0, 10, 20, 30, 45, 60, 80, 100, 130, 160, 200, 249]
+viz_sig = np.array([math.sqrt(1 - abar_at(viz_t)) for viz_t in viz_ts])
+viz_names = ["noise-aware $p_t(y\\mid x_t)$", "clean $p(y\\mid x)$ applied to $x_t$"]
+viz_colors = ["0.15", "tab:red"]
+viz_curves = {viz_n: [] for viz_n in viz_names}       # (accuracy, mean confidence) at each t
+viz_rel = {}                                          # reliability diagram at t = 60: (bin confidence, bin accuracy)
+viz_min_count = max(20, len(x0_cal) // 200)           # leave out nearly empty confidence bins
+for viz_t in viz_ts:
+    viz_ab = abar_at(viz_t)
+    viz_xt = math.sqrt(viz_ab) * x0_cal.double() + math.sqrt(1 - viz_ab) * torch.randn(
+        x0_cal.shape, generator=viz_gen, dtype=torch.float64)
+    for viz_n, viz_abar in zip(viz_names, [viz_ab, None]):          # abar=None: the clean classifier
+        viz_conf, viz_pred = noisy_classifier_logprobs(viz_xt, viz_abar).exp().max(dim=1)
+        viz_ok = (viz_pred == y_cal).double()
+        viz_curves[viz_n].append((viz_ok.mean().item(), viz_conf.mean().item()))
+        if viz_t == 60:
+            viz_bin = torch.clamp((viz_conf * 10).long(), max=9)
+            viz_rel[viz_n] = np.array([(viz_conf[viz_bin == b].mean().item(), viz_ok[viz_bin == b].mean().item())
+                                       for b in range(10) if (viz_bin == b).sum() >= viz_min_count])
+
+viz_fig, viz_axes = plt.subplots(1, 2, figsize=(11, 3.8), gridspec_kw=dict(width_ratios=[1.5, 1]))
+for viz_n, viz_c in zip(viz_names, viz_colors):
+    viz_acc, viz_mc = np.array(viz_curves[viz_n]).T
+    viz_axes[0].plot(viz_sig, viz_acc, "o-", color=viz_c, ms=4)
+    viz_axes[0].plot(viz_sig, viz_mc, "s--", color=viz_c, ms=4, mfc="none")
+    viz_axes[1].plot(viz_rel[viz_n][:, 0], viz_rel[viz_n][:, 1], "o-", color=viz_c, ms=4, label=viz_n)
+viz_acc, viz_mc = np.array(viz_curves[viz_names[1]]).T                    # shade the clean classifier's gap
+viz_axes[0].fill_between(viz_sig, viz_acc, viz_mc, color="tab:red", alpha=0.12, lw=0)
+viz_axes[0].axhline(1 / 3, color="0.5", ls=":", lw=1)
+viz_axes[0].legend(handles=[plt.Line2D([], [], color=viz_c, lw=2, label=viz_n) for viz_n, viz_c in zip(viz_names, viz_colors)]
+                   + [plt.Line2D([], [], color="0.5", marker="o", label="accuracy"),
+                      plt.Line2D([], [], color="0.5", marker="s", mfc="none", ls="--", label="mean confidence"),
+                      Patch(color="tab:red", alpha=0.12, label="over-confidence"),
+                      plt.Line2D([], [], color="0.5", ls=":", lw=1, label="chance (1/3)")], loc="lower left")
+viz_axes[0].set(xlabel="noise level $\\sigma_t=\\sqrt{1-\\bar\\alpha_t}$", ylabel="accuracy, mean confidence",
+                ylim=(0.25, 1.02), title="As noise grows, only the noise-aware classifier lowers its confidence")
+viz_axes[1].plot([1 / 3, 1], [1 / 3, 1], color="0.5", ls=":", lw=1, label="perfect calibration")
+viz_axes[1].set(xlabel="reported confidence (bin average)", ylabel="accuracy within the bin", xlim=(0.3, 1.01),
+                ylim=(0.3, 1.01), aspect="equal", title="At t = 60: calibrated vs over-confident")
+viz_axes[1].legend(loc="upper left", fontsize=7)
+plt.tight_layout()
+plt.show()
+
+# %% [markdown]
+# Here is what the noise-aware classifier looks like.
 # The colour at each point mixes the three class colours with weights $p_t(y=c\mid x)$.
 
 # %%
@@ -530,6 +586,52 @@ plt.show()
 #   upper one at $(2.0, 1.2)$, class 0's top one at $(-1.0, 2.0)$. Most of the diversity loss comes from this
 #   re-weighting.
 #
+# Below, the component shares from the table as curves, with two more guidance scales ($w=2$ and $5$, same seed);
+# the key on the left shows where each component sits. In every class one component loses samples steadily as $w$
+# grows, mostly to a neighbour further from the other classes, while the shares of the exact target (dashed) stay
+# close to equal.
+
+# %%
+# Component shares against w: the guided sampler (seed 10 as above, plus w = 2 and 5) vs the exact target p_w
+viz_ws = [1.0, 2.0, 3.0, 5.0, 10.0]
+viz_guided = {viz_w: cg_samples[viz_w] if viz_w in cg_samples else
+              sample_2d(ClassifierGuidedEps(viz_w), labels_2d, seed=10) for viz_w in viz_ws}
+viz_share_guided = {c: np.array([component_occupancy(viz_guided[w][labels_2d == c], c).numpy() for w in viz_ws])
+                    for c in range(N_CLASSES)}                  # rows: w, columns: the components of class c
+viz_share_exact = {c: np.array([grid_occupancy(*(pw_grids[(w, c)] if (w, c) in pw_grids
+                                                 else tilted_density_grid(c, w))[:2], c).numpy() for w in viz_ws])
+                   for c in range(N_CLASSES)}
+viz_markers = ["o", "s", "^"]
+viz_fig, viz_axes = plt.subplots(1, 4, figsize=(14, 3.4), gridspec_kw=dict(width_ratios=[0.85, 1, 1, 1]))
+viz_axes[0].imshow(clean_rgb, extent=[-LIM, LIM, -LIM, LIM], origin="lower", alpha=0.25)
+for viz_c in range(N_CLASSES):
+    for viz_k, viz_m in enumerate(class_gmms[viz_c].means.numpy()):
+        viz_axes[0].plot(*viz_m, viz_markers[viz_k], color=CLASS_COLORS[viz_c], ms=8, mec="k", mew=0.6)
+viz_axes[0].set(xlim=(-LIM, LIM), ylim=(-LIM, LIM), aspect="equal", xticks=[], yticks=[],
+                title="key: component means")
+for viz_c in range(N_CLASSES):
+    viz_ax = viz_axes[viz_c + 1]
+    viz_ax.axhline(1 / class_gmms[viz_c].K, color="0.5", ls=":", lw=1)
+    for viz_k, viz_m in enumerate(class_gmms[viz_c].means.numpy()):
+        viz_ax.plot(viz_ws, viz_share_exact[viz_c][:, viz_k], "--", color="0.55", lw=1, marker=viz_markers[viz_k],
+                    ms=4, mfc="none")
+        viz_ax.plot(viz_ws, viz_share_guided[viz_c][:, viz_k], "-", color=CLASS_COLORS[viz_c], lw=1.8,
+                    marker=viz_markers[viz_k], ms=5, mec="k", mew=0.5)
+        viz_ax.annotate(f"({viz_m[0]:.1f}, {viz_m[1]:.1f})", (viz_ws[-1], viz_share_guided[viz_c][-1, viz_k]),
+                        xytext=(6, 0), textcoords="offset points", va="center", fontsize=7, color=CLASS_COLORS[viz_c])
+    viz_ax.set(xlabel="guidance scale w", xticks=viz_ws, xlim=(0.4, 13.8), ylim=(0, 0.78),
+               title=f"class {viz_c}: share of each component")
+viz_axes[1].set_ylabel("fraction of the class's samples")
+viz_axes[1].legend(handles=[plt.Line2D([], [], color="0.2", marker="o", lw=1.8, label="guided sampler (DDPM)"),
+                            plt.Line2D([], [], color="0.55", marker="o", mfc="none", ls="--", lw=1,
+                                       label="exact target $p_w$"),
+                            plt.Line2D([], [], color="0.5", ls=":", lw=1, label="equal shares, as in $p(x\\mid y)$")],
+                   loc="upper left", fontsize=7)
+plt.suptitle("Guidance re-weights each class's components; the exact target $p_w$ barely does", y=1.0)
+plt.tight_layout()
+plt.show()
+
+# %% [markdown]
 # So the re-weighting is not in the target. The guided *dynamics* produce it, even though every score and every
 # classifier probability here is exact. At intermediate noise the noisy classifier is uncertain over whole blobs,
 # and $w$ times its gradient pushes trajectories away from the other classes *before* they commit to a component.
@@ -558,6 +660,9 @@ plt.show()
 # hardware utilisation.
 #
 # First, with exact scores, classifier guidance and CFG are the *same* thing:
+
+# %% [markdown]
+# *Side note — safe to skim: checks numerically that exact CFG equals exact classifier guidance (it also creates `exact`, the exact denoiser used below); the rule to remember: with perfect networks the two methods are identical.*
 
 # %%
 exact = ExactDenoiser()
@@ -664,6 +769,54 @@ with torch.no_grad():
 # error of the difference is much larger than that of either term, and guidance multiplies exactly this error by
 # $w$. **Model errors are amplified by the guidance scale.**
 #
+# Below, the same comparison on a finer grid of noise levels (with fresh noise, so the numbers differ a little from
+# the table), and what guidance makes of it. Left: at every noise level the implicit classifier $\epsilon_c-\epsilon_u$
+# is learned far less accurately, relative to its size, than either prediction. Right: the error of what the sampler
+# actually uses, $\tilde\epsilon=\epsilon_u+w(\epsilon_c-\epsilon_u)$, is smallest near $w=1$ and grows steeply with
+# $w$; at the smaller noise levels it soon exceeds the size of the prediction itself (dashed line).
+
+# %%
+# The error table on a finer grid of noise levels (fresh noise), and the error of the guided prediction against w
+viz_gen = torch.Generator().manual_seed(103)
+viz_ts = [2, 5, 10, 20, 30, 45, 60, 80, 110, 150, 200]
+viz_ws = np.linspace(0.0, 10.0, 41)
+viz_names = ["$\\epsilon_c$ (conditional)", "$\\epsilon_u$ (unconditional)",
+             "$\\epsilon_c-\\epsilon_u$ (implicit classifier)"]
+viz_err = {viz_n: [] for viz_n in viz_names}
+viz_amp = {}                          # t -> E||guided error||^2 / E||exact eps_c||^2 for each w in viz_ws
+with torch.no_grad():
+    for viz_t in viz_ts:
+        viz_tv = torch.full((len(x_ev),), viz_t, device=device)
+        viz_xt = sched2d.q_sample(x_ev, viz_tv, torch.randn(x_ev.shape, generator=viz_gen).to(device))
+        viz_lc, viz_lu = cfg_mlp_ema(viz_xt, viz_tv, y_ev), cfg_mlp_ema(viz_xt, viz_tv, null_ev)     # learned
+        viz_ec, viz_eu = exact(viz_xt, viz_tv, y_ev), exact(viz_xt, viz_tv, null_ev)               # exact
+        for viz_n, (viz_a, viz_b) in zip(viz_names, [(viz_lc, viz_ec), (viz_lu, viz_eu),
+                                                     (viz_lc - viz_lu, viz_ec - viz_eu)]):
+            viz_err[viz_n].append(rel_err(viz_a, viz_b))
+        if viz_t in (5, 30, 80):
+            # guided error = (eps_u error) + w (eps_c error - eps_u error)
+            viz_dc, viz_du = (viz_lc - viz_ec).cpu().double(), (viz_lu - viz_eu).cpu().double()
+            viz_scale = viz_ec.cpu().double().pow(2).sum(1).mean()
+            viz_amp[viz_t] = np.array([((viz_du + w * (viz_dc - viz_du)).pow(2).sum(1).mean() / viz_scale).item()
+                                       for w in viz_ws])
+
+viz_fig, viz_axes = plt.subplots(1, 2, figsize=(11, 3.8))
+for viz_n, viz_c in zip(viz_names, ["0.15", "0.6", "tab:red"]):
+    viz_axes[0].semilogy(viz_ts, viz_err[viz_n], "o-", ms=4, color=viz_c, label=viz_n)
+viz_axes[0].set(xlabel="t (larger = noisier)", title="The implicit classifier is the worst-learned quantity",
+                ylabel="relative error  $E\\|$learned$-$exact$\\|^2\\,/\\,E\\|$exact$\\|^2$")
+viz_axes[0].legend()
+for (viz_t, viz_a), viz_c in zip(viz_amp.items(), ["tab:olive", "tab:purple", "tab:cyan"]):
+    viz_axes[1].semilogy(viz_ws, viz_a, "-", color=viz_c, lw=1.8, label=f"t = {viz_t}")
+viz_axes[1].axhline(1.0, color="0.5", ls="--", lw=1, label="error as large as $\\epsilon_c$ itself")
+viz_axes[1].axvline(1.0, color="0.5", ls=":", lw=1, label="w = 1: no guidance")
+viz_axes[1].set(xlabel="guidance scale w", title="... and the guidance scale multiplies its error",
+                ylabel="error of the guided $\\tilde\\epsilon$, rel. to $E\\|\\epsilon_c\\|^2$")
+viz_axes[1].legend(loc="lower right")
+plt.tight_layout()
+plt.show()
+
+# %% [markdown]
 # Now we sample with the learned CFG model, using the **same** $x_T$ and sampler noise (seed) as the exact
 # classifier-guidance samples of Section 2. Exact CFG *is* exact classifier guidance (checked above), so those
 # samples serve as the exact reference, and in the figure the difference between rows is model error only.
@@ -733,6 +886,66 @@ plt.show()
 # 2. the stochastic sampler (DDPM, the reverse SDE) and the deterministic one (DDIM, the probability-flow ODE),
 #    which agree whenever the field is a genuine score family (notebook 04), now **disagree**.
 #
+# First the cause, as a picture, for class 0 at $w=6$ (the case examined below): in blue the density whose score
+# guidance follows at noise level $t$, $\propto q_t(x)^{1-w}q_t(x\mid y)^w$, in red the noised target $q^w_t$ that a
+# sampler of $p_w$ would have to follow. The two coincide at low noise and again at the end of the forward process.
+# In between, the blue density stays out at the far left (away from the other classes, which lie to the right)
+# while the red one moves in towards the centre with the shrinking signal; around $t=80$–$130$ their centres are
+# about one noise standard deviation apart.
+
+# %%
+# Tilt then noise (the target q^w_t) vs noise then tilt (what guidance follows), on a grid: class 0, w = 6
+viz_y, viz_w = 0, 6.0
+viz_ts = [8, 40, 80, 130, 249]
+viz_pts, viz_probs, viz_h = tilted_density_grid(viz_y, viz_w, n=100)    # p_w tabulated on 100 x 100 cells
+viz_keep = viz_probs > viz_probs.max() * 1e-12                           # drop cells with negligible mass
+viz_cells, viz_logm = viz_pts[viz_keep], viz_probs[viz_keep].log()
+viz_gx = torch.linspace(-4.5, 3.0, 90, dtype=torch.float64)
+viz_gy = torch.linspace(-3.0, 4.5, 90, dtype=torch.float64)
+viz_grid = torch.stack([a.flatten() for a in torch.meshgrid(viz_gx, viz_gy, indexing="xy")], 1)
+
+
+def viz_noised_target_logq(x, abar, chunk=2048):
+    """log sum_j m_j N(x; sqrt(abar) g_j, (1 - abar) I): the tabulated p_w pushed through the forward process."""
+    out = []
+    for i in range(0, len(x), chunk):
+        d2 = torch.cdist(x[i:i + chunk], math.sqrt(abar) * viz_cells).pow(2)
+        out.append(torch.logsumexp(viz_logm[None] - d2 / (2 * (1 - abar)), dim=1))
+    return torch.cat(out)
+
+
+def viz_hdr(p, masses=(0.9, 0.5)):
+    """Density thresholds of the highest-density regions that hold the given masses (ascending)."""
+    s = np.sort(p)[::-1]
+    return sorted(s[np.searchsorted(np.cumsum(s), m)] for m in masses)
+
+
+viz_fig, viz_axes = plt.subplots(1, len(viz_ts), figsize=(14, 3.2))
+for viz_ax, viz_t in zip(viz_axes, viz_ts):
+    viz_ab = abar_at(viz_t)
+    viz_full, viz_per_class = noised_mixtures(viz_ab)
+    viz_log_g = ((1 - viz_w) * torch.logsumexp(viz_full.component_log_probs(viz_grid), 1)
+                 + viz_w * torch.logsumexp(viz_per_class[viz_y].component_log_probs(viz_grid), 1))
+    viz_pg = torch.softmax(viz_log_g, 0).reshape(len(viz_gy), len(viz_gx)).numpy()
+    viz_pq = torch.softmax(viz_noised_target_logq(viz_grid, viz_ab), 0).reshape(len(viz_gy), len(viz_gx)).numpy()
+    viz_ax.contourf(viz_gx.numpy(), viz_gy.numpy(), viz_pg, levels=viz_hdr(viz_pg.ravel()) + [1.01 * viz_pg.max()],
+                    colors=["#b5d4e9", "#4a90c4"])
+    viz_ax.contour(viz_gx.numpy(), viz_gy.numpy(), viz_pq, levels=viz_hdr(viz_pq.ravel()), colors="tab:red",
+                   linewidths=0.9)
+    viz_mu = math.sqrt(viz_ab) * class_gmms[viz_y].means.numpy()                # the components' centres at time t
+    viz_ax.plot(viz_mu[:, 0], viz_mu[:, 1], "k+", ms=7, mew=1)
+    viz_ax.set(title=f"t = {viz_t}  ($\\sigma_t$ = {math.sqrt(1 - viz_ab):.2f})", xticks=[], yticks=[], aspect="equal")
+viz_fig.legend(handles=[Patch(color="#4a90c4", label="followed by guidance, $\\propto q_t(x)^{1-w}q_t(x\\mid y)^w$: 50% region"),
+                        Patch(color="#b5d4e9", label="... and its 90% region"),
+                        plt.Line2D([], [], color="tab:red", lw=0.9, label="noised target $q^w_t$ (needed for $p_w$): 50% / 90%"),
+                        plt.Line2D([], [], color="k", marker="+", ls="none", label="class-0 component centres at time t")],
+               loc="lower center", ncol=4, bbox_to_anchor=(0.5, -0.07))
+plt.suptitle("Noising does not commute with tilting: the density guidance follows (blue) departs from the noised "
+             f"target (red) at intermediate noise (class {viz_y}, w = {viz_w:g})", y=1.0)
+plt.tight_layout()
+plt.show()
+
+# %% [markdown]
 # We can check both claims exactly, with the tabulated $p_w$ of Section 2. We focus on class 0, where
 # Section 2 showed that $p_w$ hardly differs from $p(x\mid y{=}0)$, and compare DDPM and DDIM.
 
@@ -1191,6 +1404,41 @@ show_idx = torch.cat([show_idx[0::2], show_idx[1::2]])                          
 fig, axes = plt.subplots(len(trick_x), 1, figsize=(7.0, 1.75 * len(trick_x)))
 for ax, name in zip(axes, trick_x):
     dm.show_images(trick_x[name][show_idx].float().cpu(), nrow=10, ax=ax, title=name)
+plt.tight_layout()
+plt.show()
+
+# %% [markdown]
+# The same numbers placed on the plain-CFG curve of 6.1, in the plane of diversity and ink; accuracy is
+# (essentially) 1 at every point except $w=1$, so this compares the configurations at equal fidelity. The arrows
+# start at plain CFG with $w=6$: the interval moves it back along the curve, to between plain $w=2$ and $w=3$,
+# while rescale moves it up, slightly above the curve (the title gives each trick's gap to the curve at the same
+# ink). With only 10 samples per digit, treat gaps of a few hundredths with caution.
+
+# %%
+# The tricks against the plain-CFG curve of 6.1 (numbers from the sweep and the table above; nothing new is sampled)
+viz_ws = [w for w in W_SWEEP if w >= 1]
+viz_ink = np.array([sweep[w]["ink"] for w in viz_ws])
+viz_div = np.array([sweep[w]["div"] for w in viz_ws])
+viz_fig, viz_ax = plt.subplots(figsize=(6.4, 4.3))
+viz_ax.plot(viz_ink, viz_div, "o-", color="0.45", ms=5, label="plain CFG (sweep of 6.1)")
+for viz_wi, viz_xi, viz_yi in zip(viz_ws, viz_ink, viz_div):
+    viz_ax.annotate(f"w = {viz_wi:g}", (viz_xi, viz_yi), xytext=(5, 3), textcoords="offset points", fontsize=7,
+                    color="0.35")
+for viz_name, viz_c, viz_mk in zip(configs, ["tab:green", "tab:orange"], ["*", "D"]):
+    viz_m = trick_m[viz_name]
+    viz_ax.annotate("", xy=(viz_m["ink"], viz_m["div"]), xytext=(sweep[W_TRICK]["ink"], sweep[W_TRICK]["div"]),
+                    arrowprops=dict(arrowstyle="->", color=viz_c, lw=1.3, shrinkA=4, shrinkB=6))
+    viz_ax.plot(viz_m["ink"], viz_m["div"], viz_mk, color=viz_c, ms=13 if viz_mk == "*" else 7, mec="k", mew=0.6,
+                label=viz_name)
+viz_order = np.argsort(viz_ink)                  # diversity of the plain-CFG curve at each trick's ink (interpolated)
+viz_gap = [trick_m[viz_name]["div"] - np.interp(trick_m[viz_name]["ink"], viz_ink[viz_order], viz_div[viz_order])
+           for viz_name in configs]
+viz_ax.set_xlim(right=viz_ink.max() + 0.12)
+viz_ax.set(xlabel="ink relative to real digits (bolder strokes →)", ylabel="within-class diversity, rel. to real",
+           title=f"The tricks against plain CFG (arrows start at plain w = {W_TRICK:g})\ndiversity above the curve at "
+                 "the same ink: " + ", ".join(f"{viz_name.split(', ')[-1]} {viz_g:+.2f}"
+                                              for viz_name, viz_g in zip(configs, viz_gap)))
+viz_ax.legend(loc="upper right")
 plt.tight_layout()
 plt.show()
 

@@ -143,6 +143,38 @@ with torch.no_grad():
               f"max |f(shift x) - shift f(x)| = {err:.1e}   (output scale {scale:.2f})")
 
 # %% [markdown]
+# The same check in pictures. Shift a digit 3 pixels to the right, then compare $f(\text{shift}\,x)$ (layer after
+# the shift) with $\text{shift}\,f(x)$ (shift after the layer). For the convolution the two are the same image, so
+# their difference is 0 everywhere; for the dense layer they are unrelated patterns.
+
+# %%
+viz_k = 3                                    # the same 3-pixel shift as in the check above
+viz_x = img[:1]                              # the first of the test digits used above
+viz_xs = shift_right(viz_x, viz_k)
+with torch.no_grad():
+    viz_rows = [(f"{n}\n({dm.count_params(m):,} params)", f(viz_xs)[0, 0], shift_right(f(viz_x), viz_k)[0, 0])
+                for n, f, m in [("3x3 conv", conv, conv), ("dense layer", apply_dense, dense)]]
+viz_fig = plt.figure(figsize=(7.6, 3.9))
+viz_gs = viz_fig.add_gridspec(2, 5, width_ratios=[1, 0.32, 1, 1, 1], wspace=0.08, hspace=0.25)
+for viz_r, (viz_im, viz_lab) in enumerate([(viz_x, "input $x$"), (viz_xs, f"shift $x$ ({viz_k} px right)")]):
+    viz_ax = viz_fig.add_subplot(viz_gs[viz_r, 0])
+    viz_ax.imshow(viz_im[0, 0], cmap="gray", vmin=-1, vmax=1)
+    viz_ax.set(xticks=[], yticks=[], title=viz_lab)
+for viz_r, (viz_name, viz_a, viz_b) in enumerate(viz_rows):
+    viz_lim = max(viz_a.abs().max().item(), viz_b.abs().max().item())   # one grey scale per layer
+    viz_d = (viz_a - viz_b).abs()
+    for viz_c, (viz_im, viz_lab, viz_cmap) in enumerate([(viz_a, "$f$(shift $x$)", "gray"),
+                                                         (viz_b, "shift $f(x)$", "gray"),
+                                                         (viz_d, f"|difference|, max {viz_d.max():.1f}", "magma")]):
+        viz_ax = viz_fig.add_subplot(viz_gs[viz_r, 2 + viz_c])
+        viz_ax.imshow(viz_im, cmap=viz_cmap, vmin=0 if viz_cmap == "magma" else -viz_lim, vmax=viz_lim)
+        viz_ax.set(xticks=[], yticks=[], title=viz_lab)
+        if viz_c == 0:
+            viz_ax.set_ylabel(viz_name)
+viz_fig.suptitle("A convolution commutes with shifts (difference 0); a dense layer does not", y=1.0)
+plt.show()
+
+# %% [markdown]
 # The convolution is exactly shift-equivariant (up to float rounding) with 10 parameters. The dense layer is not,
 # even with 600k parameters. The real U-Net is only *approximately* equivariant: it uses zero padding (borders
 # break the symmetry) and stride-2 down-sampling, which is equivariant only to shifts by multiples of the total
@@ -255,6 +287,51 @@ with torch.no_grad():
 # BatchNorm, treats every sample independently. We will rely on that last property in section 6, where we
 # evaluate many copies of one image in a single batch.
 #
+# Here is that last check with real diffusion inputs: one noisy digit (sample 0, at $t=100$) normalised once among
+# batch-mates at its own noise level, as at sampling time, and once among batch-mates at $t=50\dots999$, as in a
+# training minibatch. Compare the top two rows: GroupNorm's output is the same in both batches, BatchNorm's loses
+# contrast in the noisy one. (We normalise the 1-channel image itself; inside the network the same happens to every
+# feature map.)
+
+# %%
+viz_ab = dm.NoiseSchedule(T=1000, kind="linear").alpha_bars.double()   # the linear schedule used throughout (CPU)
+viz_eps = torch.randn(img.shape, generator=torch.Generator().manual_seed(11), dtype=torch.float64)
+viz_ts = {"A": torch.full((8,), 100),                                  # sampling: the whole batch shares one t
+          "B": torch.tensor([100, 999, 850, 700, 550, 400, 250, 50])}  # training: a different t per sample
+viz_batch = {}
+for viz_key, viz_t in viz_ts.items():     # x_t = sqrt(abar) x_0 + sqrt(1 - abar) eps; sample 0 is the same in both
+    viz_a = viz_ab[viz_t].view(-1, 1, 1, 1)
+    viz_batch[viz_key] = viz_a.sqrt() * img.double() + (1 - viz_a).sqrt() * viz_eps
+viz_norms = {"GroupNorm": lambda z: F.group_norm(z, 1),                          # each sample's own mean and variance
+             "BatchNorm": lambda z: F.batch_norm(z, None, None, training=True)}  # mean and variance of the batch
+viz_out = {(n, k): f(x)[0, 0] for n, f in viz_norms.items() for k, x in viz_batch.items()}
+
+viz_fig = plt.figure(figsize=(6.6, 6.2))
+viz_gs = viz_fig.add_gridspec(3, 3, width_ratios=[2.1, 1, 1], wspace=0.15, hspace=0.42)
+viz_titles = {"A": "batch A: all at t = 100\n(as when sampling)",
+              "B": "batch B: sample 0 at t = 100, the rest\nat t = 50 … 999 (as in training)"}
+for viz_r, viz_key in enumerate("AB"):
+    viz_ax = viz_fig.add_subplot(viz_gs[viz_r, 0])
+    dm.show_images(viz_batch[viz_key].float(), nrow=4, ax=viz_ax, vmin=-1.5, vmax=1.5)
+    viz_ax.add_patch(plt.Rectangle((1.5, 1.5), 28, 28, fill=False, ec="gold", lw=2))
+    viz_ax.set_title(viz_titles[viz_key])
+    for viz_c, viz_name in enumerate(viz_norms):
+        viz_ax = viz_fig.add_subplot(viz_gs[viz_r, 1 + viz_c])
+        viz_ax.imshow(viz_out[(viz_name, viz_key)], cmap="gray", vmin=-2.5, vmax=2.5)
+        viz_ax.set(xticks=[], yticks=[], title=f"{viz_name}\nsample 0 in batch {viz_key}")
+viz_ax = viz_fig.add_subplot(viz_gs[2, 0])
+viz_ax.text(0.5, 0.5, "Sample 0 (gold box) is the same noisy\ndigit in both batches; only its\nbatch-mates differ.",
+            ha="center", va="center", fontsize=9, transform=viz_ax.transAxes)
+viz_ax.set_axis_off()
+for viz_c, viz_name in enumerate(viz_norms):
+    viz_d = (viz_out[(viz_name, "A")] - viz_out[(viz_name, "B")]).abs()
+    viz_ax = viz_fig.add_subplot(viz_gs[2, 1 + viz_c])
+    viz_ax.imshow(viz_d, cmap="magma", vmin=0, vmax=2.5)
+    viz_ax.set(xticks=[], yticks=[], title=f"{viz_name}\n|A − B|, max {viz_d.max():.2f}")
+viz_fig.suptitle("BatchNorm makes a sample's output depend on its batch-mates; GroupNorm does not")
+plt.show()
+
+# %% [markdown]
 # ### 2.2 Self-attention at low resolution
 #
 # Treat the $N=HW$ positions of a feature map as tokens $h_i\in\mathbb{R}^C$. With per-head queries, keys and values
@@ -310,6 +387,34 @@ for hw in (28, 14, 7):
     print(f"attention matrix at {hw:2d}x{hw:<2d}: {(hw * hw) ** 2:>7,d} entries per head and image")
 
 # %% [markdown]
+# The receptive-field numbers as maps: the share of the influence on the output at the centre (+) that comes from
+# each input position. The conv's map is exactly zero (grey) outside its 3×3 box; attention reaches every position.
+# (The bright centre of the attention map is mostly the block's residual connection, $x+\dots$.)
+
+# %%
+from matplotlib.colors import LogNorm
+
+viz_w = torch.randn(64, 64, 3, 3, generator=torch.Generator().manual_seed(12)) / math.sqrt(64 * 9)  # a random 3x3 conv
+viz_box = torch.zeros(7, 7, dtype=torch.bool)
+viz_box[2:5, 2:5] = True                                     # the 3x3 neighbourhood of the centre (3, 3)
+viz_fig, viz_axes = plt.subplots(1, 2, figsize=(7.0, 3.3), layout="constrained")
+for viz_ax, (viz_name, viz_layer) in zip(viz_axes, [("3x3 conv", lambda z: F.conv2d(z, viz_w, padding=1)),
+                                                    ("self-attention", attn_block)]):
+    viz_g, = torch.autograd.grad(viz_layer(feat)[0, :, 3, 3].sum(), feat)   # as in the cell above
+    viz_share = viz_g[0].abs().sum(0).double()
+    viz_share = viz_share / viz_share.sum()                   # share of the influence on output (3, 3)
+    viz_im = viz_ax.imshow(np.ma.masked_equal(viz_share.numpy(), 0), norm=LogNorm(1e-3, 1),
+                           cmap=plt.get_cmap("viridis").with_extremes(bad="0.85"))
+    viz_ax.add_patch(plt.Rectangle((1.5, 1.5), 3, 3, fill=False, ec="w", lw=1.5, ls="--"))
+    viz_ax.plot(3, 3, "+", color="gold", ms=10, mew=2)
+    viz_ax.set(xticks=[], yticks=[], title=f"{viz_name}: {(viz_share > 0).sum().item()} of 49 positions,\n"
+                                           f"{viz_share[~viz_box].sum().item():.0%} of the influence outside the box")
+viz_fig.colorbar(viz_im, ax=viz_axes, shrink=0.9,
+                 label="share of the influence on the output at +\n(log scale; grey = exactly 0)")
+viz_fig.suptitle("One layer on the 7×7 map: a conv sees its 3×3 box (dashed), attention sees every position")
+plt.show()
+
+# %% [markdown]
 # Our explicit softmax attention agrees with PyTorch's fused kernel. A 3×3 conv sees 9 positions. One attention
 # layer is influenced by all 49 positions of the 7×7 map, and about a fifth of that influence comes from outside
 # the 3×3 neighbourhood. (Strictly, GroupNorm alone already couples
@@ -328,6 +433,9 @@ for hw in (28, 14, 7):
 #   for the skip concatenations. The image size must therefore be divisible by $2^{\text{levels}-1}$: 28 → 14 → 7
 #   works for 3 levels, and 30 → 15 → 8 does not (8 up-samples to 16 ≠ 15). Neither would a 4th level for 28
 #   (7 → 4 → 8 ≠ 7).
+
+# %% [markdown]
+# *Side note — safe to skim: checks which image sizes come back to the encoder's sizes after down- and up-sampling; rule: the image side must be divisible by $2^{\text{levels}-1}$ (28 is, for 3 levels; 30 is not).*
 
 # %%
 down = nn.Conv2d(32, 32, 3, stride=2, padding=1)
@@ -454,6 +562,27 @@ for name, x in scalings.items():
     left = (abar[-1].sqrt() * x).abs().amax(dim=(1, 2, 3)).mean().item()
     print(f"{name:>9s} | {x.std().item():9.3f} | {t_cross:>23s} | {left:24.3f}")
 
+# %% [markdown]
+# The table over the whole schedule. Multiplying the data by $c$ multiplies the effective SNR by $c^2$, which moves
+# the whole curve up or down on this log scale. The dots mark where each curve crosses SNR = 1 (the table's third
+# column), and so how many of the 1000 steps still see structure.
+
+# %%
+viz_fig, viz_ax = plt.subplots(figsize=(6.6, 3.5))
+for (viz_name, viz_x), viz_c in zip(scalings.items(), ["k", "tab:purple", "tab:red"]):
+    viz_snr = (abar * viz_x.var() / (1 - abar)).numpy()       # effective SNR at every t, as in the table
+    viz_t1 = int(np.argmax(viz_snr < 1))                       # first t with SNR < 1 (the table's crossing)
+    viz_ax.plot(np.arange(len(viz_snr)), viz_snr, color=viz_c, lw=2 if viz_name == "[-1, 1]" else 1.4,
+                label=f"data in {viz_name}: SNR > 1 for t < {viz_t1} ({viz_t1 / len(viz_snr):.0%} of the steps)")
+    viz_ax.plot(viz_t1, 1, "o", color=viz_c, ms=5)
+viz_ax.axhline(1, color=C_REAL, ls="--", lw=1)
+viz_ax.text(560, 1.6, "SNR = 1", color=C_REAL, fontsize=8)
+viz_ax.set(yscale="log", xlim=(0, len(viz_snr) - 1), xlabel="t",
+           ylabel="effective SNR  $\\bar\\alpha_t\\,\\mathrm{Var}[x_0]\\,/\\,(1-\\bar\\alpha_t)$",
+           title="Rescaling the data shifts which timesteps carry information")
+viz_ax.legend(loc="upper right")
+plt.show()
+
 # %%
 ts_show = [0, 50, 100, 200, 300, 500, 700, 999]
 x0_show = x_train[:5].to(device)
@@ -481,7 +610,7 @@ plt.show()
 # %% [markdown]
 # With data in $[-1,1]$, structure fades gradually: strokes are clear up to $t\approx100$, the digit is still
 # visible at $t\approx300$ and at best faintly visible at $t\approx500$, and by $t\approx700$ the eye sees only noise. (Some low-frequency information
-# survives longer than the eye suggests, see section 6.) The second figure shows the scaling gotcha. Data in $[0,255]$
+# survives longer than the eye suggests, see section 6.) The $x_{T-1}$ figure shows the scaling gotcha. Data in $[0,255]$
 # is still plainly visible at the last timestep, so the model would never be trained on the pure noise the sampler
 # starts from. Data in $[0,1]$ has a small variance, so SNR = 1 is reached much earlier, and fewer of the
 # 1000 steps are spent at noise levels where the model still sees structure.
@@ -814,6 +943,9 @@ plt.show()
 # as clearly recognisable. That is a known difference. The deterministic ODE sampler carries every error of the
 # network along its path, while DDPM injects fresh noise at every step, which lets later steps correct earlier mistakes (Karras et
 # al. 2022 analyse this trade-off). Section 7 compares the two samplers quantitatively.
+
+# %% [markdown]
+# *Side note — safe to skim: measures how much bfloat16 autocast changes the samples (very little) and $\hat x_0$ (a lot at large $t$); rule: bf16 is fine for sampling, but look at $\hat x_0$ at large $t$ only in float32.*
 #
 # **Numerical precision.** We sampled under bfloat16 autocast. The schedule coefficients and the sampler arithmetic
 # stay in float32. This matters, because $\hat x_0=(x_t-\sqrt{1-\bar\alpha_t}\,\hat\epsilon)/\sqrt{\bar\alpha_t}$
@@ -1277,6 +1409,35 @@ print(f"{'random Gaussian matrix':29s}       : off-diagonal asymmetry {offdiag_a
 # section 1, made visible. (At the very largest $t$ the filters of an $\epsilon$-network become erratic, for the
 # reason discussed in section 4, so we stop at $t=650$.)
 #
+# To see what the symmetry numbers mean, plot pairs of pixels $(p,q)$ of the central 12×12 block as dots at
+# $(J_{pq},J_{qp})$. For a symmetric matrix every dot would lie on the dashed diagonal. The trained network's dots
+# stretch along it; the untrained network's form a round cloud.
+
+# %%
+viz_xt = schedule.q_sample(x_clean, torch.full((1,), t_sym, device=device), noise)   # the x_t of the check above
+viz_pairs = torch.triu_indices(len(block_pix), len(block_pix), offset=1)     # every pixel pair (p, q), p < q, once
+viz_show = torch.randperm(viz_pairs.shape[1], generator=torch.Generator().manual_seed(13))[:3000]  # dots to draw
+viz_fig, viz_axes = plt.subplots(1, 2, figsize=(8.4, 4.0))
+for viz_ax, (viz_name, viz_net, viz_c) in zip(viz_axes, [("trained (reference)", ref_model, C_DDPM),
+                                                         ("untrained, same architecture", untrained, C_REAL)]):
+    viz_J = jacobian_rows(x0_hat_fn(viz_net, t_sym), viz_xt, block_pix).cpu()[:, block_pix].double()
+    viz_pq, viz_qp = viz_J[viz_pairs[0], viz_pairs[1]], viz_J[viz_pairs[1], viz_pairs[0]]
+    viz_corr = np.corrcoef(viz_pq.numpy(), viz_qp.numpy())[0, 1]
+    viz_lim = 1.05 * max(viz_pq.abs().max().item(), viz_qp.abs().max().item())
+    viz_ax.plot([-viz_lim, viz_lim], [-viz_lim, viz_lim], "k--", lw=1, label="$J_{pq} = J_{qp}$ (symmetric)")
+    viz_ax.scatter(viz_pq[viz_show], viz_qp[viz_show], s=4, alpha=0.4, color=viz_c, lw=0,
+                   label=f"{len(viz_show):,} of {viz_pairs.shape[1]:,} pixel pairs (corr. {viz_corr:.2f})")
+    viz_ax.set(xlim=(-viz_lim, viz_lim), ylim=(-viz_lim, viz_lim), aspect="equal",
+               xlabel="$J_{pq}$: effect of input pixel q on output pixel p",
+               ylabel="$J_{qp}$: effect of input p on output q",
+               title=f"{viz_name}\noff-diagonal asymmetry {offdiag_asymmetry(viz_J):.2f}")
+    viz_ax.legend(loc="upper left")
+viz_fig.suptitle(f"Denoiser Jacobian at t = {t_sym}: training pulls it towards symmetry, "
+                 "as a posterior covariance requires")
+plt.tight_layout()
+plt.show()
+
+# %% [markdown]
 # The symmetry check compares the off-diagonal part of the Jacobian with its transpose. An untrained network of
 # the same architecture is about as asymmetric as a random matrix. The trained one is clearly more symmetric (about
 # 0.55 against 1.41 in the printout). The network was never told that its output is a posterior mean, i.e. that $\hat\epsilon$ is

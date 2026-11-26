@@ -317,6 +317,49 @@ plt.show()
 # goes there, and a learned score is least accurate there (3b). So this is a mixing-time problem, not an information
 # problem, but in practice the information is lost either way.)
 #
+# The next figure compares that two-mode example with a mixture of the same two modes in equal proportions.
+
+# %%
+# Same two modes, different weights: the 0.8 / 0.2 mixture used below vs equal weights, along the slice x_2 = 0
+viz_x1 = torch.linspace(-4.5, 4.5, 1801, dtype=torch.float64)
+viz_line = torch.stack([viz_x1, torch.zeros_like(viz_x1)], 1)
+viz_zoom = torch.linspace(-0.15, 0.2, 351, dtype=torch.float64)                    # around the density minimum
+viz_zline = torch.stack([viz_zoom, torch.zeros_like(viz_zoom)], 1)
+viz_logp, viz_score = {}, {}
+viz_fig, viz_axes = plt.subplots(1, 3, figsize=(12, 3.1), gridspec_kw={"width_ratios": [1, 1, 0.8]})
+for viz_w, viz_lab, viz_style in [(0.8, "weights 0.8 / 0.2 (used below)", dict(color=C["exact"], lw=1.8)),
+                                  (0.5, "weights 0.5 / 0.5", dict(color="k", lw=1.1, ls="--"))]:
+    viz_mix = dm.GaussianMixture([viz_w, 1 - viz_w], [[-2.5, 0.0], [2.5, 0.0]], [0.09, 0.09])
+    viz_logp[viz_w] = torch.logsumexp(viz_mix.component_log_probs(viz_line), 1)      # float64 log-density
+    viz_score[viz_w] = gmm_score(viz_mix, viz_line)[:, 0]
+    viz_axes[0].plot(viz_x1, viz_logp[viz_w].exp(), label=viz_lab, **viz_style)
+    viz_axes[1].plot(viz_x1, viz_score[viz_w], **viz_style)
+    viz_axes[2].plot(viz_zoom, gmm_score(viz_mix, viz_zline)[:, 0], **viz_style)
+viz_rel = viz_logp[0.8] - viz_logp[0.8].max()                   # log(p / peak) of the 0.8 / 0.2 mixture
+viz_depth = viz_rel[viz_x1.abs() < 1].min().item()              # ... at its density minimum between the modes
+viz_differ = (viz_score[0.8] - viz_score[0.5]).abs() > 0.1      # where the two scores differ noticeably
+viz_axes[0].set(xlabel="$x_1$ (along $x_2 = 0$)", ylabel="density $p(x_1, 0)$", ylim=(0, 1.9),
+                title="two clearly different mixtures ...")
+viz_axes[0].legend(loc="upper right")
+viz_axes[1].axvspan(viz_zoom[0].item(), viz_zoom[-1].item(), color="0.85", lw=0)
+viz_axes[1].axhline(0, color="0.6", lw=0.6)
+viz_axes[1].set(xlabel="$x_1$", ylabel=r"score $s_1=\partial_{x_1}\log p$",
+                title="... with the same score, except in the grey sliver")
+viz_axes[2].axhline(0, color="0.6", lw=0.6)
+viz_axes[2].set(xlabel="$x_1$ (zoom into the grey sliver)", ylabel=r"score $s_1$",
+                title=rf"the weights show only here, where $p\approx e^{{{viz_depth:.0f}}}\times$peak")
+plt.tight_layout()
+plt.show()
+print(f"the two scores differ by more than 0.1 only for {viz_x1[viz_differ].min():.2f} < x1 < "
+      f"{viz_x1[viz_differ].max():.2f}, where p is at most e^{viz_rel[viz_differ].max():.0f} times its peak")
+
+# %% [markdown]
+# The two densities differ visibly (left), yet their scores lie on top of each other (middle): near each mode the weight
+# only adds a constant to $\log p$, which the gradient removes. All the weights change is where the score jumps through
+# zero (the density minimum): from $x_1=0$ to about $0.025$ (right), inside a sliver where $p$ is at most about $e^{-32}$
+# times its peak (printed). A sampler that follows the score near the modes cannot tell that the left mode is four times
+# heavier.
+#
 # The 8-component mixture above already shows this: the left panel below gives its per-component occupation, the
 # cause of the stalled MMD in §2. The other two panels show a cleaner version: two well-separated modes with weights
 # 0.8 and 0.2, and particles started uniformly on a square.
@@ -368,7 +411,32 @@ counts, _, _ = np.histogram2d(train_data[:, 0].numpy(), train_data[:, 1].numpy()
 print(f"{N_TRAIN} training points, [-{LIM:.0f}, {LIM:.0f}]^2 split into 60 x 60 cells: "
       f"{(counts == 0).mean():.0%} of the cells contain no training point, {(counts < 10).mean():.0%} contain fewer than 10")
 
+# %%
+# The same 60 x 60 cells, shaded by how many training points each holds. The last three panels preview §4: every
+# training point plus Gaussian noise of standard deviation sigma (the same noise draw, scaled).
+viz_edges = np.linspace(-LIM, LIM, 61)
+viz_shades = ["white", "0.78", "0.35"]                                    # no point / 1-9 points / 10 or more
+viz_panels = [("clean training data", counts)]
+for viz_s in [0.25, 0.5, 1.0]:
+    viz_noisy = train_data.double() + viz_s * torch.randn(train_data.shape, dtype=torch.float64, generator=rng(20))
+    viz_panels.append((rf"+ noise, $\sigma$={viz_s}",
+                       np.histogram2d(viz_noisy[:, 0].numpy(), viz_noisy[:, 1].numpy(), bins=60,
+                                      range=[[-LIM, LIM], [-LIM, LIM]])[0]))
+viz_fig, viz_axes = plt.subplots(1, len(viz_panels), figsize=(12, 3.4))
+for viz_ax, (viz_title, viz_cnt) in zip(viz_axes, viz_panels):
+    viz_ax.pcolormesh(viz_edges, viz_edges, np.digitize(viz_cnt.T, [1, 10]), cmap=ListedColormap(viz_shades),
+                      vmin=0, vmax=2)
+    viz_ax.set(aspect="equal", xticks=[], yticks=[], title=f"{viz_title}: {(viz_cnt == 0).mean():.0%} of cells empty")
+viz_axes[0].legend(handles=[plt.Rectangle((0, 0), 1, 1, fc=c, ec="0.5", lw=0.5) for c in viz_shades],
+                   labels=["no training point", "1-9 points", "10 or more"], loc="lower left", fontsize=7)
+plt.tight_layout()
+plt.show()
+
 # %% [markdown]
+# In the left panel, every white cell received none of the 20,000 training points: the data occupy a few small islands.
+# The other panels preview the cure of §4. Add Gaussian noise of standard deviation $\sigma$ to every point, and the same
+# points spread over the square (at $\sigma=1$ only about a tenth of the cells, mostly near the edges, stay empty).
+#
 # Most of the square never receives a training signal. In §7 we will measure exactly how wrong a trained network's
 # score is there. Both failure modes have the same cure, which is the central idea of score-based diffusion models.
 #
@@ -377,7 +445,8 @@ print(f"{N_TRAIN} training points, [-{LIM:.0f}, {LIM:.0f}]^2 split into 60 x 60 
 # Add Gaussian noise to the data: $q_\sigma = p \ast \mathcal N(0,\sigma^2I)$, the "variance exploding" marginal of
 # notebook 01 (`dm.GaussianMixture.noised_ve(sigma)` gives it exactly). For large $\sigma$:
 # - **the modes are connected**: $q_\sigma$ has no deep valleys, so Langevin mixes quickly and particles can redistribute;
-# - **there are no low-density holes**: noised training points fill the whole space, so a learned score is constrained everywhere.
+# - **there are no low-density holes**: noised training points fill the whole space, so a learned score is constrained everywhere
+#   (the right-hand panels of the figure in §3b).
 #
 # And for every $\sigma>0$:
 # - **the score exists everywhere**: real data such as images concentrate near low-dimensional manifolds, off which $p=0$
@@ -507,6 +576,9 @@ plt.show()
 # (As in `dmtools`, the $t$ in code, printouts and plot titles is the array index $0,\dots,T-1$, one less than the maths'
 # $t$: `ABAR[t]` is $\bar\alpha_{t+1}$; notebook 02, §1.)
 
+# %% [markdown]
+# *Side note — safe to skim: checks that the VP score is the rescaled VE score and maps our $\sigma$ ladder onto DDPM's timesteps (the figure after it puts both on one noise axis); rule to remember: the code's `t` is the array index, so `ABAR[t]` is the maths' $\bar\alpha_{t+1}$.*
+
 # %%
 sched = dm.NoiseSchedule(1000, "linear", device=device)   # DDPM's linear schedule, T = 1000, used from here on
 ABAR = sched.alpha_bars.cpu().double()                      # float64 copy for exact computations (.cpu() first: MPS)
@@ -526,8 +598,64 @@ print(f"DDPM's own range: sigma_t from {SIGMA_T[0]:.3f} (t=0) to {SIGMA_T[-1]:.0
 
 # %% [markdown]
 # Our hand-made ladder covers only the middle of DDPM's range. DDPM starts from far more noise (at its last index $t=T-1$,
-# $\sigma_t\approx157$, so $x_t$ itself is essentially pure $\mathcal N(0,I)$) and ends at a smaller $\sigma$. What remains is to *learn* the noised
-# scores from data.
+# $\sigma_t\approx157$, so $x_t$ itself is essentially pure $\mathcal N(0,I)$) and ends at a smaller $\sigma$.
+#
+# Exact scores make the difference between re-equilibrating and transporting easy to see. We hand the exact score of the
+# two-mode mixture, as a noise prediction $\epsilon^*=-\sqrt{1-\bar\alpha_t}\,\nabla\log q_t$, to the unchanged
+# `dm.ddpm_sample` (§8 does the same for the 8-component mixture), and follow the fraction of particles on the heavy side
+# of the valley as the noise level falls.
+
+# %%
+viz_s1a = (1 - ABAR).sqrt()
+
+
+def viz_two_eps(x, t, y=None):
+    """Exact noise prediction for `two`: -sqrt(1 - abar_t) * grad log q_t(x). Samplers pass one t per batch."""
+    tv = int(t[0])
+    return (-viz_s1a[tv] * gmm_score(two.noised(ABAR[tv].item()), x.cpu())).to(x.device, x.dtype)
+
+
+def viz_mass_left(sig):
+    """Exact mass of the sigma-noised two-mode mixture on the heavy side of the valley, x_1 < 0."""
+    sig = torch.as_tensor(sig, dtype=torch.float64)
+    return sum(w * torch.special.ndtr(-m / (v + sig ** 2).sqrt())
+               for w, m, v in zip(two.weights, two.means[:, 0], two.covs[:, 0, 0])).numpy()
+
+
+viz_x_ddpm, viz_traj = dm.ddpm_sample(viz_two_eps, sched, (N_PART, 2), return_traj=True, traj_every=10,
+                                      generator=torch.Generator(device=device).manual_seed(21))
+viz_ddpm_sig = np.array([SIGMA_T[t].item() for t, _, _ in viz_traj])     # the VE noise level matching each x_t
+viz_ddpm_frac = np.array([(xt[:, 0] < 0).double().mean().item() for _, xt, _ in viz_traj])  # sign is scale-free
+viz_sig = np.geomspace(0.005, 300, 400)
+viz_band = 2 * np.sqrt(viz_mass_left(viz_sig) * (1 - viz_mass_left(viz_sig)) / N_PART)   # ±2 binomial SE
+
+viz_fig, viz_ax = plt.subplots(figsize=(7.2, 3.4))
+viz_ax.fill_between(viz_sig, viz_mass_left(viz_sig) - viz_band, viz_mass_left(viz_sig) + viz_band, color="0.85", lw=0,
+                    label=f"±2 SE for {N_PART} particles")
+viz_ax.plot(viz_sig, viz_mass_left(viz_sig), color="k", lw=1.2, label=r"exact: mass of $q_\sigma$ at $x_1<0$")
+viz_ax.plot(viz_ddpm_sig, viz_ddpm_frac, "o", ms=2.5, color=C["exact"],
+            label=f"DDPM + exact score: 1 step per level ({sched.T} levels; every 10th shown)")
+viz_ax.plot(sigmas, [(x[:, 0] < 0).double().mean().item() for x in level_ends], "D", ms=5, color=C["annealed"],
+            mec="k", mew=0.5, label=f"annealed Langevin: {PER_LEVEL} steps per level ({N_LEVELS} levels; level ends)")
+viz_ax.axhline(0.8, color=C["data"], ls="--", lw=1, label="truth 0.8")
+viz_ax.set(xscale="log", xlim=(300, 0.005), ylim=(0.45, 0.88), ylabel="fraction of particles\nat $x_1<0$ (heavy side)",
+           xlabel=r"noise level $\sigma$, decreasing $\rightarrow$   "
+                  r"(DDPM step $t$: $\sigma_t=\sqrt{(1-\bar\alpha_t)/\bar\alpha_t}$)",
+           title=f"same path down the noise levels: DDPM takes 1 step per level, Langevin {PER_LEVEL}")
+viz_ax.legend(loc="lower right", fontsize=7)
+plt.tight_layout()
+plt.show()
+viz_dev = np.abs(viz_ddpm_frac - viz_mass_left(viz_ddpm_sig)) / np.sqrt(
+    viz_mass_left(viz_ddpm_sig) * (1 - viz_mass_left(viz_ddpm_sig)) / N_PART)
+print(f"DDPM particles vs the exact marginal at {len(viz_dev)} recorded steps: deviation median {np.median(viz_dev):.1f} SE, "
+      f"largest {viz_dev.max():.1f} SE")
+
+# %% [markdown]
+# Each red dot summarises DDPM's particles at one of its noise levels, reached with a *single* step from the level before,
+# and the dots lie on the exact curve, up to sampling noise (grey band), all the way down: one step carries the particles
+# from one noise level to the next. Annealed Langevin (green) reaches the same curve only at the end of each level, after
+# 100 MCMC steps of re-equilibration, and its split freezes once the modes separate ($\sigma\lesssim1$), here slightly
+# below the curve but within the band. What remains is to *learn* the noised scores from data.
 #
 # ## 5 · Learning the score: from explicit to denoising score matching
 #
@@ -740,6 +868,9 @@ plt.show()
 # - the three outputs a network can be trained to produce ($\epsilon$, $x_0$, or the score) are **affine reparameterisations of the same function**;
 # - a model's $x_0$-prediction $\hat x_0=(x_t-\sqrt{1-\bar\alpha_t}\,\epsilon_\theta)/\sqrt{\bar\alpha_t}$ (what `dm.model_predictions` returns) *is*
 #   Tweedie's formula with the learned score. It estimates the posterior mean, not a sample.
+
+# %% [markdown]
+# *Side note — safe to skim: confirms that Tweedie's formula equals the exact posterior mean to float64 precision; the one thing to keep is `tweedie_x0`, the boxed formula as code, which the next cells use.*
 #
 # **Check.** For our mixture we can compute $\mathbb E[x_0\mid x_t]=\sum_k r_k(x_t)\,m_k(x_t)$ by Gaussian conditioning (§5) and compare it with
 # Tweedie's formula applied to the exact score. One route conditions each Gaussian component on $x_t$; the other differentiates the
@@ -1029,8 +1160,32 @@ plt.show()
 # %% [markdown]
 # With the exact score, DDPM's 1000 small steps reproduce the data distribution to within the sampling noise of the metrics
 # (compare with the floor of fresh true samples), so the sampler's own discretisation error is negligible here. Unlike plain
-# Langevin in §2, DDPM also gets the **mode weights** right (see the printed fractions): it too travels from high noise to
-# low noise, and at high noise the modes are connected (§4).
+# Langevin in §2, DDPM also gets the **mode weights** right (see the printed fractions and the bar chart below): it too
+# travels from high noise to low noise, and at high noise the modes are connected (§4).
+
+# %%
+viz_k = np.arange(gmm.K)
+viz_bars = [(f"true weight $w_k$ (whiskers: ±2 SE for {N_SAMPLE} samples)", gmm.weights.numpy(), C["data"]),
+            ("plain Langevin (§2)", frac_lan.numpy(), C["plain"])]
+for viz_name, viz_xs, viz_col in [("DDPM + exact score", x_exact, C["exact"]),
+                                  ("DDPM + learned score", x_learned, C["learned"])]:
+    viz_comp = gmm.responsibilities(viz_xs.cpu()).argmax(1).numpy()             # most likely component of each sample
+    viz_bars.append((viz_name, np.bincount(viz_comp, minlength=gmm.K) / len(viz_xs), viz_col))
+viz_fig, viz_ax = plt.subplots(figsize=(7.5, 3.1))
+for viz_i, (viz_lab, viz_v, viz_col) in enumerate(viz_bars):
+    viz_ax.bar(viz_k + (viz_i - 1.5) * 0.2, viz_v, 0.2, color=viz_col, label=viz_lab,
+               yerr=2 * np.sqrt(viz_v * (1 - viz_v) / N_SAMPLE) if viz_i == 0 else None,
+               error_kw=dict(lw=0.8, capsize=2))
+viz_ax.set(xlabel="component $k$ (even = inner, odd = outer)", ylabel="fraction of samples", xticks=viz_k,
+           ylim=(0, 0.3), title="DDPM puts the right mass into every component; plain Langevin (§2) did not")
+viz_ax.legend(loc="upper center", ncol=2, fontsize=7)
+plt.tight_layout()
+plt.show()
+
+# %% [markdown]
+# Grey bars are the true weights, and the purple bars repeat plain Langevin's occupation (§3a, left panel): wrong in every
+# component. Both DDPM runs (red: exact score, blue: learned score) match the true weights to within sampling noise: their
+# largest deviations (printed above) are below two standard errors.
 #
 # On this easy 2-D problem the learned model lands close to the MMD floor as well, so by MMD alone the score error of §7 seems to
 # have vanished. It has not. The tail metric shows that the learned model puts several times too many samples *between* the

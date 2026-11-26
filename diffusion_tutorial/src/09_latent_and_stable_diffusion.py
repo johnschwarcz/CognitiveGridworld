@@ -457,6 +457,48 @@ for ab, s, _, _, lab in curves:
 # signal is why SD struggles to generate very bright or very dark images, and propose rescaling the schedule to
 # zero terminal SNR (`rescale_betas_zero_snr=True` in diffusers' schedulers).
 #
+# **Why not sample like a VAE?** A VAE generates by decoding samples of $\mathcal N(0,I)$, the target of its KL term
+# (§2.1), but our KL is so light that the latents stay far from it (their channel means range from about −1.6 to +1.5
+# here, printed below the figure). Decoded, $\mathcal N(0,I)$ gives nearly blank images (top row) and a Gaussian with
+# the real latents' own mean and covariance mostly malformed strokes (middle), against decoded real latents (bottom),
+# and the classifier recognises far fewer of them with $p>0.9$ (right, out of 500 each). The latents' distribution has
+# to be *learned*: that is the diffusion model's job (§3).
+
+# %%
+# What a VAE would do: sample a simple prior and decode. Two simple priors over our (unscaled) latents, 500 samples each:
+# N(0, I), the target of the KL term, and the Gaussian with the training latents' own mean and full covariance.
+viz_g = torch.Generator().manual_seed(11)                             # own generator: the global RNG is untouched
+viz_Z = z_raw.flatten(1).double()                                     # (60000, 196), float64 on the CPU
+viz_mu, viz_cov = viz_Z.mean(0), torch.cov(viz_Z.T)
+viz_chol = torch.linalg.cholesky(viz_cov + 1e-6 * torch.eye(len(viz_mu), dtype=torch.float64))
+viz_priors = {
+    "z ~ N(0, I)\n(a VAE's prior)": torch.randn((500, Z_CH, LAT, LAT), generator=viz_g),
+    "z ~ Gaussian with the real\nlatents' mean, covariance":
+        (viz_mu + torch.randn((500, len(viz_mu)), generator=viz_g, dtype=torch.float64) @ viz_chol.T)
+        .float().view(-1, Z_CH, LAT, LAT),
+    "real latents E(x)\n(for reference)": z_raw[:500],
+}
+viz_imgs, viz_conf = {}, {}
+for viz_name, viz_z in viz_priors.items():
+    viz_imgs[viz_name] = decode(viz_z).clamp(-1, 1).cpu()
+    viz_conf[viz_name] = (classify(viz_imgs[viz_name])[1].max(1).values > 0.9).float().mean().item()
+del viz_Z, viz_cov
+
+viz_ncol = 16
+viz_fig, viz_ax = plt.subplots(figsize=(10, 2.6))
+dm.show_images(torch.cat([viz_v[:viz_ncol] for viz_v in viz_imgs.values()]), nrow=viz_ncol, ax=viz_ax,
+               title="Sampling like a VAE fails here: simple priors over the latents decode to blanks or malformed strokes")
+for viz_r, viz_name in enumerate(viz_imgs):     # rows are 28 + 2 pixels apart: prior left, classifier's verdict right
+    viz_ax.text(-2, 2 + viz_r * 30 + 14, viz_name, ha="right", va="center", fontsize=8)
+    viz_ax.text(viz_ncol * 30 + 4, 2 + viz_r * 30 + 14, f"{100 * viz_conf[viz_name]:.0f}% recognised\nwith p > 0.9",
+                ha="left", va="center", fontsize=8)
+plt.tight_layout()
+plt.show()
+print("per-channel mean of the raw latents:", np.round(z_raw.mean(dim=(0, 2, 3)).numpy(), 2))
+for viz_name in viz_imgs:
+    print(f"{viz_name.replace(chr(10), ' '):50s}: classifier confident (p > 0.9) on {100 * viz_conf[viz_name]:.0f}% of 500")
+
+# %% [markdown]
 # ## 3 · Semantic compression: a diffusion model in latent space
 #
 # Freeze the autoencoder, encode the training set **once**, and train an ordinary diffusion model on the scaled
@@ -963,6 +1005,68 @@ else:
 # floating-point rounding, since Euler's variable $x/\sqrt{\bar\alpha}$ is up to $\sigma_{\max}\approx160$ times
 # larger, plus the fact that Euler starts at exactly $\sigma_{\max}$ rather than at $\sqrt{\sigma_{\max}^2+1}$.)
 #
+# The same check as a picture, for four of the samples: Euler's state $x=z/\sqrt{\bar\alpha}$ starts
+# $\sigma_{\max}\approx157$ times larger than DDIM's $z$ and shrinks to it (left), but divided by $\sqrt{\sigma^2+1}$,
+# the factor that `scale_model_input` applies before every network call, it lies on DDIM's path at every step (right).
+# The network sees the same input in both loops: the two schedulers are one method in two coordinate systems.
+
+# %%
+if HAVE_DIFFUSERS:
+    # Re-run the two samplers of the check above on a few of its samples, recording the state after every step.
+    viz_k = min(4, len(z_T))
+    viz_y = torch.cat([torch.full_like(y_cmp[:viz_k], ldm_ema.n_classes), y_cmp[:viz_k]])
+    viz_runs = {}
+    for viz_name, viz_sch in [("DDIM", make_ddim("trailing")), ("Euler", EulerDiscreteScheduler(**OUR_SCHEDULE))]:
+        if viz_name == "DDIM":
+            viz_sch.set_timesteps(len(grid_hf), device=device)          # trailing spacing: the grid printed above
+        else:
+            viz_sch.set_timesteps(timesteps=grid_hf, device=device)
+        viz_gen = torch.Generator().manual_seed(0)    # deterministic samplers; passed so no version touches the global RNG
+        viz_z = z_T[:viz_k] * viz_sch.init_noise_sigma
+        viz_states = [viz_z.cpu().double()]
+        with torch.no_grad():
+            for viz_t in viz_sch.timesteps:                             # the loop of diffusers_sample
+                viz_in = viz_sch.scale_model_input(torch.cat([viz_z, viz_z]), viz_t)
+                viz_eu, viz_ec = ldm_ema(viz_in, viz_t.to(device).float().expand(len(viz_in)), viz_y).chunk(2)
+                viz_z = viz_sch.step(viz_eu + 3.0 * (viz_ec - viz_eu), viz_t, viz_z, generator=viz_gen).prev_sample
+                viz_states.append(viz_z.cpu().double())
+        viz_runs[viz_name] = torch.stack(viz_states)                    # (steps + 1, k, Z_CH, LAT, LAT)
+        if viz_name == "Euler":
+            viz_sigma = viz_sch.sigmas.cpu().double()                   # noise level of each recorded state
+    viz_ddim, viz_euler = viz_runs["DDIM"], viz_runs["Euler"]
+    viz_euler_vp = viz_euler / (1 + viz_sigma ** 2).sqrt().view(-1, 1, 1, 1, 1)   # what scale_model_input feeds the net
+    viz_rms = lambda s: s.pow(2).mean(dim=(1, 2, 3, 4)).sqrt().numpy()
+    viz_step = np.arange(len(viz_ddim))
+
+    viz_fig, viz_axes = plt.subplots(1, 2, figsize=(10, 3.3))
+    viz_axes[0].plot(viz_step, viz_rms(viz_euler), "s:", color="tab:purple",
+                     label="EulerDiscreteScheduler: $x = z/\\sqrt{\\bar\\alpha}$")
+    viz_axes[0].plot(viz_step, viz_rms(viz_ddim), "o-", color="tab:green", label="DDIMScheduler: $z$")
+    viz_axes[0].set(yscale="log", ylabel="RMS of the sampler's state",
+                    title=f"Different units: Euler's state starts $\\sigma_{{\\max}}$ ≈ {viz_sigma[0]:.0f}× larger")
+    # the four latent values of the first sample that move most between z_T and the final sample
+    viz_move = (viz_ddim[-1, 0] - viz_ddim[0, 0]).abs().flatten()
+    for viz_j, viz_i in enumerate(viz_move.argsort(descending=True)[:4].tolist()):
+        viz_axes[1].plot(viz_step, viz_ddim[:, 0].flatten(1)[:, viz_i], "-", color="tab:green", lw=1.5,
+                         label="DDIMScheduler: $z$" if viz_j == 0 else None)
+        viz_axes[1].plot(viz_step, viz_euler_vp[:, 0].flatten(1)[:, viz_i], "x", color="tab:purple", ms=7, mew=1.5,
+                         label="EulerDiscreteScheduler: $x/\\sqrt{\\sigma^2+1}$" if viz_j == 0 else None)
+    viz_axes[1].set(ylabel="latent value (scaled latents)",
+                    title="Converted back, Euler's path lies on DDIM's (4 latent values)")
+    for viz_ax in viz_axes:
+        viz_ax.set(xlabel=f"sampler step (0 = $z_T$, {len(viz_step) - 1} = sample)", xticks=viz_step)
+        viz_ax.legend(fontsize=7)
+    plt.suptitle("DDIM is Euler in other units (same $z_T$, same 10 timesteps, w = 3)", y=1.0)
+    plt.tight_layout()
+    plt.show()
+    print(f"largest |DDIM - Euler / sqrt(sigma^2 + 1)| over all recorded states: "
+          f"{(viz_euler_vp - viz_ddim).abs().max().item():.1e} (the latent values are of order 1)")
+else:
+    print("diffusers is not installed: `pip install diffusers` to run §7")
+
+# %% [markdown]
+# *Side note — safe to skim: what the two silent bugs do to samples; rule: divide generated latents by the scale factor $c$ before decoding, and pass `clip_sample=False` to `DDIMScheduler` for latents.*
+#
 # **Two silent bugs, shown.** The gotchas of §2.3 and of the comment above produce images without any error message.
 # Below, the same $z_T$ and the same 25-step DDIM sampler three times: done correctly; with the generated latents
 # decoded *without* dividing by the scale factor $c$; and with `DDIMScheduler`'s default `clip_sample=True`, which
@@ -1099,11 +1203,71 @@ if HAVE_DIFFUSERS:
 #   sits in a correction of relative size $\sqrt{\bar\alpha_{999}}\approx0.006$. This is one motivation for
 #   $v$-prediction (Salimans & Ho 2022) and for zero-terminal-SNR schedules (Lin et al. 2024). Under our schedule,
 #   skipping the segment from 999 to 750 costs almost nothing, because almost no signal is left there (printed).
+#
+# The printed check as bars: without its first step, the one from $t=999$, the trailing grid's error drops to nearly
+# that of leading, at both step counts.
+
+# %%
+if HAVE_DIFFUSERS:
+    # The errors printed above, for the two smallest step counts.
+    viz_bars = {"DDIM trailing (first step from t = 999)": (errors["DDIM (trailing)"][:2], "tab:green", None),
+                "trailing without that first step": (skip_first, "white", "////"),
+                "DDIM leading": (errors["DDIM (leading)"][:2], "tab:olive", None)}
+    viz_fig, viz_ax = plt.subplots(figsize=(6, 3.2))
+    viz_w = 0.26
+    for viz_b, (viz_name, (viz_vals, viz_c, viz_h)) in enumerate(viz_bars.items()):
+        viz_x = np.arange(len(viz_vals)) + (viz_b - 1) * viz_w
+        viz_ax.bar(viz_x, viz_vals, width=viz_w, color=viz_c, hatch=viz_h,
+                   edgecolor="tab:green" if viz_h else viz_c, label=viz_name)
+        for viz_xi, viz_v in zip(viz_x, viz_vals):
+            viz_ax.text(viz_xi, viz_v, f"{viz_v:.3f}", ha="center", va="bottom", fontsize=7, clip_on=True)
+    viz_ax.set_xticks(range(2), [f"{viz_n}-step grids" for viz_n in NFES[:2]])
+    viz_ax.set(ylabel="RMS pixel error vs reference",
+               ylim=(0, 1.3 * max(max(viz_vals) for viz_vals, _, _ in viz_bars.values())),
+               title="Drop trailing's step out of t = 999 and its extra error is gone")
+    viz_ax.legend(fontsize=7, loc="upper right")
+    plt.tight_layout()
+    plt.show()
+else:
+    print("diffusers is not installed: `pip install diffusers` to run §7")
+
+# %% [markdown]
 # * **...but under SD's schedule "leading" is the wrong choice.** Under SD's "scaled_linear" schedule a clearly
 #   non-zero correlation with the data remains at the first leading timestep (printed). The leading sampler therefore
 #   starts from a distribution the network does not expect. That is the flaw Lin et al. (2024) identified, and why
 #   `timestep_spacing="trailing"` is recommended for few-step sampling with SD-like schedules. The general rule: check
 #   what the first timestep means under *your* schedule, and how reliable your network is there.
+#
+# The curves show how much of the data is left in $z_t$ near the noisy end of both schedules
+# ($\sqrt{\bar\alpha_t}$, the correlation of $z_t$ with $z_0$ for unit-variance data). At the first timestep of the 4-
+# and 8-step leading grids it is 0.06 and 0.02 under our schedule, but 0.24 and 0.14 under SD's.
+
+# %%
+# corr(z_t, z_0) = sqrt(abar_t) for unit-variance data: how much of z_0 a timestep says is still in z_t.
+viz_fig, viz_ax = plt.subplots(figsize=(6, 3.3))
+viz_t = np.arange(500, 1000)
+viz_ax.plot(viz_t, np.sqrt(abar_ours[viz_t]), color=C_LAT, label="our linear schedule")
+viz_ax.plot(viz_t, np.sqrt(abar_sd[viz_t]), color="tab:purple", ls="--", label="SD's scaled_linear schedule")
+for viz_n, viz_m in [(4, "o"), (8, "s")]:
+    viz_t1 = (viz_n - 1) * (1000 // viz_n)                       # first timestep of the leading grid, as printed above
+    viz_ax.axvline(viz_t1, color="0.6", lw=0.8, ls=":")
+    viz_ax.text(viz_t1 - 4, 0.56, f"first 'leading'\ntimestep, {viz_n} steps", ha="right", va="top", fontsize=7,
+                color="0.35")
+    for viz_ab, viz_c in [(abar_ours, C_LAT), (abar_sd, "tab:purple")]:
+        viz_r = np.sqrt(viz_ab[viz_t1])
+        viz_ax.plot(viz_t1, viz_r, viz_m, color=viz_c, ms=6, mfc="white", mew=1.5)
+        viz_ax.annotate(f"{viz_r:.2f}", (viz_t1, viz_r), textcoords="offset points", xytext=(5, 3), fontsize=8,
+                        color=viz_c)
+viz_ax.axvline(999, color="tab:green", lw=1)
+viz_ax.text(995, 0.56, "'trailing' grids\nstart at t = 999", ha="right", va="top", fontsize=7, color="tab:green")
+viz_ax.set(xlim=(500, 1010), ylim=(0, 0.6), xlabel="t", ylabel="corr($z_t$, $z_0$) = $\\sqrt{\\bar\\alpha_t}$",
+           title="Signal left at the first 'leading' timestep: little under ours, much more under SD's")
+viz_ax.legend(loc="lower left")
+viz_ax.grid(alpha=0.3)
+plt.tight_layout()
+plt.show()
+
+# %% [markdown]
 # * **DPM-Solver++ (2M)** (Lu et al. 2022), a second-order multistep solver, has the smallest error for most step
 #   counts. That is why 20–25 DPM-Solver++ steps are a common default for Stable Diffusion, instead of 50 DDIM or PNDM
 #   steps. Yet its fitted slope (printed) is close to that of the first-order methods, about 1 rather than 2 (compare

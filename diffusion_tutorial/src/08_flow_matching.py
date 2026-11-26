@@ -235,6 +235,8 @@ for t in [0.1, 0.5, 0.9]:
     assert err < 1e-3
 
 # %% [markdown]
+# *Side note — safe to skim: a brute-force Monte-Carlo check that `exact_velocity` is right; nothing later depends on it.*
+#
 # A second, fully independent check: estimate the posterior mean by **self-normalised importance
 # sampling** — draw prior samples $x_0^{(i)}\sim p_{\rm data}$ and weight each by the likelihood
 # $\mathcal N(x;(1-t)x_0^{(i)},t^2I)$, just like a particle filter's measurement update.
@@ -290,6 +292,34 @@ for name, f in {"0": torch.zeros_like(xt_mc), "-x_t": -xt_mc, "0.5 v": 0.5 * v_m
 # (it is an average posterior variance), which is why flow-matching training losses look
 # "stuck" well above zero.
 #
+# The same identity as a picture: evaluate both losses along the family of candidate fields $f=s\,v$ (the
+# table's first and third rows are $s=0$ and $s=0.5$). The training loss $\mathcal L_{\rm CFM}$ (blue) is the true
+# error $\mathcal L_{\rm FM}$ (dashed) shifted up by the same constant $C$ at every $s$, so the two curves have the same
+# slope everywhere and the same minimiser, the exact velocity at $s=1$; only the training loss never gets below $C$.
+
+# %%
+viz_s = np.linspace(-0.25, 1.75, 41)                                            # candidate fields f = s * v
+viz_cfm = np.array([sq(viz_k * v_mc, u_mc).mean().item() for viz_k in viz_s])   # training loss: target eps - x0
+viz_fm = np.array([sq(viz_k * v_mc, v_mc).mean().item() for viz_k in viz_s])    # true error: target v
+viz_fig, viz_ax = plt.subplots(figsize=(6, 3.5))
+viz_ax.plot(viz_s, viz_cfm, color=COL["fm"],
+            label="$\\mathcal{L}_{\\rm CFM}(s\\,v)$: training loss, target $\\varepsilon-x_0$")
+viz_ax.plot(viz_s, viz_fm, "--", color=COL["exact"], label="$\\mathcal{L}_{\\rm FM}(s\\,v)$: true error, target $v$")
+viz_ax.axhline(CFM_FLOOR, color="0.5", lw=1, ls=":", label=f"floor $C$ = {CFM_FLOOR:.2f}")
+for viz_k in [0.0, 1.0]:                                                        # the gap is C at every s
+    viz_j = int(np.argmin(np.abs(viz_s - viz_k)))
+    viz_ax.annotate("", xy=(viz_k, viz_cfm[viz_j]), xytext=(viz_k, viz_fm[viz_j]),
+                    arrowprops=dict(arrowstyle="<->", color="0.4", lw=1))
+    viz_ax.text(viz_k + 0.04, viz_fm[viz_j] + 0.35 * (viz_cfm[viz_j] - viz_fm[viz_j]), "$C$", color="0.3")
+viz_ax.set_ylim(0, None)
+viz_ax.set_xlabel("candidate field $f=s\\,v$   ($s=1$: the exact velocity)")
+viz_ax.set_ylabel("loss (summed over the 2 coordinates)")
+viz_ax.set_title("Training loss = true error + C: same minimiser, but a floor at C")
+viz_ax.legend(loc="upper center", fontsize=7)
+plt.tight_layout()
+plt.show()
+
+# %% [markdown]
 # Now let's look at the field itself. Arrows show $-v\,\Delta t$ with $\Delta t=0.15$, i.e.
 # where a particle moves in the next 0.15 units of *backward* time; the background is $\log p_t$.
 
@@ -337,6 +367,32 @@ plt.show()
 # $v = x - \mathbb E[x_0]$ and every particle first heads to the data mean. As $t$ decreases,
 # the posterior commits to components, the field splits into basins, and near $t=0$ it points
 # sharply onto the thin mixture components (round on the inner ring, elongated on the outer one).
+
+# %% [markdown]
+# **Does this field really carry noise to data?** Section 1 claimed that the ODE $\dot x=v(x,t)$, started from
+# $\mathcal N(0,I)$ at $t=1$, has marginal $p_t$ at *every* $t$. Below, 600 noise points are moved by 100 small Euler
+# steps of the exact field (black) and compared at five times with fresh samples of $x_t=(1-t)x_0+t\varepsilon$ made
+# directly from straight training lines (grey). The two clouds coincide at every $t$, although no particle travels
+# along a straight line (Section 4 shows their curved paths): the ODE reproduces the *distribution* of $x_t$, not the
+# individual lines, which is exactly what the continuity equation promises.
+
+# %%
+viz_states = [torch.randn(N_PLOT, 2, generator=torch.Generator().manual_seed(100))]   # pure noise at t = 1
+for viz_i in range(100):                                    # 100 Euler steps backwards in time, dt = -0.01
+    viz_states.append(viz_states[-1] - 0.01 * exact_velocity(gmm, viz_states[-1], 1 - viz_i / 100)[0])
+viz_g = torch.Generator().manual_seed(101)
+viz_x0, viz_eps = gmm.sample(N_PLOT, generator=viz_g), torch.randn(N_PLOT, 2, generator=viz_g)
+viz_fig, viz_axes = plt.subplots(1, 5, figsize=(13, 3.2))
+for viz_ax, viz_t in zip(viz_axes, [1.0, 0.6, 0.3, 0.15, 0.0]):
+    dm.scatter2d((1 - viz_t) * viz_x0 + viz_t * viz_eps, ax=viz_ax, c=COL["data"], s=4, alpha=0.7,
+                 label="direct samples of $x_t=(1-t)\\,x_0+t\\,\\varepsilon$")
+    dm.scatter2d(viz_states[round(100 * (1 - viz_t))], ax=viz_ax, c=COL["exact"], s=2, alpha=0.6,
+                 title=f"t = {viz_t:g}", label="ODE particles (noise at $t=1$, moved by $\\dot x=v$)")
+viz_h, viz_l = viz_axes[0].get_legend_handles_labels()
+viz_fig.legend(viz_h, viz_l, loc="lower center", ncol=2, markerscale=3, bbox_to_anchor=(0.5, -0.02))
+plt.suptitle("Integrating the averaged velocity from noise reproduces the distribution of $x_t$ at every t", y=1.02)
+plt.tight_layout(rect=(0, 0.07, 1, 1))
+plt.show()
 
 # %% [markdown]
 # ## 3 · Training a flow-matching model
@@ -691,6 +747,51 @@ for name, p in [("exact ODE", exact_paths), ("learned FM ODE", fm_paths)]:
 # straightness numbers ($S>0$, length ratio $>1$) quantify why a single Euler step cannot work here.
 
 # %% [markdown]
+# **Zooming in on the bend.** Below, one particle of the figure above (its exact ODE path is the black line) is
+# frozen at three times. The thin red lines are the rest of the training lines that pass through its position at that
+# time, each ending at its $x_0$ (so the red dots are samples of the posterior $p(x_0\mid x_t)$); the black arrow points
+# to their average $\hat x_0$, which is where the ODE heads, since $-v=(\hat x_0-x_t)/t$. At $t=0.9$ the lines come from
+# all over the data and the arrow points towards its centre; by $t=0.2$ a single component is left, and the swing of
+# the arrow in between is the bend of the path.
+
+# %%
+import matplotlib.patheffects as viz_pe
+
+viz_bank = gmm.sample(20_000 if FAST else 100_000, generator=torch.Generator().manual_seed(103)).double()
+viz_g = torch.Generator().manual_seed(104)
+viz_path = exact_paths[:, 53].double()                   # one particle of the figure above, from t = 1 to t = 0
+viz_fig, viz_axes = plt.subplots(1, 3, figsize=(10, 3.9))
+for viz_ax, viz_t, viz_what in zip(viz_axes, [0.9, 0.5, 0.2], ["lines from all over the data",
+                                                               "mainly two components left", "one component left"]):
+    viz_j = round(PATH_STEPS * (1 - viz_t))
+    viz_x = viz_path[viz_j]                              # the particle's position at time t
+    # x0 of the training lines through viz_x at time t = samples of p(x0 | x_t = viz_x): resample prior
+    # samples with the likelihood N(viz_x; (1-t) x0, t^2 I), like a particle filter's measurement update
+    viz_logw = -((viz_x - (1 - viz_t) * viz_bank) ** 2).sum(1) / (2 * viz_t ** 2)
+    viz_x0s = viz_bank[torch.multinomial(torch.softmax(viz_logw, 0), 40, replacement=True, generator=viz_g)]
+    viz_x0hat = exact_velocity(gmm, viz_x[None].float(), viz_t)[1][0]   # their exact average E[x0 | x_t]
+    dm.scatter2d(test[:N_PLOT], ax=viz_ax, c=COL["data"], s=2, alpha=0.3)
+    for viz_e in viz_x0s:
+        viz_ax.plot([viz_x[0], viz_e[0]], [viz_x[1], viz_e[1]], color="tab:red", lw=0.6, alpha=0.25)
+    viz_ax.scatter(viz_x0s[:, 0], viz_x0s[:, 1], s=6, c="tab:red", zorder=3,
+                   label="$x_0$ of the training lines through the particle")
+    viz_ax.plot(viz_path[:viz_j + 1, 0], viz_path[:viz_j + 1, 1], color="k", lw=1, alpha=0.6,
+                label="its exact ODE path so far (dotted: still to come)")
+    viz_ax.plot(viz_path[viz_j:, 0], viz_path[viz_j:, 1], color="k", lw=1, alpha=0.6, ls=":")
+    viz_ax.scatter(*viz_x.tolist(), s=30, c="k", zorder=6, label="particle at time $t$")
+    viz_ax.annotate("", xy=tuple(viz_x0hat.tolist()), xytext=tuple(viz_x.tolist()), zorder=5,
+                    arrowprops=dict(arrowstyle="-|>", color="k", lw=2, mutation_scale=12, shrinkA=0, shrinkB=0,
+                                    path_effects=[viz_pe.withStroke(linewidth=4, foreground="w")]))
+    viz_ax.plot([], [], color="k", lw=2, label="to their average $\\hat x_0$: where the ODE moves")
+    viz_ax.set_title(f"t = {viz_t}: {viz_what}")
+viz_h, viz_l = viz_axes[0].get_legend_handles_labels()
+viz_fig.legend(viz_h, viz_l, loc="lower center", ncol=2, fontsize=8, markerscale=1.5, bbox_to_anchor=(0.5, -0.04))
+plt.suptitle("Why the path bends: the particle heads for the average end point of all training lines through it",
+             y=1.0)
+plt.tight_layout(rect=(0, 0.08, 1, 1))
+plt.show()
+
+# %% [markdown]
 # ## 5 · Flow matching is diffusion in disguise
 #
 # **Same family of paths.** Every model in this tutorial uses a Gaussian path
@@ -736,6 +837,9 @@ for name, p in [("exact ODE", exact_paths), ("learned FM ODE", fm_paths)]:
 #
 # Let's verify all of this numerically, first with the exact mixture.
 
+# %% [markdown]
+# *Side note — safe to skim: numerical checks that dmtools' VP marginal is our flow marginal after rescaling, and that $\hat x_0$, $\hat\varepsilon$ match Tweedie's formulas.*
+
 # %%
 # CHECK 1: dmtools' VP marginal (notebook 01) equals our flow marginal after x -> x / (alpha + sigma)
 for ab in [0.9, 0.5, 0.1]:
@@ -754,6 +858,43 @@ for t in [0.2, 0.5, 0.8]:
     e1, e2 = (xq - t * v - x0_tweedie).abs().max().item(), (xq + (1 - t) * v - eps_tweedie).abs().max().item()
     print(f"t = {t}: |x0_hat - Tweedie| = {e1:.1e}, |eps_hat - Tweedie| = {e2:.1e}")
     assert max(e1, e2) < 1e-3
+
+# %% [markdown]
+# **The picture behind the dictionary.** Each path is a curve in the plane of the coefficients $(\alpha,\sigma)$ of
+# $x=\alpha x_0+\sigma\varepsilon$ (VP diffusion: the quarter circle; flow matching: the straight segment), and dividing a
+# state by $\alpha+\sigma$ slides it along its ray through the origin, which keeps the SNR $\alpha/\sigma$, onto the segment.
+# With frozen predictions $(\hat x_0,\hat\varepsilon)$ the state $\alpha\hat x_0+\sigma\hat\varepsilon$ is a linear image of this
+# plane, so a DDIM step follows the arc in VP coordinates but the straight segment in flow coordinates, where Euler is exact.
+# The orange dots are the 8 steps that `dm.ddim_sample` used for 8 NFE in Section 3: in flow time (open circles) they
+# crowd near the noise end and then jump to a last evaluation at $t\approx0.01$, unlike the uniform grid (crosses),
+# which matters for the comparison below.
+
+# %%
+# dm.ddim_sample's 8 integer steps k at 8 NFE (uniform in k), as coefficients (alpha, sigma) of x = alpha x0 + sigma eps
+viz_ks = np.unique(np.linspace(0, schedule.T - 1, 8).round().astype(int))[::-1]
+viz_ab = schedule.alpha_bars.cpu().double().numpy()[viz_ks]                     # CPU first: MPS has no float64
+viz_a, viz_sig = np.sqrt(viz_ab), np.sqrt(1 - viz_ab)
+viz_phi = np.linspace(0, np.pi / 2, 200)
+
+viz_fig, viz_ax = plt.subplots(figsize=(7.2, 4.0))
+viz_ax.plot(np.cos(viz_phi), np.sin(viz_phi), color=COL["ddpm"], lw=1.5, label="VP diffusion: $\\alpha^2+\\sigma^2=1$")
+viz_ax.plot([1, 0], [0, 1], color=COL["fm"], lw=1.5, label="flow matching: $\\alpha+\\sigma=1$ (and $\\sigma=t$)")
+for viz_i in range(len(viz_ks)):                                                # rays of constant SNR alpha / sigma
+    viz_ax.plot([0, 1.1 * viz_a[viz_i]], [0, 1.1 * viz_sig[viz_i]], color="0.6", lw=0.7, ls=":",
+                label="same SNR: divide by $\\alpha+\\sigma$" if viz_i == 0 else None)
+viz_ax.scatter(viz_a, viz_sig, s=22, color=COL["ddpm"], zorder=3, label="DDIM's 8 steps (uniform in $k$)")
+viz_ax.scatter(viz_a / (viz_a + viz_sig), viz_sig / (viz_a + viz_sig), s=24, facecolors="white",
+               edgecolors=COL["ddpm"], zorder=3, label="the same states in flow coordinates")
+viz_ax.scatter(np.linspace(1, 0, 9), np.linspace(0, 1, 9), s=24, marker="x", color=COL["fm"], lw=1, zorder=3,
+               label="uniform 8-step flow grid, for comparison")
+viz_ax.text(1.0, -0.13, "data ($t=0$)", ha="center", fontsize=8)
+viz_ax.text(0.04, 1.07, "noise ($t=1$)", ha="left", fontsize=8)
+viz_ax.set_xlim(-0.05, 1.2); viz_ax.set_ylim(-0.18, 1.2); viz_ax.set_aspect("equal")
+viz_ax.set_xlabel("signal coefficient $\\alpha$"); viz_ax.set_ylabel("noise coefficient $\\sigma$")
+viz_ax.set_title("Same SNR, same ray: a VP state is a rescaled flow state")
+viz_ax.legend(loc="upper left", bbox_to_anchor=(1.02, 1.0), fontsize=7)
+plt.tight_layout()
+plt.show()
 
 # %% [markdown]
 # **Converting trained models in both directions.** With the dictionary above we can wrap

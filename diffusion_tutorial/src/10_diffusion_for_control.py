@@ -353,7 +353,8 @@ for y in [-0.3, 0.0, 0.3]:
 
 # %% [markdown]
 # Both conditionals are about ½ on the centre line and lean towards the near side away from it,
-# the pair conditional more strongly towards the edges of the box. From now on "ground truth" for
+# the pair conditional more strongly towards the edges of the box. (The probability-matching figure
+# in Section 3 plots both against the start height.) From now on "ground truth" for
 # anything trained on pairs means $p_{\text{pairs}}(\tau\mid s)$.
 #
 # ## 2 · Baseline: behaviour cloning by regression
@@ -585,6 +586,32 @@ class TrajectoryDenoiser(nn.Module):
 # one has to choose. We train the standard $\varepsilon$-model and a $v$-model with identical
 # networks and budgets, and compare. (Exercise 4: the $\tau_0$-model.)
 #
+# The three weightings side by side, on the schedule we use below (linear, $T=100$):
+
+# %%
+viz_ab = dm.NoiseSchedule(T=100, kind="linear").alpha_bars.double()   # the schedule `sched` below
+viz_snr = (viz_ab / (1 - viz_ab)).numpy()
+viz_fig, viz_ax = plt.subplots(figsize=(5.4, 3.3))
+viz_ax.axvspan(1e-2, 3e-1, color="0.9", label="route is chosen here (shown below)")
+viz_ax.loglog(viz_snr, viz_snr, "^:", color=COL["bc"], ms=3, markevery=3,
+              label=r"$\varepsilon$-prediction: $\mathrm{SNR}_t$")
+viz_ax.loglog(viz_snr, 1 + viz_snr, "s-", color="k", ms=3, markevery=3,
+              label=r"$v$-prediction: $1+\mathrm{SNR}_t$")
+viz_ax.loglog(viz_snr, np.ones_like(viz_snr), "o--", color="0.5", ms=3, markevery=(1, 3),
+              label=r"$\tau_0$-prediction: $1$")
+viz_ax.set_xlabel(r"$\mathrm{SNR}_t$  (noise level; high noise on the left)")
+viz_ax.set_ylabel(r"loss weight on $\|\tau_0-\hat\tau_0\|^2$")
+viz_ax.set_title(r"$\varepsilon$-prediction barely weights the levels where the route is chosen")
+viz_ax.legend(fontsize=7, loc="upper left")
+plt.tight_layout()
+plt.show()
+
+# %% [markdown]
+# In the shaded band the $\varepsilon$ weight (red) is 4 to 100 times smaller than the $v$ weight
+# (black), and at the noisiest level it is only $2\cdot10^{-5}$. $\tau_0$-prediction (grey)
+# weights every level equally, so at the low-noise end it gives about 1000 times less weight than
+# the other two. The $v$ weight is never below either of them.
+#
 # **Other practical details.**
 #
 # * *Continuous conditioning through dmtools.* `dm.diffusion_loss`, `dm.model_predictions` and
@@ -655,6 +682,8 @@ for pred in ["eps", "v"]:
     policies[pred] = train_denoiser(net, P_train, S_train, pred=pred, steps=DP_STEPS)
 
 # %% [markdown]
+# *Side note — safe to skim: a numerical check of the reweighting identities above; they hold for any predictor, so it tests our algebra and code, not the network.*
+#
 # **Check.** The reweighting identities, on a real batch. For the $\varepsilon$-network, the
 # per-sample $\varepsilon$-error must equal $\mathrm{SNR}_t$ times the error of its implied
 # $\hat\tau_0$, and the error of its implied $\hat v$ must equal $(1+\mathrm{SNR}_t)$ times it.
@@ -988,6 +1017,40 @@ for t in [5, 30, 60, 90]:
           f"{np.sqrt(((single - bc_plan) ** 2).sum(-1).mean(1)).mean():27.3f}")
 
 # %% [markdown]
+# The same check as a picture, for the network. Thin lines are 40 of the single one-shot guesses
+# $\hat\tau_0$, coloured by the route their clean chunk actually took; the thick black line averages
+# all the guesses, and the dashed red line is the Monte-Carlo mean $\mathbb{E}[\tau_0\mid s^\ast]$.
+# Watch the black line stay on the dashed one in every panel, while the thin lines go from one
+# bundle along the mean path to two bundles, one per route.
+
+# %%
+viz_noise = torch.randn(ref_flat.shape, generator=torch.Generator().manual_seed(0)).to(device)
+viz_show = np.random.default_rng(0).choice(len(ref_flat), size=min(40, len(ref_flat)), replace=False)
+viz_colours = [COL["above"] if r else COL["below"] for r in ref_routes[viz_show]]
+viz_fig, viz_axes = plt.subplots(1, 4, figsize=(13, 3.1))
+for viz_ax, viz_t in zip(viz_axes, [90, 60, 30, 5]):
+    viz_tt = torch.full((len(ref_flat),), viz_t, device=device, dtype=torch.long)
+    viz_x0 = dm.model_predictions(policy, sched.q_sample(ref_flat, viz_tt, viz_noise), viz_tt, sched,
+                                  y=ref_cond, pred="v")[1]
+    viz_x0 = viz_x0.reshape(-1, H, 2).cpu().numpy()
+    draw_world(viz_ax, title=f"t = {viz_t}  (SNR = {sched.snr(viz_t).item():.1e})")
+    plot_paths(viz_ax, np.concatenate([ref_states[viz_show, None], viz_x0[viz_show]], 1),
+               colours=viz_colours, alpha=0.5, lw=0.8)
+    viz_ax.plot(*np.concatenate([s_star[None], viz_x0.mean(0)]).T, color="k", lw=2.5)
+    viz_ax.plot(*np.concatenate([s_star[None], mc_mean]).T, "--", color=COL["bc"], lw=1.5)
+for viz_c, viz_l, viz_ls, viz_lw in [
+        (COL["above"], r"single guess $\hat\tau_0$ (its clean chunk went above)", "-", 1),
+        (COL["below"], "single guess (its clean chunk went below)", "-", 1),
+        ("k", f"average of all {len(ref_flat)} guesses", "-", 2.5),
+        (COL["bc"], r"Monte-Carlo $\mathbb{E}[\tau_0\mid s^\ast]$ (what BC learns)", "--", 1.5)]:
+    viz_axes[0].plot([], [], viz_ls, color=viz_c, lw=viz_lw, label=viz_l)
+viz_fig.legend(*viz_axes[0].get_legend_handles_labels(), loc="lower center", ncol=4, fontsize=8)
+plt.suptitle("Averaged over the noise, the guesses give the mean path at every noise level; "
+             "single guesses split by route as the noise falls")
+plt.tight_layout(rect=(0, 0.07, 1, 1))
+plt.show()
+
+# %% [markdown]
 # At low noise the network and the trivial estimator both agree with the Monte-Carlo mean, as they
 # must. At high noise the trivial estimator is useless while the network's *average* stays within
 # a few hundredths of the mean: it has learned $\mathbb{E}[\tau_0\mid s]$, the BC answer.
@@ -1043,6 +1106,38 @@ plt.show()
 # something close to the mean path, the regression answer; the $\varepsilon$-model returns
 # garbage). With 2–5 steps every variant fails often, and their order there means little
 # (deterministic DDIM is often as good or better at such tiny budgets, as the DDIM paper found).
+#
+# Here is what "between the routes" looks like. The same 20 starting noises from $s^\ast$ go through
+# the deterministic sampler ($\eta=0$) with 2, 3, 5 and 20 steps, so the panels differ only in the
+# number of steps.
+
+# %%
+viz_n = 20
+viz_xT = torch.randn(viz_n, 2 * H, generator=torch.Generator().manual_seed(2)).to(device)  # same in every panel
+viz_cond = to_tensor(np.repeat(s_star[None], viz_n, 0))
+viz_fig, viz_axes = plt.subplots(1, 4, figsize=(13, 3.1))
+for viz_ax, viz_k in zip(viz_axes, [2, 3, 5, 20]):
+    viz_plans = to_paths(sample_plans(policy, viz_cond, n_steps=viz_k, eta=0.0, x_T=viz_xT))
+    viz_full = np.concatenate([np.repeat(s_star[None, None], viz_n, 0), viz_plans], 1)
+    viz_hit = hits_obstacle(viz_full)
+    draw_world(viz_ax, title=f"{viz_k} steps: {viz_hit.sum()}/{viz_n} through the obstacle")
+    plot_paths(viz_ax, viz_full, alpha=0.7,
+               colours=[COL["bc"] if h else c for h, c in zip(viz_hit, route_colours(viz_full))])
+    viz_ax.plot(bc_plan[:, 0], bc_plan[:, 1], "--", color=COL["bc"], lw=1.2)
+for viz_c, viz_l, viz_ls in [(COL["above"], "plan passes above", "-"), (COL["below"], "plan passes below", "-"),
+                             (COL["bc"], "plan runs through the obstacle", "-"), (COL["bc"], "BC plan", "--")]:
+    viz_axes[0].plot([], [], viz_ls, color=viz_c, label=viz_l)
+viz_fig.legend(*viz_axes[0].get_legend_handles_labels(), loc="lower center", ncol=4, fontsize=8)
+plt.suptitle("With 2 steps every plan is the mean path, the regression answer: the route decision needs more steps")
+plt.tight_layout(rect=(0, 0.07, 1, 1))
+plt.show()
+
+# %% [markdown]
+# With 2 steps the network is called only at $t=99$, where its guess $\hat\tau_0$ is the mean path,
+# and at $t=0$, which removes just the last trace of noise, so every plan comes out as the
+# regression answer. Each extra step adds a noise level at which a sample can move towards one
+# route, and with 20 steps nearly all of them have committed.
+#
 # From about 10 steps on, stochastic sampling ($\eta=1$) collides less than the deterministic ODE
 # ($\eta=0$) at equal cost, and its plans are also much smoother. The fresh noise, re-denoised at
 # every step, acts as a corrector that washes out earlier errors, whereas the ODE carries its
@@ -1500,6 +1595,25 @@ print(f"fraction above: {above.mean():.1%} of all unguided plans, {above[accept]
       f"the accepted ones")
 print(f"accepted plans that hit the old obstacle (the policy's own failures): "
       f"{hits_obstacle(full)[accept].mean():.1%}")
+
+# %% [markdown]
+# Side by side, from the same random starts: the guided plans ($\gamma=0.5$) on the left, and on the
+# right the unguided plans that happen to have zero cost, i.e. exact samples of $\tilde p$ (40 are
+# drawn in each panel; the titles count all of them). Compare the share of blue, upper-route plans.
+
+# %%
+viz_guided = np.concatenate([eval_starts[:, None], guide_paths[0.5]], 1)
+viz_exact = full[accept]                           # start + plan of every accepted unguided plan
+viz_fig, viz_axes = plt.subplots(1, 2, figsize=(8, 3.5))
+for viz_ax, viz_name, viz_p in zip(viz_axes, ["guidance, $\\gamma$ = 0.5", "exact $\\tilde p$: rejection sampling"],
+                                   [viz_guided, viz_exact]):
+    viz_above = np.mean(np.array(route_colours(viz_p)) == COL["above"])
+    draw_world(viz_ax, extra_obstacles=[(NEW_C, NEW_R)],
+               title=f"{viz_name}\n{viz_above:.0%} of {len(viz_p)} plans pass above")
+    plot_paths(viz_ax, viz_p[:40], alpha=0.6)
+plt.suptitle("Guidance bends the lower plans; exact conditioning moves the mass to the upper route")
+plt.tight_layout()
+plt.show()
 
 # %% [markdown]
 # Exact sampling from $\tilde p$ moves almost all of the mass to the upper route: given that a

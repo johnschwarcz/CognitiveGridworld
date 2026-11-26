@@ -441,6 +441,8 @@ SAMPLERS = {  # name: (function, uses Heun's 2 NFE per step?, stochastic?)
 }
 
 # %% [markdown]
+# *Side note — safe to skim: checks that our `ddpm_sampler` reproduces `dm.ddpm_sample` exactly; rule to remember: dmtools' array index `k` sits at continuous time $t=(k+1)/T$ (the gotcha of §1.1).*
+#
 # **CHECK against `dmtools`.** `dm.ddpm_sample` (notebook 02) runs the full 1000-step chain with the discrete schedule.
 # Our sampler must reproduce it exactly when given the same grid, the same $\bar\alpha_k$ and the same random numbers. To
 # hand the exact score to `dmtools` we wrap it as a model with the usual signature `model(x, t, y=None)`.
@@ -542,6 +544,46 @@ print("first NFE inside the floor band (MMD^2 / sliced W1):  "
                    for name, rows in sweep.items()))
 print(f"total variance of the samples at NFE {NFES[0]} (exact samples: {x_true.var(0).sum():.2f}):  "
       + ",  ".join(f"{name} {rows[0]['var']:.2f}" for name, rows in sweep.items()))
+
+# %% [markdown]
+# Before reading the curves, look at the samples behind their left half (grey: the true density; the stochastic samplers
+# show the first of their three seeds). At 5 NFE, DDPM and DDIM squeeze the samples into the middle (total variance about
+# 0.9, against 2.11 for exact samples), Euler–Maruyama sprays them far past the modes (3.3), Euler keeps the right
+# variance without finding the modes, and only Heun already shows them. By 20 NFE the ODE solvers in $(x,t)$ look like
+# the data, while Euler–Maruyama's modes are still too wide and DDPM's too narrow.
+
+# %%
+viz_grid = np.linspace(-LIM, LIM, 161)          # plotting grid for the density backgrounds of the new figures
+viz_xy = torch.tensor(np.stack(np.meshgrid(viz_grid, viz_grid), -1).reshape(-1, 2))
+
+
+def viz_density(dist):
+    """dist's density on the plotting grid, normalised to its maximum and square-rooted (to show the tails)."""
+    p = dist.log_prob(viz_xy).double().exp().reshape(len(viz_grid), len(viz_grid)).numpy()
+    return (p / p.max()) ** 0.5
+
+
+viz_p0 = viz_density(gmm)
+viz_budgets = [5, 10, 20]
+viz_fig, viz_axes = plt.subplots(len(viz_budgets), len(SAMPLERS), figsize=(11.5, 7.3), layout="constrained")
+for viz_r, viz_nfe in enumerate(viz_budgets):
+    for viz_c, viz_name in enumerate(SAMPLERS):
+        viz_n, viz_used = steps_for_nfe(viz_name, viz_nfe)
+        viz_x = SAMPLERS[viz_name][0](eps_exact, x_T, uniform_grid(viz_n),
+                                      gen=torch.Generator().manual_seed(0))     # = the sweep's first seed
+        viz_ax = viz_axes[viz_r, viz_c]
+        viz_ax.contourf(viz_grid, viz_grid, viz_p0, levels=np.linspace(0, 1, 11), cmap=CMAP_DENSITY)
+        viz_ax.scatter(viz_x[:1000, 0], viz_x[:1000, 1], s=1.5, marker="s", color=COL[viz_name], linewidths=0,
+                       antialiased=False)
+        viz_ax.text(0.03, 0.97, f"NFE {viz_used}\nvariance {viz_x.var(0).sum():.2f}", transform=viz_ax.transAxes,
+                    va="top", fontsize=7.5, bbox=dict(fc="white", ec="none", alpha=0.7, pad=1.0))
+        viz_ax.set(xlim=(-LIM, LIM), ylim=(-LIM, LIM), aspect="equal", xticks=[], yticks=[])
+        if viz_r == 0:
+            viz_ax.set_title(viz_name)
+    viz_axes[viz_r, 0].set_ylabel(f"NFE ≈ {viz_nfe}")
+viz_fig.suptitle("Few steps, exact score: DDPM and DDIM pull the samples inwards, Euler–Maruyama sprays them outwards "
+                 f"(grey: true density; exact samples have total variance {x_true.var(0).sum():.2f})")
+plt.show()
 
 # %%
 fig, axes = plt.subplots(1, 2, figsize=(11.5, 4))
@@ -736,6 +778,30 @@ ours_ddim = ddim_sampler(eps_exact, x_T[:300], uniform_grid(20), eta=1.0, gen=to
 ours_ddpm = ddpm_sampler(eps_exact, x_T[:300], uniform_grid(20), gen=torch.Generator().manual_seed(8))
 print(f"CHECK 4: DDIM(eta=1) == DDPM ancestral (20 steps): max |diff| = {(ours_ddim - ours_ddpm).abs().max():.1e}")
 assert torch.allclose(ours_ddim, ours_ddpm, atol=1e-9)
+
+# %% [markdown]
+# CHECK 1 in pictures: the same $x_t$ (left) takes one DDIM step straight from $t=0.5$ to $s=0.05$, with the exact $q_s$
+# in grey. Fed a posterior *sample* of $x_0$, the step lands on all eight modes with the right variance. Fed the
+# posterior *mean*, which is what DDIM and DDPM use, it collapses the samples into one blob around the empty centre, and
+# DDPM's fresh noise ($\eta=1$) leaves an even tighter blob.
+
+# %%
+viz_step = np.array([T_BIG, S_BIG])
+viz_panels = [   # (samples, background density, title, colour)
+    (x_t_mc, gmm.noised(abar_fn(T_BIG)), f"start: $x_t\\sim q_t$ at $t={T_BIG}$", "k"),
+    (ddim_sampler(oracle_eps(x0_post), x_t_mc, viz_step), q_s, "DDIM step fed a posterior sample of $x_0$", COL["DDIM"]),
+    (ddim_sampler(eps_exact, x_t_mc, viz_step), q_s, "DDIM step fed the posterior mean", COL["DDIM"]),
+    (ddim_sampler(eps_exact, x_t_mc, viz_step, eta=1.0, gen=torch.Generator().manual_seed(10)), q_s,
+     r"DDPM step ($\eta=1$) fed the posterior mean", COL["DDPM ancestral"])]   # seed 10, as in CHECK 1
+viz_fig, viz_axes = plt.subplots(1, 4, figsize=(13, 3.9), layout="constrained")
+for viz_ax, (viz_x, viz_dist, viz_title, viz_col) in zip(viz_axes, viz_panels):
+    viz_ax.contourf(viz_grid, viz_grid, viz_density(viz_dist), levels=np.linspace(0, 1, 11), cmap=CMAP_DENSITY)
+    viz_ax.scatter(viz_x[:2000, 0], viz_x[:2000, 1], s=1.5, marker="s", color=viz_col, linewidths=0, antialiased=False)
+    viz_ax.set(xlim=(-LIM, LIM), ylim=(-LIM, LIM), aspect="equal", xticks=[], yticks=[],
+               title=f"{viz_title}\ntotal variance {viz_x.var(0).sum():.2f}")
+viz_fig.suptitle(f"One big step $t={T_BIG}\\to s={S_BIG}$ (grey: exact $q_s$, total variance {ref_s.var(0).sum():.2f}): "
+                 "a posterior sample of $x_0$ lands on $q_s$; the posterior mean collapses it")
+plt.show()
 
 # %% [markdown]
 # CHECK 1 sums up the discretisation error of DDIM and DDPM in one line. A single huge step is exact if $x_0$ is drawn
@@ -1001,6 +1067,28 @@ for t_chk in (0.5, 0.2, 0.05):
     fl_t = dm.sliced_wasserstein(q_t.sample(N_TRAJ, generator=torch.Generator().manual_seed(25)), ref_t)
     print(f"  t = {t_chk}:  ODE {dm.sliced_wasserstein(ode_traj[i_o], ref_t):.4f}   "
           f"SDE {dm.sliced_wasserstein(sde_traj[i_s], ref_t):.4f}   exact vs exact {fl_t:.4f}")
+
+# %% [markdown]
+# The marginal check, drawn: histograms of the first coordinate of all particles at the three checked times and at the
+# end, against the exact marginal $p_t(x_1)$. ODE and SDE particles follow the same curve at every time, up to sampling
+# noise; the next figure shows how differently they get there.
+
+# %%
+viz_bins = np.linspace(-LIM, LIM, 41)
+viz_fig, viz_axes = plt.subplots(1, 4, figsize=(13, 3.1), layout="constrained")
+for viz_ax, viz_t in zip(viz_axes, (0.5, 0.2, 0.05, 0.0)):
+    viz_io, viz_is = np.abs(grid_ode - viz_t).argmin(), np.abs(grid_sde - viz_t).argmin()
+    viz_ax.hist(ode_traj[viz_io, :, 0].numpy(), bins=viz_bins, density=True, histtype="step", lw=1.3,
+                color=COL["DDIM"], label="ODE (DDIM) particles")
+    viz_ax.hist(sde_traj[viz_is, :, 0].numpy(), bins=viz_bins, density=True, histtype="step", lw=1.3, ls="--",
+                color=COL["DDPM ancestral"], label="SDE (DDPM) particles")
+    viz_ax.plot(XS_G, x1_marginal_density([grid_ode[viz_io]], XS_G)[:, 0], color="k", lw=1, label="exact $p_t(x_1)$")
+    viz_ax.set(xlabel="first coordinate $x_1$", title=f"$t={grid_ode[viz_io]:.2f}$", xlim=(-LIM, LIM))
+viz_axes[0].set_ylabel("density")
+viz_axes[-1].legend(loc="upper left", fontsize=7)
+viz_fig.suptitle(f"Same marginals: at every $t$ the {N_TRAJ} ODE and SDE particles both follow the exact $p_t(x_1)$, "
+                 "although their paths differ")
+plt.show()
 
 # %%
 N_SHOW = 15
@@ -1592,7 +1680,38 @@ plt.show()
 # noise in the printout above). The ODE transports the latents that lead into those regions faithfully. MMD's bounded
 # kernels barely notice a percent of misplaced samples, while a transport distance like $W_1$ does. Look at more than one
 # metric, and look at the tails.
-#
+
+# %% [markdown]
+# Here are those samples at the largest budget, from the same $x_T$ (DDPM: the sweep's first seed). With the exact score
+# no DDIM sample is stranded. With the trained network some twenty are, mostly in the gaps between neighbouring modes,
+# with a few in the empty centre and far out in the tails; DDPM strands fewer (the counts in the titles depend on the
+# trained network).
+
+# %%
+viz_logp0 = gmm.log_prob(viz_xy).double().reshape(len(viz_grid), len(viz_grid)).numpy()
+viz_n = NFES_8[-1]                                  # the largest budget of the sweep
+viz_runs = [("DDIM, exact score", ddim_sampler(eps_exact, x_T, uniform_grid(viz_n)), COL["DDIM"]),
+            ("DDIM, trained network", ddim_sampler(net_eps, x_T, uniform_grid(viz_n)), COL["DDIM"]),
+            ("DDPM ancestral, trained network",      # = the sweep's first seed
+             ddpm_sampler(net_eps, x_T, uniform_grid(viz_n), gen=torch.Generator().manual_seed(0)),
+             COL["DDPM ancestral"])]
+viz_fig, viz_axes = plt.subplots(1, 3, figsize=(12, 4.4), layout="constrained")
+for viz_ax, (viz_title, viz_x, viz_col) in zip(viz_axes, viz_runs):
+    viz_lost = gmm.log_prob(viz_x) < -10.0            # stranded, as in stranded_fraction
+    viz_ax.contourf(viz_grid, viz_grid, viz_p0, levels=np.linspace(0, 1, 11), cmap=CMAP_DENSITY)
+    viz_ax.contour(viz_grid, viz_grid, viz_logp0, levels=[-10.0], colors="k", linewidths=0.6, linestyles="--")
+    viz_ax.scatter(viz_x[~viz_lost, 0], viz_x[~viz_lost, 1], s=1.5, marker="s", color=viz_col, linewidths=0,
+                   antialiased=False)
+    viz_ax.scatter(viz_x[viz_lost, 0], viz_x[viz_lost, 1], s=20, marker="x", color="k", linewidths=1.0,
+                   label="stranded sample")
+    viz_ax.set(xlim=(-LIM, LIM), ylim=(-LIM, LIM), aspect="equal", xticks=[], yticks=[],
+               title=f"{viz_title}, NFE {viz_n}\n{int(viz_lost.sum())} of {len(viz_x)} samples stranded")
+viz_axes[1].legend(loc="lower left", fontsize=7)
+viz_fig.suptitle("Where the model error hides: a few samples stranded outside the dashed contour ($\\log p=-10$), "
+                 "mostly in the gaps between modes")
+plt.show()
+
+# %% [markdown]
 # **DDPM behaves differently.** At large budgets it typically strands fewer samples, and its $W_1$ comes down into the
 # floor band, close to its exact-score counterpart, instead of levelling off above it (see the printout; the exact
 # numbers depend on the trained network). This is §4.1 at work. The Langevin part
