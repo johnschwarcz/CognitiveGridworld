@@ -592,12 +592,12 @@ plt.show()
 # too, and with a perfect model its remaining error is pure method bias. (A smaller part of the error at $n=100$ grid
 # steps comes from the under-dispersion of strided steps, section 1.1.)
 #
-# **Watching replacement go wrong.** Below, the same ancestral sampler runs twice on fresh particles while we record
-# the denoiser's running guess of the missing coordinate, $\hat x_{0,2}(x_t)$. On the left it follows the *exact*
-# conditional score of $p(x_2\mid x_1=c)$ (a 1-D mixture, so this is what an ideal method would do). On the right it is
+# **Watching replacement go wrong.** The same ancestral sampler runs twice on fresh particles while we record the
+# denoiser's running guess of the missing coordinate, $\hat x_{0,2}(x_t)$. On the left it follows the *exact* score of
+# the conditional $p(x_2\mid x_1=c)$ (a 1-D mixture, so this is what an ideal method would do). On the right it is
 # replacement with the perfect joint model, whose network sees the observation only as
-# $x_{1,t}/\sqrt{\bar\alpha_t}=c+\sigma_t n$, with $\sigma_t=\sqrt{(1-\bar\alpha_t)/\bar\alpha_t}$ on the horizontal
-# axis. Compare where the guesses start, and where the red and black paths separate.
+# $x_{1,t}/\sqrt{\bar\alpha_t}=c+\sigma_t n$, with the noise level $\sigma_t=\sqrt{(1-\bar\alpha_t)/\bar\alpha_t}$ on
+# the horizontal axis.
 
 # %%
 class VizRecorder(torch.nn.Module):
@@ -644,10 +644,14 @@ print(f"E[x2 | x1 = c] = {viz_mean_cond:.2f}, E[x2] = {viz_mean_prior:.2f}; exac
       f"ending below 0.8: exact score {(viz_out_cond < 0.8).float().mean():.3f}, "
       f"replacement {(viz_out_repl[:, 1] < 0.8).float().mean():.3f}")
 
-viz_fig, viz_axes = plt.subplots(1, 2, figsize=(10, 3.7), sharey=True)
+viz_fig, viz_axes = plt.subplots(1, 2, figsize=(9.6, 3.6), sharey=True)
 for viz_ax, (viz_name, viz_guess, viz_final, viz_start, viz_label, viz_dy) in zip(viz_axes, viz_panels):
     viz_low = viz_final < 0.8
-    for viz_i in range(min(30, viz_n)):
+    # draw 20 of the particles, red and black in the same proportions as among all of them
+    viz_n_red = round(min(20, viz_n) * viz_low.float().mean().item())
+    viz_show = torch.cat([torch.nonzero(viz_low).flatten()[:viz_n_red],
+                          torch.nonzero(~viz_low).flatten()[:min(20, viz_n) - viz_n_red]])
+    for viz_i in viz_show.tolist():
         viz_ax.plot(viz_sig, viz_guess[:, viz_i], color=COL["replacement"] if viz_low[viz_i] else COL["exact"],
                     lw=0.7, alpha=0.55)
     viz_ax.annotate(f"{viz_label} = {viz_start:.2f}", (20, viz_start), xytext=(4, viz_dy), textcoords="offset points",
@@ -668,6 +672,11 @@ plt.tight_layout()
 plt.show()
 
 # %% [markdown]
+# The ideal guess starts at $\mathbb E[x_2\mid x_1=c]$ and stays near the main mode, because it conditions on $y$
+# from the first step. Replacement's guess starts at the prior mean, as if nothing had been observed. Its particles
+# split into the two modes as $\sigma_t$ falls from about 3 to 0.5, and the split is well under way in the shaded
+# region, where the noisy $x_1$ cannot yet rule out the components at $0$ and $-2.2$. Once split, they stay split.
+#
 # ### 2.4 Inpainting MNIST digits
 #
 # Now the real model. We use three masks: the bottom half missing, a 12×12 centre square missing, and 85% of the
@@ -1155,8 +1164,8 @@ plt.show()
 # **The Jensen gap, seen directly.** For a GMM prior the denoising posterior $p(x_0\mid x_t)$ is itself a Gaussian
 # mixture, so we can compare what DPS uses, the single point $\hat x_0(x_t)$, with the whole distribution it stands
 # for. We re-run the Bayes-weight sampler on fresh particles, take those that end in the spurious mode, and draw, at a
-# high and a low noise level, their $\hat x_0(x_t)$ next to one sample each from the exact $p(x_0\mid x_t)$. The green
-# band is where the likelihood is high ($|x_1-y|<2\sigma_y$).
+# high and a low noise level ($\sigma_t$ as in section 2.3), their $\hat x_0(x_t)$ next to one sample each from the
+# exact $p(x_0\mid x_t)$. The green band is where the likelihood is high ($|x_1-y|<2\sigma_y$).
 
 # %%
 def viz_posterior_x0(gmm, abar, x_t):
@@ -1176,8 +1185,10 @@ viz_dps = dps_sample(viz_rec_dps, sched_cpu, A_first, torch.full((viz_m, 1), C_O
                      n_steps=10 * TOY_STEPS, zeta=1.0, weighting="bayes", sigma_y=SIGMA_Y_TOY,
                      generator=torch.Generator().manual_seed(91))
 viz_spur = viz_dps[:, 1] < 0.8                           # particles that end in the spurious mode
+print(f"{viz_spur.float().mean():.0%} of {viz_m} particles end in the spurious mode")
 if viz_spur.sum() < 5:                                   # (only possible in a FAST smoke test)
     viz_spur = torch.ones_like(viz_spur)
+    print("(too few to plot, so the figure shows all particles)")
 viz_t_dps = torch.tensor([t for t, _, _ in viz_rec_dps.calls])
 viz_x0h_dps = viz_x0_hat(viz_rec_dps.calls, sched_cpu)  # (steps, particles, 2)
 viz_g = torch.Generator().manual_seed(92)
@@ -1189,7 +1200,6 @@ def viz_in_band(pts):
     return ((pts[:, 0] - C_OBS).abs() < 2 * SIGMA_Y_TOY).double().mean().item()
 
 
-print(f"{(viz_dps[:, 1] < 0.8).float().mean():.0%} of {viz_m} particles end in the spurious mode")
 viz_fig, viz_axes = plt.subplots(1, 2, figsize=(7.6, 5.0), sharey=True)
 for viz_ax, viz_t_target in zip(viz_axes, [400, 50]):
     viz_k = int((viz_t_dps - viz_t_target).abs().argmin())
@@ -1201,6 +1211,14 @@ for viz_ax, viz_t_target in zip(viz_axes, [400, 50]):
     viz_post = viz_mu[torch.arange(len(viz_comp)), viz_comp] + \
         torch.einsum("nij,nj->ni", torch.linalg.cholesky(viz_cov)[viz_comp], viz_z)
     viz_x0h = viz_x0h_dps[viz_k, viz_spur]
+    # exact p_t(y | x_t) = sum_k p(k | x_t) N(y; E[x1 | x_t, k], Var[x1 | x_t, k] + sigma_y^2),
+    # against the value DPS uses, N(y; x0_hat_1, sigma_y^2)
+    viz_var = viz_cov[None, :, 0, 0] + SIGMA_Y_TOY ** 2
+    viz_lik = (viz_w * torch.exp(-0.5 * (C_OBS - viz_mu[..., 0]) ** 2 / viz_var) / (2 * math.pi * viz_var).sqrt()).sum(1)
+    viz_lik_dps = torch.exp(-0.5 * (C_OBS - viz_x0h[:, 0].double()) ** 2 / SIGMA_Y_TOY ** 2) / \
+        math.sqrt(2 * math.pi * SIGMA_Y_TOY ** 2)
+    print(f"t = {viz_tk}: the exact p_t(y | x_t) is a median {(viz_lik / viz_lik_dps).median():.2f} times the value "
+          f"DPS uses, N(y; x0_hat_1, sigma_y^2)")
     viz_ax.scatter(viz_prior[:, 0], viz_prior[:, 1], s=1, color="0.82", label="prior samples")
     viz_ax.axvspan(C_OBS - 2 * SIGMA_Y_TOY, C_OBS + 2 * SIGMA_Y_TOY, color=COL["DPS"], alpha=0.2, lw=0,
                    label=r"likelihood high: $|x_1-y|<2\sigma_y$")
@@ -1219,6 +1237,12 @@ plt.tight_layout(rect=(0, 0.09, 1, 1))
 plt.show()
 
 # %% [markdown]
+# At the high noise level almost every $\hat x_0$ lies in the band, while the posterior samples sit on the components
+# around it, almost all outside. DPS therefore sees a good fit where the exact $p_t(y\mid x_t)$ is small (the printed
+# ratio: about a twentieth of the value DPS uses), so its likelihood term does not push these particles away. At the
+# low noise level the posterior samples have gathered around $\hat x_0$ and the gap has narrowed (to roughly a factor
+# of three), but by then the particles sit between the components.
+#
 # ### 4.2 4× super-resolution of MNIST (7×7 → 28×28)
 #
 # $A$ averages 4×4 blocks and $\sigma_y=0.05$. For each measurement we draw several posterior samples. We compare
@@ -1686,45 +1710,56 @@ plt.show()
 
 # %% [markdown]
 # The geometry as a picture. On the left are the norms of 2000 fresh noise images and of the lerp and slerp midpoints
-# of 2000 random pairs of them: the shell is thin, and the lerp midpoints land far inside it. On the right is the norm
-# along the two interpolation paths above.
+# of 2000 random pairs of them: the shell is thin, and the lerp midpoints land far inside it. In the middle is the norm
+# along the two interpolation paths above, and on the right the amount of ink in their decoded frames.
 
 # %%
 viz_g = torch.Generator().manual_seed(81)
 viz_e = torch.randn(2, 2000, 784, generator=viz_g)              # 2000 pairs of fresh N(0, I) noise images
-viz_norms = {r"fresh noise $\epsilon\sim\mathcal{N}(0,I)$": viz_e[0].norm(dim=1),
-             "lerp midpoint of two noises": lerp(viz_e[0], viz_e[1], 0.5).norm(dim=1),
-             "slerp midpoint of two noises": slerp(viz_e[0], viz_e[1], 0.5).norm(dim=1)}
-viz_shell = list(viz_norms.values())[0]
+viz_shell = viz_e[0].norm(dim=1)
 viz_cols = {"lerp": "tab:brown", "slerp": "tab:cyan"}
-viz_fig, (viz_ax1, viz_ax2) = plt.subplots(1, 2, figsize=(11, 3.6))
-for (viz_name, viz_nrm), viz_colour in zip(viz_norms.items(), [COL["baseline"], viz_cols["lerp"], viz_cols["slerp"]]):
-    viz_ax1.hist(viz_nrm.numpy(), bins=np.linspace(15, 31, 81), color=viz_colour, alpha=0.75, label=viz_name)
+viz_fig, (viz_ax1, viz_ax2, viz_ax3) = plt.subplots(1, 3, figsize=(14, 3.6))
+viz_bins = np.linspace(15, 31, 81)
+viz_ax1.hist(viz_shell.numpy(), bins=viz_bins, color=COL["baseline"], alpha=0.6,
+             label=r"fresh noise $\epsilon\sim\mathcal{N}(0,I)$")
+viz_ax1.hist(lerp(viz_e[0], viz_e[1], 0.5).norm(dim=1).numpy(), bins=viz_bins, color=viz_cols["lerp"], alpha=0.8,
+             label="lerp midpoints of two noises")
+viz_ax1.hist(slerp(viz_e[0], viz_e[1], 0.5).norm(dim=1).numpy(), bins=viz_bins, histtype="step", lw=1.5,
+             color=viz_cols["slerp"], label="slerp midpoints of two noises")
 viz_ax1.axvline(math.sqrt(784), color=COL["exact"], ls="--", lw=1, label=r"$\sqrt{d}=28$")
+viz_ax1.set_ylim(0, 1.45 * viz_ax1.get_ylim()[1])
 viz_ax1.set(xlabel=r"norm $\|z\|$  (d = 784)", ylabel="count",
-            title="Noise lives on a thin shell; lerp midpoints fall inside it")
-viz_ax1.legend(loc="upper left")
+            title="Noise lives on a thin shell;\nlerp midpoints fall far inside it")
+viz_ax1.legend(loc="upper center", ncol=2, fontsize=7)
 viz_lam = torch.linspace(0, 1, 41).tolist()
 for viz_p in range(len(PAIRS)):
+    viz_pair = f"{y_test[PAIRS[viz_p][0]].item()} → {y_test[PAIRS[viz_p][1]].item()}"
     for viz_name, viz_f in [("lerp", lerp), ("slerp", slerp)]:
+        viz_ls = "-" if viz_p == 0 else "--"
         viz_ax2.plot(viz_lam, [viz_f(z0s[viz_p:viz_p + 1], z1s[viz_p:viz_p + 1], lam).norm().item() for lam in viz_lam],
-                     "-" if viz_p == 0 else "--", color=viz_cols[viz_name],
-                     label=f"{viz_name}: {y_test[PAIRS[viz_p][0]].item()} → {y_test[PAIRS[viz_p][1]].item()}")
+                     viz_ls, color=viz_cols[viz_name], label=f"{viz_name}: {viz_pair}")
+        viz_ink = ((decoded[viz_name][viz_p::len(PAIRS)] + 1) / 2).mean(dim=(1, 2, 3))   # mean brightness per frame
+        viz_ax3.plot(LAMS, viz_ink.numpy(), viz_ls, marker="o", ms=3.5, color=viz_cols[viz_name],
+                     label=f"{viz_name}: {viz_pair}")
 viz_ax2.axhspan((viz_shell.mean() - 2 * viz_shell.std()).item(), (viz_shell.mean() + 2 * viz_shell.std()).item(),
                 color=COL["baseline"], alpha=0.3, lw=0, label="fresh noise (mean ± 2 std)")
 viz_ax2.set(xlabel="interpolation weight λ", ylabel=r"$\|z\|$", ylim=(0, 31),
-            title="The inverted latents: lerp dips, slerp keeps the norm")
-viz_ax2.legend(loc="lower left", ncol=3, fontsize=7)
+            title="The inverted latents: lerp dips in the middle,\nslerp moves smoothly between the end points")
+viz_ax2.legend(loc="lower left", ncol=2, fontsize=7)
+viz_ax3.set(xlabel="interpolation weight λ", ylabel="ink: mean pixel brightness", ylim=(0, None),
+            title="Decoded frames: the lerp midpoints\ncarry less ink")
+viz_ax3.legend(loc="lower left", ncol=2, fontsize=7)
 plt.tight_layout()
 plt.show()
 
 # %% [markdown]
 # The norms confirm the geometry: the inverted end points are nearly orthogonal, so lerp dips to roughly
-# $1/\sqrt2\approx0.7$ of their norm in the middle of the path, while slerp keeps the norm all the way. (The end points
-# themselves sit at about 20–22, below $\sqrt d=28$, because inverted latents are smaller than white noise, section
-# 6.1.) Decoded, the lerp midpoints tend to come out thinner and fainter, because the model reads a low-energy latent
-# as an image with less ink. Slerp keeps normal stroke weight all the way. The path still has to cross between the
-# two digit classes somewhere, so expect a few hybrid or third-class frames with either method.
+# $1/\sqrt2\approx0.7$ of their norm in the middle of the path, while slerp keeps the norm all the way, moving smoothly
+# from one end point's norm to the other's when they differ. (The end points themselves sit at about 20–25, below
+# $\sqrt d=28$, because inverted latents are smaller than white noise, section 6.1.) Decoded, the lerp midpoints tend
+# to come out thinner and fainter, because the model reads a low-energy latent as an image with less ink. Slerp keeps
+# normal stroke weight all the way. The path still has to cross between the two digit classes somewhere, so expect a
+# few hybrid or third-class frames with either method.
 #
 # ### 6.3 Class swap: keep the style, change the label
 #

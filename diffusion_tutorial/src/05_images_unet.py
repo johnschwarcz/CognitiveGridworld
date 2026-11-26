@@ -332,6 +332,45 @@ viz_fig.suptitle("BatchNorm makes a sample's output depend on its batch-mates; G
 plt.show()
 
 # %% [markdown]
+# Back to the FiLM check: at random initialisation every gain $1+\gamma_t$ stays close to 1, which is why the output
+# changed by only a few per cent with $t$. The figure shows the gain of each of the 64 channels at every $t$, for our
+# block (left) and for the block of the same shape (32 → 64 channels, at 14×14) in the trained reference U-Net that
+# section 4 uses (right, read straight from its checkpoint file). After training every row changes colour along $t$:
+# most channels are turned down as the noise grows, some are turned up, and many are nearly silenced (dark blue, gain
+# near 0) at some noise levels.
+
+# %%
+from matplotlib.colors import TwoSlopeNorm
+
+viz_ckpt = dm.CKPT_DIR / "mnist_unet_uncond.pt"               # the trained reference U-Net that section 4 uses
+if viz_ckpt.exists():
+    viz_sd = torch.load(viz_ckpt, map_location="cpu", weights_only=True)["ema"]
+    viz_part = lambda prefix: {k.removeprefix(prefix): v for k, v in viz_sd.items() if k.startswith(prefix)}
+    viz_time_mlp, viz_block = copy.deepcopy(time_mlp), copy.deepcopy(block)   # dm.UNet has the same layers and names
+    viz_time_mlp.load_state_dict(viz_part("time_emb."))
+    viz_block.load_state_dict(viz_part("down.2.0."))          # its first block at 14x14: 32 -> 64 channels, like ours
+    viz_tt = torch.arange(1000)
+    with torch.no_grad():                                      # the FiLM gain 1 + gamma_t, as in MyResBlock.forward
+        viz_gains = {"at initialisation (our block above)":
+                         1 + block.emb(F.silu(time_mlp(viz_tt))).chunk(2, dim=1)[0],
+                     "after training (reference U-Net, same-shape block)":
+                         1 + viz_block.emb(F.silu(viz_time_mlp(viz_tt))).chunk(2, dim=1)[0]}
+    viz_fig, viz_axes = plt.subplots(1, 2, figsize=(10, 3.4), sharey=True, layout="constrained")
+    for viz_ax, (viz_name, viz_g) in zip(viz_axes, viz_gains.items()):
+        viz_g = viz_g.double().T.numpy()                                            # (channel, t)
+        viz_order = np.argsort(np.corrcoef(viz_g, viz_tt.numpy()[None])[-1, :-1])  # gain falling with t first
+        viz_im = viz_ax.imshow(viz_g[viz_order], aspect="auto", cmap="RdBu_r", norm=TwoSlopeNorm(1, vmin=0, vmax=2),
+                               extent=[-0.5, 999.5, len(viz_g) - 0.5, -0.5])   # colour 1 (white) = no modulation
+        viz_ax.set(xlabel="t", title=f"{viz_name}\ngains from {viz_g.min():.2f} to {viz_g.max():.2f}")
+    viz_axes[0].set_ylabel("channel (sorted: gain falls with t\nat the top, rises at the bottom)")
+    viz_fig.colorbar(viz_im, ax=viz_axes, extend="both",
+                     label="FiLM gain $1+\\gamma_t$\n(1 = unchanged, 0 = silenced)")
+    viz_fig.suptitle("After training, FiLM turns every channel up or down depending on the noise level")
+    plt.show()
+else:
+    print(f"{viz_ckpt.name} not found: section 4 trains it; re-run this cell afterwards to see the trained gains")
+
+# %% [markdown]
 # ### 2.2 Self-attention at low resolution
 #
 # Treat the $N=HW$ positions of a feature map as tokens $h_i\in\mathbb{R}^C$. With per-head queries, keys and values
@@ -406,7 +445,7 @@ for viz_ax, (viz_name, viz_layer) in zip(viz_axes, [("3x3 conv", lambda z: F.con
     viz_im = viz_ax.imshow(np.ma.masked_equal(viz_share.numpy(), 0), norm=LogNorm(1e-3, 1),
                            cmap=plt.get_cmap("viridis").with_extremes(bad="0.85"))
     viz_ax.add_patch(plt.Rectangle((1.5, 1.5), 3, 3, fill=False, ec="w", lw=1.5, ls="--"))
-    viz_ax.plot(3, 3, "+", color="gold", ms=10, mew=2)
+    viz_ax.plot(3, 3, "+", color="k", ms=10, mew=2)          # black: visible on the bright centre of either map
     viz_ax.set(xticks=[], yticks=[], title=f"{viz_name}: {(viz_share > 0).sum().item()} of 49 positions,\n"
                                            f"{viz_share[~viz_box].sum().item():.0%} of the influence outside the box")
 viz_fig.colorbar(viz_im, ax=viz_axes, shrink=0.9,
