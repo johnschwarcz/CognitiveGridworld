@@ -566,6 +566,50 @@ axes[3].legend()
 plt.tight_layout()
 plt.show()
 
+
+# %% [markdown]
+# The same schedules on **linear axes**. Left, zoomed in: the linear schedule's $eta_t$ really is a straight line,
+# from 0^{-4}$ to /bin/bash.02$, while the cosine one starts smaller and only shoots up in its last few steps. Second: the
+# standard deviations of the signal and noise parts of $; where they cross, the SNR is 1 (about /T=0.25$ for
+# linear, /bin/bash.5$ for cosine). Third: the SNR itself. It starts near 10,000 and almost all of its range is squeezed into
+# the first few steps, which is why the figure above plots its log. Right: the different-$ comparison in terms of
+# $arlpha_t$; the curves lie on top of each other.
+
+# %%
+# Linear-scale views of the noise schedules (uses betas_lin, abar_lin, betas_cos, abar_cos, T from above)
+from matplotlib.lines import Line2D
+lin_t = (torch.arange(T + 1) / T).numpy()
+lin_fig, lin_ax = plt.subplots(1, 4, figsize=(16, 3.6))
+for name, b, ab, c in [("linear", betas_lin, abar_lin, C_LIN), ("cosine", betas_cos, abar_cos, C_COS)]:
+    b, ab = b.numpy(), ab.numpy()
+    lin_ax[0].plot(lin_t[1:], b[1:], color=c, label=name)                         # per-step noise variance
+    lin_ax[1].plot(lin_t, np.sqrt(ab), color=c)                                   # signal std
+    lin_ax[1].plot(lin_t, np.sqrt(1 - ab), color=c, ls="--")                      # noise std
+    lin_ax[2].plot(lin_t[1:], ab[1:] / (1 - ab[1:]), color=c, label=name)         # the SNR itself, not its log
+lin_ax[0].set(ylim=(0, 0.04), xlabel="t / T", ylabel=r"$\beta_t$", title=r"per-step noise $\beta_t$ (zoomed)")
+lin_ax[0].annotate("cosine shoots up to 0.999\nin its last few steps", xy=(0.985, 0.04), xytext=(0.4, 0.033),
+                   arrowprops=dict(arrowstyle="->", color=C_COS), color=C_COS, fontsize=8)
+lin_ax[0].legend(fontsize=8)
+lin_ax[1].set(xlabel="t / T", ylabel="standard deviation",
+              title=r"signal std $\sqrt{\bar\alpha_t}$ (solid), noise std $\sqrt{1-\bar\alpha_t}$ (dashed)")
+lin_ax[1].legend(handles=[Line2D([], [], color=C_LIN, label="linear"), Line2D([], [], color=C_COS, label="cosine")],
+                 fontsize=8, loc="center left")
+lin_ax[2].axhline(1, color="gray", lw=0.6, ls=":")
+lin_ax[2].set(ylim=(0, 4), xlabel="t / T", ylabel="SNR", title=r"SNR $=\bar\alpha_t/(1-\bar\alpha_t)$ (zoomed)")
+lin_ax[2].text(0.36, 3.6, f"starts at {float(abar_lin[1] / (1 - abar_lin[1])):,.0f}: that is why\nthe figure above plots its log",
+               fontsize=8, va="top")
+lin_ax[2].legend(fontsize=8, loc="center right")
+for T_, ls in [(1000, "-"), (100, "--"), (50, ":")]:                                   # same process, different T
+    lin_ref = dm.NoiseSchedule(T_, "linear")
+    lin_ax[3].plot((torch.arange(1, T_ + 1) / T_).numpy(), lin_ref.alpha_bars.cpu().numpy(), color=C_LIN, ls=ls,
+                   label=f"dm, T={T_}")
+lin_b10, lin_ab10 = respace(abar_lin, 10)
+lin_ax[3].plot((torch.arange(11) / 10).numpy(), lin_ab10.numpy(), "ks", ms=5, label="respaced, T=10")
+lin_ax[3].set(xlabel="t / T", ylabel=r"$\bar\alpha_t$", title=r"linear schedule, different T: $\bar\alpha_t$")
+lin_ax[3].legend(fontsize=8)
+plt.tight_layout()
+plt.show()
+
 # %% [markdown]
 # - **$\beta_t$ (log scale):** the cosine schedule starts with smaller steps and ends with much larger ones (the
 #   last step is clipped at 0.999).
