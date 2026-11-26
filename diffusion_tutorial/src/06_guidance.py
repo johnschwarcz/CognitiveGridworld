@@ -212,7 +212,7 @@ for t in [0, 30, 60, 100, 200]:
 # Below, the same check on a finer grid of noise levels, with a contrast: the *clean* classifier $p(y\mid x)$
 # evaluated directly at the noisy $x_t$, as an ordinary classifier would be. Left: both lose accuracy as the noise
 # grows, but only the noise-aware classifier lowers its confidence to match (its two curves coincide), while the
-# clean one stays about 95% sure (shaded: over-confidence). Right: at $t=60$, grouped by the confidence they
+# clean one stays at least 95% sure (shaded: over-confidence). Right: at $t=60$, grouped by the confidence they
 # report, the noise-aware classifier lies on the diagonal and the clean one far below it, which is why guidance
 # needs $p_t(y\mid x_t)$ (Exercise 3 tries the clean one).
 
@@ -771,9 +771,10 @@ with torch.no_grad():
 #
 # Below, the same comparison on a finer grid of noise levels (with fresh noise, so the numbers differ a little from
 # the table), and what guidance makes of it. Left: at every noise level the implicit classifier $\epsilon_c-\epsilon_u$
-# is learned far less accurately, relative to its size, than either prediction. Right: the error of what the sampler
-# actually uses, $\tilde\epsilon=\epsilon_u+w(\epsilon_c-\epsilon_u)$, is smallest near $w=1$ and grows steeply with
-# $w$; at the smaller noise levels it soon exceeds the size of the prediction itself (dashed line).
+# is the worst-learned of the three, relative to its size, and at the lowest and highest noise levels by a large
+# factor. Right: the error of what the sampler actually uses, $\tilde\epsilon=\epsilon_u+w(\epsilon_c-\epsilon_u)$,
+# is smallest near $w=1$ and grows steeply with $w$; at the smaller noise levels it soon exceeds the size of
+# $\epsilon_c$ itself (dashed line).
 
 # %%
 # The error table on a finer grid of noise levels (fresh noise), and the error of the guided prediction against w
@@ -1436,7 +1437,7 @@ viz_gap = [trick_m[viz_name]["div"] - np.interp(trick_m[viz_name]["ink"], viz_in
 viz_ax.set_xlim(right=viz_ink.max() + 0.12)
 viz_ax.set(xlabel="ink relative to real digits (bolder strokes →)", ylabel="within-class diversity, rel. to real",
            title=f"The tricks against plain CFG (arrows start at plain w = {W_TRICK:g})\ndiversity above the curve at "
-                 "the same ink: " + ", ".join(f"{viz_name.split(', ')[-1]} {viz_g:+.2f}"
+                 "the same ink: " + ", ".join(f"{viz_name.split(', ')[-1].split()[0]}: {viz_g:+.2f}"
                                               for viz_name, viz_g in zip(configs, viz_gap)))
 viz_ax.legend(loc="upper right")
 plt.tight_layout()

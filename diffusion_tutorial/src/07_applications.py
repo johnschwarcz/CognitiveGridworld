@@ -261,6 +261,8 @@ def reverse_process(model, schedule, x, ts, y=None, w=1.0, eta=1.0, generator=No
 
 
 # %% [markdown]
+# *Side note — safe to skim: checks that our `predict` and samplers reproduce `dmtools` (to about 1e-6); the one rule: compare stochastic samplers only when they get the same random numbers.*
+#
 # **Check.** Our blocks must reproduce `dmtools` (notebooks 02, 04 and 06): the same predictions, with and without guidance,
 # and the same deterministic ($\eta=0$) and stochastic ($\eta=1$) samplers when given the same random numbers.
 
@@ -406,8 +408,35 @@ print("replacement   (n=8)            :", repaint_path(8, 2, 1))
 # %% [markdown]
 # Reading the RePaint path: it descends to grid index 4, climbs back to 6, descends to 4 again, and so on. Every
 # multiple of `jump` at least `jump` steps below the top (here 4, 2 and 0) is reached $r=3$ times by a denoising step
-# (with $r-1=2$ climbs back in between) before the walk continues downwards.
-#
+# (with $r-1=2$ climbs back in between) before the walk continues downwards. The plot below draws both paths. Only the
+# downward moves (filled dots) call the network; the climbs (open triangles) just add noise. The saw-tooth is where
+# RePaint's extra cost comes from.
+
+# %%
+viz_paths = {"replacement": (repaint_path(8, 2, 1), COL["replacement"]),
+             "RePaint (jump = 2, r = 3)": (repaint_path(8, 2, 3), COL["RePaint"])}
+viz_fig, viz_ax = plt.subplots(figsize=(7.5, 3.0))
+viz_nfe = {}
+for viz_name, (viz_path, viz_colour) in viz_paths.items():
+    viz_p = np.array(viz_path)
+    viz_down = np.diff(viz_p) < 0                  # a denoising move = one network evaluation
+    viz_nfe[viz_name] = int(viz_down.sum())
+    viz_ax.plot(np.arange(len(viz_p)), viz_p, color=viz_colour, lw=1, alpha=0.6)
+    viz_ax.plot(np.flatnonzero(viz_down) + 1, viz_p[1:][viz_down], "o", color=viz_colour, ms=4.5,
+                label=f"{viz_name}: {viz_nfe[viz_name]} denoising moves (network calls)")
+    if (~viz_down).any():
+        viz_ax.plot(np.flatnonzero(~viz_down) + 1, viz_p[1:][~viz_down], "^", color=viz_colour, mfc="white", ms=4.5,
+                    label=f"{viz_name}: {int((~viz_down).sum())} re-noising moves (no network call)")
+viz_ax.set_yticks(range(-1, 8))
+viz_ax.set_yticklabels(["−1 (clean)"] + [str(j) for j in range(7)] + ["7 (noise)"])
+viz_ax.set(xlabel="move number along the path", ylabel="grid index (noise level)",
+           title=f"RePaint climbs back and re-denoises: {viz_nfe['RePaint (jump = 2, r = 3)']} network calls "
+                 f"instead of {viz_nfe['replacement']}")
+viz_ax.legend(loc="upper right", fontsize=7)
+plt.tight_layout()
+plt.show()
+
+# %% [markdown]
 # ### 2.3 The exact lab: inpainting a 2-D Gaussian mixture
 #
 # To separate *method* error from *model* error we use the labelled 2-D mixture of notebook 06 and a **perfect
@@ -563,6 +592,82 @@ plt.show()
 # too, and with a perfect model its remaining error is pure method bias. (A smaller part of the error at $n=100$ grid
 # steps comes from the under-dispersion of strided steps, section 1.1.)
 #
+# **Watching replacement go wrong.** Below, the same ancestral sampler runs twice on fresh particles while we record
+# the denoiser's running guess of the missing coordinate, $\hat x_{0,2}(x_t)$. On the left it follows the *exact*
+# conditional score of $p(x_2\mid x_1=c)$ (a 1-D mixture, so this is what an ideal method would do). On the right it is
+# replacement with the perfect joint model, whose network sees the observation only as
+# $x_{1,t}/\sqrt{\bar\alpha_t}=c+\sigma_t n$, with $\sigma_t=\sqrt{(1-\bar\alpha_t)/\bar\alpha_t}$ on the horizontal
+# axis. Compare where the guesses start, and where the red and black paths separate.
+
+# %%
+class VizRecorder(torch.nn.Module):
+    """Wraps a noise predictor and records (t, x_t, eps) at every call, so we can watch a sampler at work."""
+    n_classes = None
+
+    def __init__(self, inner):
+        super().__init__()
+        self.inner, self.calls = inner, []
+
+    def forward(self, x, t, y=None):
+        eps = self.inner(x, t, y)
+        self.calls.append((int(t[0]), x.detach().clone(), eps.detach().clone()))
+        return eps
+
+
+def viz_x0_hat(calls, sched):
+    """Tweedie estimates x0_hat = (x_t - sqrt(1 - abar_t) eps) / sqrt(abar_t) for every recorded call."""
+    return torch.stack([(x - (1 - sched.alpha_bars[t]).sqrt() * e) / sched.alpha_bars[t].sqrt() for t, x, e in calls])
+
+
+viz_n = 100 if FAST else 600
+viz_g = torch.Generator().manual_seed(89)
+# the ideal: the same eta = 1 sampler, driven by the exact score of the 1-D conditional p(x2 | x1 = c)
+viz_rec_cond = VizRecorder(ExactEps(dm.GaussianMixture(cw, cm[:, None], cv), sched_cpu))
+viz_out_cond = reverse_process(viz_rec_cond, sched_cpu, torch.randn(viz_n, 1, generator=viz_g),
+                               timesteps(T - 1, TOY_STEPS), generator=viz_g)
+# replacement with the perfect joint model (a fresh copy of it, so nothing above changes)
+viz_rec_repl = VizRecorder(ExactEps(gmm, sched_cpu))
+viz_obs = torch.zeros(viz_n, 2)
+viz_obs[:, 0] = C_OBS
+viz_out_repl, _ = inpaint(viz_rec_repl, sched_cpu, viz_obs, mask_toy, n_steps=TOY_STEPS, n_resample=1,
+                          generator=torch.Generator().manual_seed(90))
+viz_t = torch.tensor([t for t, _, _ in viz_rec_repl.calls])
+viz_sig = ((1 - sched_cpu.alpha_bars[viz_t]) / sched_cpu.alpha_bars[viz_t]).sqrt()   # noise level sigma_t
+viz_mean_cond = (cw * cm).sum().item()                                      # E[x2 | x1 = c]
+viz_mean_prior = (gmm.weights * gmm.means[:, 1]).sum().item()              # E[x2], the prior mean
+viz_p_low = (cw * 0.5 * (1 + torch.erf((0.8 - cm) / (2 * cv).sqrt()))).sum().item()   # exact P(x2 < 0.8 | x1 = c)
+viz_panels = [("exact conditional score", viz_x0_hat(viz_rec_cond.calls, sched_cpu)[:, :, 0], viz_out_cond[:, 0],
+               viz_mean_cond, "starts at\n$\\mathbb{E}[x_2\\mid x_1=c]$", -45),
+              ("replacement, perfect model", viz_x0_hat(viz_rec_repl.calls, sched_cpu)[:, :, 1], viz_out_repl[:, 1],
+               viz_mean_prior, "starts at the prior\nmean $\\mathbb{E}[x_2]$", 40)]
+print(f"E[x2 | x1 = c] = {viz_mean_cond:.2f}, E[x2] = {viz_mean_prior:.2f}; exact P(x2 < 0.8 | x1 = c) = {viz_p_low:.3f}; "
+      f"ending below 0.8: exact score {(viz_out_cond < 0.8).float().mean():.3f}, "
+      f"replacement {(viz_out_repl[:, 1] < 0.8).float().mean():.3f}")
+
+viz_fig, viz_axes = plt.subplots(1, 2, figsize=(10, 3.7), sharey=True)
+for viz_ax, (viz_name, viz_guess, viz_final, viz_start, viz_label, viz_dy) in zip(viz_axes, viz_panels):
+    viz_low = viz_final < 0.8
+    for viz_i in range(min(30, viz_n)):
+        viz_ax.plot(viz_sig, viz_guess[:, viz_i], color=COL["replacement"] if viz_low[viz_i] else COL["exact"],
+                    lw=0.7, alpha=0.55)
+    viz_ax.annotate(f"{viz_label} = {viz_start:.2f}", (20, viz_start), xytext=(4, viz_dy), textcoords="offset points",
+                    fontsize=7, va="center", arrowprops=dict(arrowstyle="->", lw=0.7))
+    viz_ax.set(xscale="log", xlim=(30, 0.01), ylim=(-1.5, 3.0),
+               xlabel=r"noise level $\sigma_t$  (sampling runs left to right)",
+               title=f"{viz_name}: {viz_low.float().mean():.0%} end below $x_2=0.8$")
+viz_axes[1].axvspan(1.0, 100.0, color=COL["baseline"], alpha=0.12, lw=0)
+viz_axes[1].text(25, -1.4, "$\\sigma_t>1$: the noisy $x_1$ cannot yet rule out\nthe components at $x_1=0$ and $x_1=-2.2$",
+                 fontsize=7, color="0.3", va="bottom")
+viz_axes[0].plot([], [], color=COL["exact"], label="ends in the main mode, near $x_2=2$")
+viz_axes[0].plot([], [], color=COL["replacement"], label="ends below $x_2=0.8$")
+viz_axes[0].legend(loc="lower left")
+viz_axes[0].set_ylabel(r"$\hat x_{0,2}(x_t)$, the guess of the missing $x_2$")
+viz_fig.suptitle("Replacement ignores the observation at high noise: its guess of $x_2$ starts at the prior mean "
+                 "and splits while $x_1$ is still blurred", fontsize=10)
+plt.tight_layout()
+plt.show()
+
+# %% [markdown]
 # ### 2.4 Inpainting MNIST digits
 #
 # Now the real model. We use three masks: the bottom half missing, a 12×12 centre square missing, and 85% of the
@@ -942,6 +1047,8 @@ def dps_sample(model, schedule, A, y_meas, shape, n_steps, zeta, weighting="dps"
 
 
 # %% [markdown]
+# *Side note — safe to skim: checks the DPS gradient through the U-Net against a finite difference; the cell also defines `A_sr` (4×4 block averaging), the super-resolution operator of section 4.2.*
+#
 # **Check: the gradient through the U-Net.** The backpropagated gradient of $\|y-A\hat x_0(x_t)\|$ must match a
 # finite-difference directional derivative along a random unit direction $v$. (The CPU copy of the 2-D lab's
 # schedule, `sched_cpu`, is defined in section 2.3; it is the same $T=1000$ linear schedule.)
@@ -1045,6 +1152,74 @@ plt.show()
 # $\zeta$ moves the error around; it does not make DPS exact. Despite this bias, DPS is very effective in practice,
 # because it needs nothing but a differentiable $A$.
 #
+# **The Jensen gap, seen directly.** For a GMM prior the denoising posterior $p(x_0\mid x_t)$ is itself a Gaussian
+# mixture, so we can compare what DPS uses, the single point $\hat x_0(x_t)$, with the whole distribution it stands
+# for. We re-run the Bayes-weight sampler on fresh particles, take those that end in the spurious mode, and draw, at a
+# high and a low noise level, their $\hat x_0(x_t)$ next to one sample each from the exact $p(x_0\mid x_t)$. The green
+# band is where the likelihood is high ($|x_1-y|<2\sigma_y$).
+
+# %%
+def viz_posterior_x0(gmm, abar, x_t):
+    """Exact denoising posterior p(x0 | x_t) of a GMM prior: for each particle a mixture (weights, means, covs)."""
+    a = float(abar)
+    S = gmm.covs                                                                      # (K, d, d)
+    gain = math.sqrt(a) * S @ torch.linalg.inv(a * S + (1 - a) * torch.eye(gmm.d, dtype=torch.float64))
+    diff = x_t.double()[:, None, :] - math.sqrt(a) * gmm.means[None]                 # (n, K, d)
+    means = gmm.means[None] + torch.einsum("kij,nkj->nki", gain, diff)               # E[x0 | x_t, k]
+    covs = S - math.sqrt(a) * gain @ S                                                # Cov[x0 | x_t, k]
+    return torch.softmax(gmm.noised(a).component_log_probs(x_t), 1), means, covs     # p(k | x_t), ...
+
+
+viz_rec_dps = VizRecorder(ExactEps(gmm, sched_cpu))
+viz_m = 100 if FAST else 500
+viz_dps = dps_sample(viz_rec_dps, sched_cpu, A_first, torch.full((viz_m, 1), C_OBS), (viz_m, 2),
+                     n_steps=10 * TOY_STEPS, zeta=1.0, weighting="bayes", sigma_y=SIGMA_Y_TOY,
+                     generator=torch.Generator().manual_seed(91))
+viz_spur = viz_dps[:, 1] < 0.8                           # particles that end in the spurious mode
+if viz_spur.sum() < 5:                                   # (only possible in a FAST smoke test)
+    viz_spur = torch.ones_like(viz_spur)
+viz_t_dps = torch.tensor([t for t, _, _ in viz_rec_dps.calls])
+viz_x0h_dps = viz_x0_hat(viz_rec_dps.calls, sched_cpu)  # (steps, particles, 2)
+viz_g = torch.Generator().manual_seed(92)
+viz_prior = gmm.sample(2000, generator=viz_g)
+
+
+def viz_in_band(pts):
+    """Fraction of points whose x1 lies within 2 sigma_y of the measurement y."""
+    return ((pts[:, 0] - C_OBS).abs() < 2 * SIGMA_Y_TOY).double().mean().item()
+
+
+print(f"{(viz_dps[:, 1] < 0.8).float().mean():.0%} of {viz_m} particles end in the spurious mode")
+viz_fig, viz_axes = plt.subplots(1, 2, figsize=(8.6, 4.6), sharey=True)
+for viz_ax, viz_t_target in zip(viz_axes, [400, 50]):
+    viz_k = int((viz_t_dps - viz_t_target).abs().argmin())
+    viz_tk = viz_t_dps[viz_k].item()
+    viz_ab = sched_cpu.alpha_bars[viz_tk]
+    viz_w, viz_mu, viz_cov = viz_posterior_x0(gmm, viz_ab, viz_rec_dps.calls[viz_k][1][viz_spur])
+    viz_comp = torch.multinomial(viz_w, 1, generator=viz_g)[:, 0]
+    viz_z = torch.randn(len(viz_comp), 2, dtype=torch.float64, generator=viz_g)
+    viz_post = viz_mu[torch.arange(len(viz_comp)), viz_comp] + \
+        torch.einsum("nij,nj->ni", torch.linalg.cholesky(viz_cov)[viz_comp], viz_z)
+    viz_x0h = viz_x0h_dps[viz_k, viz_spur]
+    viz_ax.scatter(viz_prior[:, 0], viz_prior[:, 1], s=1, color="0.82", label="prior samples")
+    viz_ax.axvspan(C_OBS - 2 * SIGMA_Y_TOY, C_OBS + 2 * SIGMA_Y_TOY, color=COL["DPS"], alpha=0.2, lw=0,
+                   label=r"likelihood high: $|x_1-y|<2\sigma_y$")
+    viz_ax.scatter(viz_post[:, 0], viz_post[:, 1], s=6, color=COL["exact"], alpha=0.5,
+                   label=r"one sample of the exact $p(x_0\mid x_t)$ per particle")
+    viz_ax.scatter(viz_x0h[:, 0], viz_x0h[:, 1], s=9, color=COL["DPS"], edgecolor="k", lw=0.3,
+                   label=r"$\hat x_0(x_t)=\mathbb{E}[x_0\mid x_t]$, the point DPS uses")
+    viz_ax.set(xlim=(-3.5, 2.5), ylim=(-2.5, 3.2), xlabel="$x_1$", aspect="equal",
+               title=f"t = {viz_tk} ($\\sigma_t$ = {math.sqrt((1 - viz_ab) / viz_ab):.2g}): in the band are\n"
+                     f"{viz_in_band(viz_x0h):.0%} of the $\\hat x_0$, {viz_in_band(viz_post):.0%} of the posterior samples")
+viz_axes[0].set_ylabel("$x_2$")
+viz_axes[0].legend(*viz_axes[0].get_legend_handles_labels(), loc="upper center", bbox_to_anchor=(1.0, -0.17),
+                   ncol=2, markerscale=2, fontsize=7.5)
+viz_fig.suptitle("DPS particles that end in the spurious mode: at high noise their $\\hat x_0$ fits $y$,\n"
+                 "although almost none of the posterior it summarises does", fontsize=10)
+plt.tight_layout()
+plt.show()
+
+# %% [markdown]
 # ### 4.2 4× super-resolution of MNIST (7×7 → 28×28)
 #
 # $A$ averages 4×4 blocks and $\sigma_y=0.05$. For each measurement we draw several posterior samples. We compare
@@ -1328,6 +1503,40 @@ for v0 in [1.0, 0.25]:
     print(f"  prior variance {v0:4.2f} | " + "   ".join(row) + f"   (used above: {n_used} steps)")
 
 # %% [markdown]
+# The two printed tables as one picture. On the left, each measured ratio (markers) lies below its value for an exact
+# posterior sampler (dashed line of the same colour). On the right, the closed-form variance ratio of our sampler with a
+# perfect denoiser climbs towards 1 as the steps get finer, and the measured MNIST spread at the step count we used
+# (cyan dot) sits below even that curve.
+
+# %%
+viz_steps = sorted({int(n) for n in np.geomspace(3, t_s + 1, 12).round()} | {n_used})
+viz_fig, (viz_ax1, viz_ax2) = plt.subplots(1, 2, figsize=(11, 3.7))
+viz_series = [("mse_sample", "MSE of one sample", 2.0, COL["sample"], "s"),
+              ("mse_mean", f"MSE of the mean of {K_DN} samples", 1 + 1 / K_DN, "tab:brown", "D"),
+              ("spread", "spread of the samples", 1.0, "tab:cyan", "o")]
+for viz_key, viz_label, viz_theory, viz_colour, viz_mk in viz_series:
+    viz_ax1.plot(SIGMAS, [dn[s][viz_key] / dn[s]["mse_tweedie"] for s in SIGMAS], viz_mk + "-", color=viz_colour,
+                 label=f"{viz_label} (exact sampler: {viz_theory:.3g})")
+    viz_ax1.axhline(viz_theory, ls="--", lw=1, color=viz_colour)
+viz_ax1.set(xlabel="noise level σ of the noisy image", ylabel="ratio to MSE(Tweedie)", ylim=(0, 2.35),
+            xlim=(0, max(SIGMAS) + 0.5), title="MNIST: all three ratios fall short of the exact-sampler values")
+viz_ax1.legend(loc="lower right")
+for viz_v0, viz_mk in [(1.0, "o"), (0.25, "s")]:
+    viz_ax2.plot(viz_steps, [strided_spread(viz_v0, t_s, n)[1] for n in viz_steps], viz_mk + "-", ms=4,
+                 color=COL["exact"], alpha=1.0 if viz_v0 == 1.0 else 0.45,
+                 label=f"perfect denoiser, Gaussian prior N(0, {viz_v0:g})")
+if 1.0 in dn:                                             # the MNIST measurement at sigma = 1, made with n_used steps
+    viz_ax2.plot(dn[1.0]["n_steps"], dn[1.0]["spread"] / dn[1.0]["mse_tweedie"], "o", ms=8, color="tab:cyan",
+                 mec="k", label="MNIST, σ = 1: spread / MSE(Tweedie)")
+viz_ax2.axhline(1.0, ls="--", lw=1, color=COL["exact"])
+viz_ax2.axvline(n_used, ls=":", color=COL["baseline"], label=f"steps used above ({n_used})")
+viz_ax2.set(xscale="log", ylim=(0, 1.1), xlabel=f"reverse steps from t* = {t_s} (σ = 1)",
+            ylabel="sampler variance / posterior variance", title="Even a perfect denoiser under-disperses with few steps")
+viz_ax2.legend(loc="lower right")
+plt.tight_layout()
+plt.show()
+
+# %% [markdown]
 # Even with a perfect denoiser, the step count used above leaves the samples with noticeably too little variance,
 # and the deficit shrinks as the steps get finer. This accounts for part of the measured shortfall; the imperfect
 # model accounts for the rest. (Exercise 4 lets you check it on MNIST by refining the steps.) For the
@@ -1473,6 +1682,40 @@ for p in range(len(PAIRS)):
         labels.append(f"{name}: {y_test[PAIRS[p][0]].item()} → {y_test[PAIRS[p][1]].item()}")
 image_grid(rows, row_labels=labels, col_labels=[f"λ={l:.2f}" for l in LAMS], size=0.85,
            title="Interpolating DDIM latents")
+plt.tight_layout()
+plt.show()
+
+# %% [markdown]
+# The geometry as a picture. On the left are the norms of 2000 fresh noise images and of the lerp and slerp midpoints
+# of 2000 random pairs of them: the shell is thin, and the lerp midpoints land far inside it. On the right is the norm
+# along the two interpolation paths above.
+
+# %%
+viz_g = torch.Generator().manual_seed(81)
+viz_e = torch.randn(2, 2000, 784, generator=viz_g)              # 2000 pairs of fresh N(0, I) noise images
+viz_norms = {r"fresh noise $\epsilon\sim\mathcal{N}(0,I)$": viz_e[0].norm(dim=1),
+             "lerp midpoint of two noises": lerp(viz_e[0], viz_e[1], 0.5).norm(dim=1),
+             "slerp midpoint of two noises": slerp(viz_e[0], viz_e[1], 0.5).norm(dim=1)}
+viz_shell = list(viz_norms.values())[0]
+viz_cols = {"lerp": "tab:brown", "slerp": "tab:cyan"}
+viz_fig, (viz_ax1, viz_ax2) = plt.subplots(1, 2, figsize=(11, 3.6))
+for (viz_name, viz_nrm), viz_colour in zip(viz_norms.items(), [COL["baseline"], viz_cols["lerp"], viz_cols["slerp"]]):
+    viz_ax1.hist(viz_nrm.numpy(), bins=np.linspace(15, 31, 81), color=viz_colour, alpha=0.75, label=viz_name)
+viz_ax1.axvline(math.sqrt(784), color=COL["exact"], ls="--", lw=1, label=r"$\sqrt{d}=28$")
+viz_ax1.set(xlabel=r"norm $\|z\|$  (d = 784)", ylabel="count",
+            title="Noise lives on a thin shell; lerp midpoints fall inside it")
+viz_ax1.legend(loc="upper left")
+viz_lam = torch.linspace(0, 1, 41).tolist()
+for viz_p in range(len(PAIRS)):
+    for viz_name, viz_f in [("lerp", lerp), ("slerp", slerp)]:
+        viz_ax2.plot(viz_lam, [viz_f(z0s[viz_p:viz_p + 1], z1s[viz_p:viz_p + 1], lam).norm().item() for lam in viz_lam],
+                     "-" if viz_p == 0 else "--", color=viz_cols[viz_name],
+                     label=f"{viz_name}: {y_test[PAIRS[viz_p][0]].item()} → {y_test[PAIRS[viz_p][1]].item()}")
+viz_ax2.axhspan((viz_shell.mean() - 2 * viz_shell.std()).item(), (viz_shell.mean() + 2 * viz_shell.std()).item(),
+                color=COL["baseline"], alpha=0.3, lw=0, label="fresh noise (mean ± 2 std)")
+viz_ax2.set(xlabel="interpolation weight λ", ylabel=r"$\|z\|$", ylim=(0, 31),
+            title="The inverted latents: lerp dips, slerp keeps the norm")
+viz_ax2.legend(loc="lower left", ncol=3, fontsize=7)
 plt.tight_layout()
 plt.show()
 

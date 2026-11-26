@@ -780,10 +780,10 @@ print(f"CHECK 4: DDIM(eta=1) == DDPM ancestral (20 steps): max |diff| = {(ours_d
 assert torch.allclose(ours_ddim, ours_ddpm, atol=1e-9)
 
 # %% [markdown]
-# CHECK 1 in pictures: the same $x_t$ (left) takes one DDIM step straight from $t=0.5$ to $s=0.05$, with the exact $q_s$
-# in grey. Fed a posterior *sample* of $x_0$, the step lands on all eight modes with the right variance. Fed the
-# posterior *mean*, which is what DDIM and DDPM use, it collapses the samples into one blob around the empty centre, and
-# DDPM's fresh noise ($\eta=1$) leaves an even tighter blob.
+# CHECK 1 in pictures: the same $x_t$ (left, over the exact $q_t$ in grey) takes one DDIM step straight from $t=0.5$ to
+# $s=0.05$ (the exact $q_s$ in grey). Fed a posterior *sample* of $x_0$, the step lands on all eight modes with the right
+# variance. Fed the posterior *mean*, which is what DDIM and DDPM use, it collapses the samples into one blob around the
+# empty centre, and DDPM's fresh noise ($\eta=1$) leaves an even tighter blob.
 
 # %%
 viz_step = np.array([T_BIG, S_BIG])
@@ -799,8 +799,8 @@ for viz_ax, (viz_x, viz_dist, viz_title, viz_col) in zip(viz_axes, viz_panels):
     viz_ax.scatter(viz_x[:2000, 0], viz_x[:2000, 1], s=1.5, marker="s", color=viz_col, linewidths=0, antialiased=False)
     viz_ax.set(xlim=(-LIM, LIM), ylim=(-LIM, LIM), aspect="equal", xticks=[], yticks=[],
                title=f"{viz_title}\ntotal variance {viz_x.var(0).sum():.2f}")
-viz_fig.suptitle(f"One big step $t={T_BIG}\\to s={S_BIG}$ (grey: exact $q_s$, total variance {ref_s.var(0).sum():.2f}): "
-                 "a posterior sample of $x_0$ lands on $q_s$; the posterior mean collapses it")
+viz_fig.suptitle(f"One big step $t={T_BIG}\\to s={S_BIG}$ (grey: the exact $q_t$ and $q_s$; $q_s$ has total variance "
+                 f"{ref_s.var(0).sum():.2f}): a posterior sample of $x_0$ lands on $q_s$; the posterior mean collapses it")
 plt.show()
 
 # %% [markdown]
