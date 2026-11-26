@@ -41,7 +41,7 @@
 # 06 (conditioning, guidance), 07 (inpainting with the replacement trick and RePaint; DPS, which Section 6
 # builds on).
 #
-# **Runtime:** about 4 min on a 4-core CPU (mostly training three small diffusion MLPs, about a
+# **Runtime:** about 4–5 min on a 4-core CPU (mostly training three small diffusion MLPs, about a
 # minute each), 1–3 min on a GPU.
 
 # %%

@@ -31,7 +31,7 @@
 # **Prerequisites:** 01 (forward process, schedules), 02 (DDPM loss and ancestral sampling),
 # 03 (scores, Tweedie's formula), 04 (DDIM).
 #
-# **Runtime:** CPU ≈ 10 min on a 4-core machine (about 9 min measured), more than half of it the in-notebook training
+# **Runtime:** CPU ≈ 10–12 min on a 4-core machine (about 11 min measured), more than half of it the in-notebook training
 # run (bfloat16 autocast; slower on a busy machine). CUDA GPU ≈ 5 min with the GPU default of 4 000 training
 # steps. Only if the shipped reference checkpoint is missing does `dmtools` train it, once (section 4): ≈ 10 min
 # more on a GPU, about an hour on a CPU.
