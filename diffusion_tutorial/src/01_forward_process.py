@@ -296,6 +296,9 @@ print(f"abar_T: discrete prod(1 - beta_t) = {abar_lin[-1]:.2e},  VP-SDE exp(-int
 # > lines `(B,)` up with the *last* axis (width 28). It raises an error, or, worse, silently does the
 # > wrong thing when the batch size happens to equal 28.
 
+# %% [markdown]
+# *Side note — safe to skim: the part of the next cell after `q_sample` (CHECK 1) only checks our code against dmtools and demonstrates the off-by-one; the rule to remember: dmtools' `t` = maths $t-1$.*
+
 # %%
 def q_sample(x0, t, abar, noise=None):
     """One-shot sample from q(x_t | x_0) = N(sqrt(abar_t) x0, (1 - abar_t) I).
@@ -388,11 +391,80 @@ plt.tight_layout()
 plt.show()
 
 # %% [markdown]
-# The two clouds overlap at every $t$. Means and variances agree with the closed form up to Monte
-# Carlo error, and the MMD between "chain" and "one shot" should match the floor between two
-# independent one-shot draws to within a couple of standard errors (compare the last two columns): the
-# step-by-step chain and the closed form are statistically indistinguishable. From now on we never need
-# to run the chain.
+# Overlaid clouds are hard to compare by eye, so the next figure makes the comparison explicit. **Top:** 1000 chains
+# started from one data point $x_0$ (star) form a blob whose centre slides towards the origin (where the grey axes
+# cross) along $\sqrt{\bar\alpha_t}\,x_0$ while it widens like $\sqrt{1-\bar\alpha_t}$, filling the dashed circle that
+# holds 95% of $q(x_t\mid x_0)$. **Bottom:** over the whole roll, the chain's histogram (blue) lies on the one-shot
+# histogram (olive) and on the exact density that the closed form predicts (black).
+
+# %%
+# Top row: 1000 chains started from ONE data point x_0, against the closed form q(x_t | x_0). The loop is the one in
+# forward_chain, but it draws from its own random generator, so the cells below still get the same random numbers.
+viz_roll = x_roll.cpu().double()
+viz_x0 = viz_roll[(viz_roll - torch.tensor([-1.9, 0.0], dtype=torch.float64)).norm(dim=1).argmin()]  # left arm
+viz_gen = torch.Generator().manual_seed(1)
+viz_x, viz_end = viz_x0.repeat(1000, 1), {}
+for viz_t in range(1, max(check_t) + 1):
+    viz_b = betas_lin[viz_t].item()
+    viz_x = math.sqrt(1 - viz_b) * viz_x + math.sqrt(viz_b) * torch.randn(viz_x.shape, generator=viz_gen,
+                                                                           dtype=torch.float64)
+    if viz_t in check_t:
+        viz_end[viz_t] = viz_x
+viz_mean = (abar_lin.sqrt()[:, None] * viz_x0).numpy()     # closed-form mean sqrt(abar_s) x_0, for every s
+viz_r95 = math.sqrt(-2 * math.log(0.05))                   # a 2-D Gaussian has 95% of its mass within 2.45 s.d.
+viz_ang = np.linspace(0, 2 * np.pi, 200)
+# Bottom row: the first coordinate of x_t over the whole roll (the same samples as in the table above)
+viz_grid = torch.linspace(-3.3, 3.3, 400, dtype=torch.float64)
+viz_bins = np.linspace(-3.3, 3.3, 67)
+viz_fig, viz_axes = plt.subplots(2, len(check_t), figsize=(3.1 * len(check_t), 6.2),
+                                 gridspec_kw=dict(height_ratios=[1.2, 1]))
+viz_inside = []
+for viz_j, viz_t in enumerate(check_t):
+    viz_a = abar_lin[viz_t].item()
+    viz_m, viz_r = viz_mean[viz_t], viz_r95 * math.sqrt(1 - viz_a)
+    viz_inside.append((((viz_end[viz_t].numpy() - viz_m) ** 2).sum(1) < viz_r ** 2).mean())
+    viz_ax = viz_axes[0, viz_j]
+    viz_ax.axhline(0, color="0.85", lw=0.6, zorder=0)
+    viz_ax.axvline(0, color="0.85", lw=0.6, zorder=0)
+    dm.scatter2d(viz_roll[:300], ax=viz_ax, s=1, alpha=0.35, c="0.6", lim=3.2)
+    dm.scatter2d(viz_end[viz_t], ax=viz_ax, s=2, alpha=0.45, c=C_VP, lim=3.2)
+    viz_ax.plot([], [], "o", ms=3, color=C_VP, label="$x_t$ of 1000 chains from $x_0$")
+    viz_ax.plot(viz_mean[:viz_t + 1, 0], viz_mean[:viz_t + 1, 1], color=C_THEORY, lw=1.2)
+    viz_ax.plot(*viz_m, "+", color=C_THEORY, ms=9, mew=1.8, ls="-", lw=1.2,
+                label=r"closed-form mean $\sqrt{\bar\alpha_t}\,x_0$ (and its path)")
+    viz_ax.plot(viz_m[0] + viz_r * np.cos(viz_ang), viz_m[1] + viz_r * np.sin(viz_ang), "--", color=C_THEORY,
+                lw=1.2, label=r"95% circle of $q(x_t\mid x_0)$")
+    viz_ax.plot(*viz_x0.numpy(), "*", ms=11, color="k", mfc="w", ls="none", label="start $x_0$")
+    viz_ax.set_title(rf"t = {viz_t}, $\bar\alpha_t$ = {viz_a:.3f}")
+    viz_ax.text(0.03, 0.03, f"{viz_inside[-1]:.1%} of chains inside", transform=viz_ax.transAxes, fontsize=8)
+    viz_ax = viz_axes[1, viz_j]
+    # exact density of the first coordinate implied by the closed form, averaged over all data points x_0
+    viz_dens = torch.exp(-0.5 * (viz_grid[:, None] - math.sqrt(viz_a) * viz_roll[None, :, 0]) ** 2
+                         / (1 - viz_a)).mean(1) / math.sqrt(2 * math.pi * (1 - viz_a))
+    viz_ax.hist(chain[viz_t][:, 0].cpu().numpy(), bins=viz_bins, density=True, color=C_VP, alpha=0.35,
+                label="chain, step by step")
+    viz_ax.hist(one_shot[viz_t][:, 0].cpu().numpy(), bins=viz_bins, density=True, histtype="step",
+                color=C_ONESHOT, lw=1.5, label=r"one shot from $q(x_t\mid x_0)$")
+    viz_ax.plot(viz_grid.numpy(), viz_dens.numpy(), color=C_THEORY, lw=1, label="closed form (exact density)")
+    viz_ax.set(xlabel="first coordinate of $x_t$", xlim=(-3.3, 3.3))
+viz_axes[0, 0].set_ylabel("one data point $x_0$, 1000 chains")
+viz_axes[1, 0].set_ylabel(f"all {N:,} data points: density")
+viz_axes[0, 0].legend(loc="upper right", fontsize=7, framealpha=0.9)
+viz_axes[1, 0].legend(loc="upper left", fontsize=7)
+viz_fig.suptitle("Running the chain step by step and jumping in one shot give the same distribution of $x_t$")
+plt.tight_layout()
+plt.show()
+print("chains from x_0 that end inside the 95% circle: "
+      + ",  ".join(f"t = {viz_t}: {viz_p:.1%}" for viz_t, viz_p in zip(check_t, viz_inside))
+      + f"   (expected: 95%, binomial s.e. {math.sqrt(0.95 * 0.05 / 1000):.1%})")
+
+# %% [markdown]
+# In both rows the chain lands where the closed form says: about 95% of the chains end inside each circle (written in
+# each panel and in the printout), and the histograms differ only by Monte Carlo noise. The table above adds the
+# numbers: the means and the variance of the first coordinate agree with the closed form up to Monte Carlo error, and
+# the MMD, which compares the full 2-D distributions, should match the floor between two independent one-shot draws to
+# within a couple of standard errors (compare its last two columns). The step-by-step chain and the closed form are
+# statistically indistinguishable, so from now on we never need to run the chain.
 
 # %% [markdown]
 # ## 4 · Noise schedules: what really matters is the SNR curve
@@ -534,7 +606,9 @@ plt.show()
 # %% [markdown]
 # Under the linear schedule (top) the digit is barely readable by $t/T\approx 0.4$ and gone by $0.5$. Every
 # later column is pure noise to the eye, yet half of the 1000 steps live there. The cosine schedule
-# (bottom) keeps the digit recognisable for much longer and destroys it more gradually. The linear schedule is
+# (bottom) keeps the digit recognisable for much longer and destroys it more gradually. Panels with the same
+# $\bar\alpha$ look the same in both rows (linear at $t/T=0.1$ and cosine at $t/T=0.2$ both have $\bar\alpha=0.90$): the
+# noised image depends on $t$ only through $\bar\alpha_t$, whatever the schedule. The linear schedule is
 # nonetheless what DDPM and our MNIST models (notebooks 05–07, and the latent model of 09) use: it works, it just wastes steps.
 # For small $28\times28$ images this "destroys too early" effect is strongest, which was a main motivation
 # for the cosine schedule.
@@ -569,6 +643,9 @@ plt.show()
 # The weights are unchanged, the means shrink, and the covariances inflate towards $I$. This GMM
 # "laboratory" is used throughout the tutorial (`dm.GaussianMixture.noised`), because it lets us
 # separate a model's errors from a sampler's errors.
+
+# %% [markdown]
+# *Side note — safe to skim: the part of the next cell after `noised_gmm` (CHECK 1 and CHECK 2) only checks the formula against dmtools and against noised samples; the figure after it shows the same agreement.*
 
 # %%
 def noised_gmm(gmm, abar_t):
@@ -818,8 +895,79 @@ plt.show()
 # longest, until the SNR drops to about 1 ($\lambda\approx0$). The dashed variance-explained curves give the same
 # order (see the printed half-way points), so the ordering is a property of the data, not of the measure. Note
 # also that the side is still half-known around the point where the 1-D density of section 5 has merged into
-# a single bump: information outlives visible structure.
-#
+# a single bump: information outlives visible structure. The next figure shows this in one picture: its first three
+# panels split $q_t$ (black outline: what you see) into the parts that come from the left family (grey) and the right
+# family (green), and the last panel marks the same three noise levels on the side curve of the figure above.
+
+# %%
+# Where does the 1-D density lose its last dip, and how much does x_t still say about the side after that?
+# Exact float64 densities on a grid (no random numbers); the side curve is the one plotted above.
+viz_xs = torch.linspace(-6, 6, 2401, dtype=torch.float64)[:, None]
+viz_dx = (viz_xs[1, 0] - viz_xs[0, 0]).item()
+
+
+def viz_family_parts(lam):
+    """q_t on viz_xs at log-SNR lam, split by family: (left part, right part). The two parts sum to q_t."""
+    viz_c = gmm1d.noised(torch.sigmoid(torch.tensor(float(lam))).item()).component_log_probs(viz_xs).exp()
+    viz_lr = (viz_c @ side_onehot).numpy()                                  # (len(viz_xs), 2)
+    return viz_lr[:, 0], viz_lr[:, 1]
+
+
+def viz_n_bumps(lam):
+    """Number of local maxima of q_t at log-SNR lam."""
+    viz_d = sum(viz_family_parts(lam))
+    return int(((viz_d[1:-1] > viz_d[:-2]) & (viz_d[1:-1] > viz_d[2:])).sum())
+
+
+def viz_best_guess(lam):
+    """Probability that the observer's best guess of the side (the larger of the two parts at x_t) is right."""
+    return float(np.maximum(*viz_family_parts(lam)).sum() * viz_dx)
+
+
+viz_lam_grid = np.round(np.arange(4.0, -4.0, -0.01), 2)                      # high -> low SNR
+viz_bumps = np.array([viz_n_bumps(viz_l) for viz_l in viz_lam_grid])
+viz_lam_merge = float(viz_lam_grid[np.where(viz_bumps > 1)[0].max() + 1])   # first level with a single bump
+viz_kept = lambda lam: float(np.interp(lam, lam_np[::-1], kept_side[::-1]))   # side information retained, I/H
+
+viz_show = [2.0, -0.5, -2.0]       # two bumps; one smooth bump just after the merge; one bump at more noise
+viz_xx = viz_xs[:, 0].numpy()
+viz_fig6, viz_axes6 = plt.subplots(1, 4, figsize=(14, 3.5), gridspec_kw=dict(width_ratios=[1, 1, 1, 1.15]))
+for viz_ax6, viz_l in zip(viz_axes6, viz_show):
+    viz_left, viz_right = viz_family_parts(viz_l)
+    viz_ax6.fill_between(viz_xx, viz_left, color="0.55", alpha=0.35, lw=0, label="part from the left family")
+    viz_ax6.fill_between(viz_xx, viz_right, color="tab:green", alpha=0.4, lw=0, label="part from the right family")
+    viz_ax6.plot(viz_xx, viz_left + viz_right, color="k", lw=1.5, label="$q_t(x)$: what you see")
+    viz_what = {1: "one bump", 2: "two bumps"}.get(viz_n_bumps(viz_l), f"{viz_n_bumps(viz_l)} bumps")
+    viz_ax6.set_title(rf"$\lambda$ = {viz_l:+.1f}: {viz_what}" + f"\nside information retained: {viz_kept(viz_l):.0%}")
+    viz_ax6.set(xlim=(-3.5, 3.5), ylim=(0, 1.5 * (viz_left + viz_right).max()), xlabel="$x_t$", yticks=[])
+viz_axes6[0].set_ylabel("density")
+viz_axes6[0].legend(loc="upper left", fontsize=7)
+viz_ax6 = viz_axes6[3]
+viz_ax6.axvspan(viz_lam_merge, -10, color="0.92", lw=0)
+viz_ax6.text(viz_lam_merge - 0.3, 0.97, "$q_t$ has a single bump", va="top", fontsize=8)
+viz_ax6.plot(lam_np, kept_side, color="tab:green", label="side (coarsest)")
+viz_ax6.plot(viz_show, [viz_kept(viz_l) for viz_l in viz_show], "o", color="k", ms=5, label="the three panels")
+viz_ax6.set(xlim=(8, -8), ylim=(-0.03, 1.05), xlabel=r"log-SNR $\lambda$   (more noise $\rightarrow$)",
+            ylabel="fraction retained, $I/H$", title="The side outlives the last dip")
+viz_ax6.legend(loc="lower left", fontsize=7)
+viz_fig6.suptitle("Information outlives visible structure: after $q_t$ has lost its last dip, $x_t$ still carries "
+                  "information about the side")
+plt.tight_layout()
+plt.show()
+print(f"q_t loses its last dip at log-SNR = {viz_lam_merge:+.2f} (t/T = "
+      f"{np.interp(-viz_lam_merge, -lam_lin, np.arange(1, T + 1) / T):.2f} under the linear schedule), where "
+      f"{viz_kept(viz_lam_merge):.0%} of the side information is retained")
+print("the observer's best guess of the side from x_t alone is right "
+      + ", ".join(f"{viz_best_guess(viz_l):.0%} of the time at log-SNR {viz_l:+.1f}" for viz_l in viz_show)
+      + f"\n(always guessing the larger family is right {w_side.max():.0%} of the time)")
+
+# %% [markdown]
+# $q_t$ loses its last dip at $\lambda\approx0$, about a quarter of the way through the linear schedule (printout), and in
+# the second panel ($\lambda=-0.5$) it is one smooth bump. Yet its grey and green parts are still clearly shifted apart,
+# so where $x_t$ falls inside the bump still tells which side it came from: the observer's best guess is right about 81%
+# of the time there, against 55% for always guessing the larger family.
+
+# %% [markdown]
 # Noise destroys information from fine to coarse, so the reverse process must *create* it **from coarse to
 # fine**: early (high-noise) denoising steps decide the global layout (which side, which mode), and late
 # (low-noise) steps fill in detail. Look for this order whenever you watch a sampling trajectory in later
@@ -931,6 +1079,9 @@ plt.show()
 # mixture of these Gaussians, $q(x_{t-1}\mid x_t)=\mathbb E_{x_0\sim q(x_0\mid x_t)}\big[q(x_{t-1}\mid x_t,x_0)\big]$, so its mean is $\tilde\mu_t$
 # with $x_0$ replaced by $\mathbb E[x_0\mid x_t]$ (Tweedie's formula, notebook 03).
 
+# %% [markdown]
+# *Side note — safe to skim: the part of the next cell after `posterior_coefs` only checks the boxed formulas against dmtools, the Kalman weights and the $\varepsilon$-form of $\tilde\mu_t$; the rule to remember: $\tilde\beta_1=0$, so a sampler with $\sigma_t^2=\tilde\beta_t$ adds no noise at its last step.*
+
 # %%
 def posterior_coefs(betas, abar):
     """Coefficients of q(x_{t-1} | x_t, x_0) = N(c_x0[t] x0 + c_xt[t] x_t, var[t]), for t = 1..T.
@@ -975,6 +1126,8 @@ assert torch.allclose(mu_x0_form, mu_eps_form, atol=1e-10)
 print("x0-form and eps-form of mu_tilde agree")
 
 # %% [markdown]
+# *Side note — safe to skim: a Monte Carlo regression confirms the posterior coefficients and variance on a coarse 10-step schedule; the figure after it shows the same match.*
+#
 # **Monte Carlo check.** The formula holds for any step size, so we test it where it is least
 # trivial: a coarse 10-step schedule (respaced from the linear one) whose $\beta$'s are large. We sample
 # $x_0$ from the 1-D mixture, then $x_{t-1}\sim q(x_{t-1}\mid x_0)$, then one forward step to get $x_t$. Since
