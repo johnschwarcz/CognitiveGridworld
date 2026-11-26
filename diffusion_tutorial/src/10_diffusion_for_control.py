@@ -1312,6 +1312,32 @@ for name, (fn, k) in controllers.items():
 # together. The diffusion policy needs no such luck because it commits to
 # a mode by *sampling*. Either way, closed loop costs compute: one planning run per replanning step.
 #
+# Here is that ridge, without the push: the same BC network from 17 starts along $x=-1$, executed
+# open loop (left) and with replanning every 4 steps (right). Black paths reached the goal, red ones
+# crashed (×).
+
+# %%
+viz_line = np.stack([np.full(17, -1.0), np.linspace(-0.4, 0.4, 17)], 1)   # 17 starts along x = -1
+viz_fig, viz_axes = plt.subplots(1, 2, figsize=(8, 3.5))
+for viz_ax, (viz_name, viz_k) in zip(viz_axes, [("BC regression, open loop", None),
+                                               ("BC regression, closed loop (k=4)", 4)]):
+    viz_res = run_episode(bc_planner, viz_line, replan_every=viz_k)        # no push; BC is deterministic
+    draw_rollouts(viz_ax, viz_res, f"{viz_name}\n{viz_res['crashed'].sum()} of {len(viz_line)} crash")
+viz_crash_y = roll_starts[run_episode(bc_planner, roll_starts, replan_every=4)["crashed"], 1]
+print(f"closed-loop BC, all {len(roll_starts)} starts of the table: {len(viz_crash_y)} crashes" +
+      (f", every one from a start height y in [{viz_crash_y.min():+.2f}, {viz_crash_y.max():+.2f}]"
+       if len(viz_crash_y) else ""))
+plt.suptitle("Replanning turns BC's slight lean into a commitment; only starts near the centre line still crash")
+plt.tight_layout()
+plt.show()
+
+# %% [markdown]
+# Open loop, the slight lean of the mean plans saves only the outermost starts. With replanning,
+# each path bends further towards its own side with every new plan and goes around the obstacle;
+# only the starts closest to the centre line, where the lean is too small to grow in time, still
+# crash. The printed line checks all 300 starts of the table: every closed-loop BC crash started in
+# a narrow band around the centre line (within about 0.07 of it in our run).
+#
 # ## 5 · Planning as inpainting (Diffuser)
 #
 # The diffusion policy was told the start through its conditioning input. *Diffuser*
@@ -1597,9 +1623,10 @@ print(f"accepted plans that hit the old obstacle (the policy's own failures): "
       f"{hits_obstacle(full)[accept].mean():.1%}")
 
 # %% [markdown]
-# Side by side, from the same random starts: the guided plans ($\gamma=0.5$) on the left, and on the
-# right the unguided plans that happen to have zero cost, i.e. exact samples of $\tilde p$ (40 are
-# drawn in each panel; the titles count all of them). Compare the share of blue, upper-route plans.
+# Side by side, both from the same 1000 random starts: the guided plans ($\gamma=0.5$) on the left,
+# and on the right only the unguided plans that happen to have zero cost, i.e. exact samples of
+# $\tilde p$ (40 are drawn in each panel; the titles count all of them). Compare the share of blue,
+# upper-route plans.
 
 # %%
 viz_guided = np.concatenate([eval_starts[:, None], guide_paths[0.5]], 1)

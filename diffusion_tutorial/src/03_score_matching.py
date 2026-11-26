@@ -603,7 +603,8 @@ print(f"DDPM's own range: sigma_t from {SIGMA_T[0]:.3f} (t=0) to {SIGMA_T[-1]:.0
 # Exact scores make the difference between re-equilibrating and transporting easy to see. We hand the exact score of the
 # two-mode mixture, as a noise prediction $\epsilon^*=-\sqrt{1-\bar\alpha_t}\,\nabla\log q_t$, to the unchanged
 # `dm.ddpm_sample` (§8 does the same for the 8-component mixture), and follow the fraction of particles on the heavy side
-# of the valley as the noise level falls.
+# of the valley as the noise level falls, for DDPM and for the annealed Langevin run above. DDPM gets five times as many
+# particles, so that its dots show its average behaviour with little sampling noise.
 
 # %%
 viz_s1a = (1 - ABAR).sqrt()
@@ -622,40 +623,50 @@ def viz_mass_left(sig):
                for w, m, v in zip(two.weights, two.means[:, 0], two.covs[:, 0, 0])).numpy()
 
 
-viz_x_ddpm, viz_traj = dm.ddpm_sample(viz_two_eps, sched, (N_PART, 2), return_traj=True, traj_every=10,
+viz_n_ddpm = 5 * N_PART                      # 5x the Langevin particles, so that DDPM's dots carry little sampling noise
+viz_x_ddpm, viz_traj = dm.ddpm_sample(viz_two_eps, sched, (viz_n_ddpm, 2), return_traj=True, traj_every=10,
                                       generator=torch.Generator(device=device).manual_seed(21))
 viz_ddpm_sig = np.array([SIGMA_T[t].item() for t, _, _ in viz_traj])     # the VE noise level matching each x_t
 viz_ddpm_frac = np.array([(xt[:, 0] < 0).double().mean().item() for _, xt, _ in viz_traj])  # sign is scale-free
+# The whole annealed Langevin run above (a snapshot every REC steps) as a path in the same plane: at each level a
+# vertical segment (sigma fixed while the split changes), joined to the next level by a horizontal move.
+viz_per = (len(heavy_ann) - 1) // N_LEVELS                                 # snapshots per level
+viz_lan_sig = np.repeat(sigmas, viz_per + 1)
+viz_lan_frac = np.concatenate([heavy_ann[i * viz_per:(i + 1) * viz_per + 1].numpy() for i in range(N_LEVELS)])
 viz_sig = np.geomspace(0.005, 300, 400)
 viz_band = 2 * np.sqrt(viz_mass_left(viz_sig) * (1 - viz_mass_left(viz_sig)) / N_PART)   # ±2 binomial SE
 
 viz_fig, viz_ax = plt.subplots(figsize=(7.2, 3.4))
 viz_ax.fill_between(viz_sig, viz_mass_left(viz_sig) - viz_band, viz_mass_left(viz_sig) + viz_band, color="0.85", lw=0,
-                    label=f"±2 SE for {N_PART} particles")
+                    label=f"±2 SE for the {N_PART:,} Langevin particles")
 viz_ax.plot(viz_sig, viz_mass_left(viz_sig), color="k", lw=1.2, label=r"exact: mass of $q_\sigma$ at $x_1<0$")
 viz_ax.plot(viz_ddpm_sig, viz_ddpm_frac, "o", ms=2.5, color=C["exact"],
-            label=f"DDPM + exact score: 1 step per level ({sched.T} levels; every 10th shown)")
-viz_ax.plot(sigmas, [(x[:, 0] < 0).double().mean().item() for x in level_ends], "D", ms=5, color=C["annealed"],
-            mec="k", mew=0.5, label=f"annealed Langevin: {PER_LEVEL} steps per level ({N_LEVELS} levels; level ends)")
+            label=f"DDPM + exact score: 1 step per level\n({sched.T} levels, every 10th shown; {viz_n_ddpm:,} particles)")
+viz_ax.plot(viz_lan_sig, viz_lan_frac, color=C["annealed"], lw=1.2,
+            label=f"annealed Langevin: {PER_LEVEL} steps per level ({N_LEVELS} levels)")
+viz_ax.plot(sigmas, [(x[:, 0] < 0).double().mean().item() for x in level_ends], "D", ms=4.5, color=C["annealed"],
+            mec="k", mew=0.5, label="... the end of each of its levels")
 viz_ax.axhline(0.8, color=C["data"], ls="--", lw=1, label="truth 0.8")
 viz_ax.set(xscale="log", xlim=(300, 0.005), ylim=(0.45, 0.88), ylabel="fraction of particles\nat $x_1<0$ (heavy side)",
            xlabel=r"noise level $\sigma$, decreasing $\rightarrow$   "
                   r"(DDPM step $t$: $\sigma_t=\sqrt{(1-\bar\alpha_t)/\bar\alpha_t}$)",
-           title=f"same path down the noise levels: DDPM takes 1 step per level, Langevin {PER_LEVEL}")
+           title="DDPM steps along the curve; Langevin falls off it at each new level and re-equilibrates")
 viz_ax.legend(loc="lower right", fontsize=7)
 plt.tight_layout()
 plt.show()
 viz_dev = np.abs(viz_ddpm_frac - viz_mass_left(viz_ddpm_sig)) / np.sqrt(
-    viz_mass_left(viz_ddpm_sig) * (1 - viz_mass_left(viz_ddpm_sig)) / N_PART)
+    viz_mass_left(viz_ddpm_sig) * (1 - viz_mass_left(viz_ddpm_sig)) / viz_n_ddpm)
 print(f"DDPM particles vs the exact marginal at {len(viz_dev)} recorded steps: deviation median {np.median(viz_dev):.1f} SE, "
-      f"largest {viz_dev.max():.1f} SE")
+      f"largest {viz_dev.max():.1f} SE (SE for {viz_n_ddpm:,} particles)")
 
 # %% [markdown]
-# Each red dot summarises DDPM's particles at one of its noise levels, reached with a *single* step from the level before,
-# and the dots lie on the exact curve, up to sampling noise (grey band), all the way down: one step carries the particles
-# from one noise level to the next. Annealed Langevin (green) reaches the same curve only at the end of each level, after
-# 100 MCMC steps of re-equilibration, and its split freezes once the modes separate ($\sigma\lesssim1$), here slightly
-# below the curve but within the band. What remains is to *learn* the noised scores from data.
+# The black curve is where the particles should be at each noise level: the mass of $q_\sigma$ on the heavy side. Each red
+# dot shows DDPM's particles at one of its noise levels, reached with a *single* step from the level before, and the dots
+# stay on the curve all the way down: one step carries the particles from one noise level to the next. The green staircase
+# is annealed Langevin. Each drop to the next level (a horizontal segment) leaves its particles with the previous level's
+# split, below the curve, and the 100 MCMC steps at the new level re-equilibrate them, climbing back towards the curve (a
+# vertical segment; diamonds mark the level ends). Once the modes separate ($\sigma\lesssim1$) the split freezes, here
+# slightly below the curve but within the band. What remains is to *learn* the noised scores from data.
 #
 # ## 5 · Learning the score: from explicit to denoising score matching
 #
@@ -1185,7 +1196,7 @@ plt.show()
 # %% [markdown]
 # Grey bars are the true weights, and the purple bars repeat plain Langevin's occupation (§3a, left panel): wrong in every
 # component. Both DDPM runs (red: exact score, blue: learned score) match the true weights to within sampling noise: their
-# largest deviations (printed above) are below two standard errors.
+# largest deviations (printed above) are here below two standard errors.
 #
 # On this easy 2-D problem the learned model lands close to the MMD floor as well, so by MMD alone the score error of §7 seems to
 # have vanished. It has not. The tail metric shows that the learned model puts several times too many samples *between* the

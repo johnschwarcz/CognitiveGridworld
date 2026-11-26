@@ -459,10 +459,10 @@ for ab, s, _, _, lab in curves:
 #
 # **Why not sample like a VAE?** A VAE generates by decoding samples of $\mathcal N(0,I)$, the target of its KL term
 # (§2.1), but our KL is so light that the latents stay far from it (their channel means range from about −1.6 to +1.5
-# here, printed below the figure). Decoded, $\mathcal N(0,I)$ gives nearly blank images (top row) and a Gaussian with
-# the real latents' own mean and covariance mostly malformed strokes (middle), against decoded real latents (bottom),
-# and the classifier recognises far fewer of them with $p>0.9$ (right, out of 500 each). The latents' distribution has
-# to be *learned*: that is the diffusion model's job (§3).
+# here, printed below the figure). Decoded, samples of $\mathcal N(0,I)$ are nearly blank (top row), and samples of a
+# Gaussian with the real latents' own mean and covariance are mostly malformed strokes (middle row). The classifier is
+# confident ($p>0.9$) about far fewer of them than about decoded real latents (bottom row; percentages on the right,
+# 500 samples each). The latents' distribution has to be *learned*: that is the diffusion model's job (§3).
 
 # %%
 # What a VAE would do: sample a simple prior and decode. Two simple priors over our (unscaled) latents, 500 samples each:
@@ -1002,13 +1002,14 @@ else:
 
 # %% [markdown]
 # Both checks pass: the scheduler is notebook 04's arithmetic, packaged. (The small Euler–DDIM difference is
-# floating-point rounding, since Euler's variable $x/\sqrt{\bar\alpha}$ is up to $\sigma_{\max}\approx160$ times
+# floating-point rounding, since Euler's variable $x/\sqrt{\bar\alpha}$ is up to $\sigma_{\max}\approx157$ times
 # larger, plus the fact that Euler starts at exactly $\sigma_{\max}$ rather than at $\sqrt{\sigma_{\max}^2+1}$.)
 #
-# The same check as a picture, for four of the samples: Euler's state $x=z/\sqrt{\bar\alpha}$ starts
-# $\sigma_{\max}\approx157$ times larger than DDIM's $z$ and shrinks to it (left), but divided by $\sqrt{\sigma^2+1}$,
-# the factor that `scale_model_input` applies before every network call, it lies on DDIM's path at every step (right).
-# The network sees the same input in both loops: the two schedulers are one method in two coordinate systems.
+# The same check as a picture, re-run on four of the samples: Euler's state $x=z/\sqrt{\bar\alpha}$ starts
+# $\sigma_{\max}\approx157$ times larger than DDIM's $z$ and shrinks to it (left, RMS over the four samples), but
+# divided by $\sqrt{\sigma^2+1}$, the factor that `scale_model_input` applies before every network call, it lies on
+# DDIM's path at every step (right, four latent values of the first sample). The network sees the same input in both
+# loops: the two schedulers are one method in two coordinate systems.
 
 # %%
 if HAVE_DIFFUSERS:
@@ -1067,7 +1068,8 @@ else:
 # %% [markdown]
 # *Side note — safe to skim: what the two silent bugs do to samples; rule: divide generated latents by the scale factor $c$ before decoding, and pass `clip_sample=False` to `DDIMScheduler` for latents.*
 #
-# **Two silent bugs, shown.** The gotchas of §2.3 and of the comment above produce images without any error message.
+# **Two silent bugs, shown.** The gotchas of §2.3 and of the `clip_sample` comment in this section's first code cell
+# produce images without any error message.
 # Below, the same $z_T$ and the same 25-step DDIM sampler three times: done correctly; with the generated latents
 # decoded *without* dividing by the scale factor $c$; and with `DDIMScheduler`'s default `clip_sample=True`, which
 # clamps the predicted $\hat z_0$ to $[-1,1]$ at every step. For pixels that is notebook 05's useful $x_0$-clipping,
@@ -1233,14 +1235,16 @@ else:
 
 # %% [markdown]
 # * **...but under SD's schedule "leading" is the wrong choice.** Under SD's "scaled_linear" schedule a clearly
-#   non-zero correlation with the data remains at the first leading timestep (printed). The leading sampler therefore
-#   starts from a distribution the network does not expect. That is the flaw Lin et al. (2024) identified, and why
-#   `timestep_spacing="trailing"` is recommended for few-step sampling with SD-like schedules. The general rule: check
-#   what the first timestep means under *your* schedule, and how reliable your network is there.
+#   non-zero correlation with the data remains at the first leading timestep (printed, and plotted below). The leading
+#   sampler therefore starts from a distribution the network does not expect. That is the flaw Lin et al. (2024)
+#   identified, and why `timestep_spacing="trailing"` is recommended for few-step sampling with SD-like schedules. The
+#   general rule: check what the first timestep means under *your* schedule, and how reliable your network is there.
 #
 # The curves show how much of the data is left in $z_t$ near the noisy end of both schedules
 # ($\sqrt{\bar\alpha_t}$, the correlation of $z_t$ with $z_0$ for unit-variance data). At the first timestep of the 4-
-# and 8-step leading grids it is 0.06 and 0.02 under our schedule, but 0.24 and 0.14 under SD's.
+# and 8-step leading grids it is 0.06 and 0.02 under our schedule, but 0.24 and 0.14 under SD's. Even trailing's
+# $t=999$ is not pure noise under SD's schedule (about 0.07 where the dashed curve meets the green line, against 0.006
+# under ours): that is the non-zero terminal SNR of §2.3.
 
 # %%
 # corr(z_t, z_0) = sqrt(abar_t) for unit-variance data: how much of z_0 a timestep says is still in z_t.

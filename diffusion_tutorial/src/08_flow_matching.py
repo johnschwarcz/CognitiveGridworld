@@ -372,8 +372,8 @@ plt.show()
 # **Does this field really carry noise to data?** Section 1 claimed that the ODE $\dot x=v(x,t)$, started from
 # $\mathcal N(0,I)$ at $t=1$, has marginal $p_t$ at *every* $t$. Below, 600 noise points are moved by 100 small Euler
 # steps of the exact field (black) and compared at five times with fresh samples of $x_t=(1-t)x_0+t\varepsilon$ made
-# directly from straight training lines (grey). The two clouds coincide at every $t$, although no particle travels
-# along a straight line (Section 4 shows their curved paths): the ODE reproduces the *distribution* of $x_t$, not the
+# directly from straight training lines (grey). The two clouds coincide at every $t$, although the particles do not
+# move along straight lines (Section 4 shows their curved paths): the ODE reproduces the *distribution* of $x_t$, not the
 # individual lines, which is exactly what the continuity equation promises.
 
 # %%
@@ -748,8 +748,8 @@ for name, p in [("exact ODE", exact_paths), ("learned FM ODE", fm_paths)]:
 
 # %% [markdown]
 # **Zooming in on the bend.** Below, one particle of the figure above (its exact ODE path is the black line) is
-# frozen at three times. The thin red lines are the rest of the training lines that pass through its position at that
-# time, each ending at its $x_0$ (so the red dots are samples of the posterior $p(x_0\mid x_t)$); the black arrow points
+# frozen at three times. The thin red lines are training lines that pass through its position at that time, drawn from
+# there to their end points $x_0$ (so the red dots are samples of the posterior $p(x_0\mid x_t)$); the black arrow points
 # to their average $\hat x_0$, which is where the ODE heads, since $-v=(\hat x_0-x_t)/t$. At $t=0.9$ the lines come from
 # all over the data and the arrow points towards its centre; by $t=0.2$ a single component is left, and the swing of
 # the arrow in between is the bend of the path.
@@ -863,8 +863,6 @@ for t in [0.2, 0.5, 0.8]:
 # **The picture behind the dictionary.** Each path is a curve in the plane of the coefficients $(\alpha,\sigma)$ of
 # $x=\alpha x_0+\sigma\varepsilon$ (VP diffusion: the quarter circle; flow matching: the straight segment), and dividing a
 # state by $\alpha+\sigma$ slides it along its ray through the origin, which keeps the SNR $\alpha/\sigma$, onto the segment.
-# With frozen predictions $(\hat x_0,\hat\varepsilon)$ the state $\alpha\hat x_0+\sigma\hat\varepsilon$ is a linear image of this
-# plane, so a DDIM step follows the arc in VP coordinates but the straight segment in flow coordinates, where Euler is exact.
 # The orange dots are the 8 steps that `dm.ddim_sample` used for 8 NFE in Section 3: in flow time (open circles) they
 # crowd near the noise end and then jump to a last evaluation at $t\approx0.01$, unlike the uniform grid (crosses),
 # which matters for the comparison below.
@@ -892,6 +890,59 @@ viz_ax.text(0.04, 1.07, "noise ($t=1$)", ha="left", fontsize=8)
 viz_ax.set_xlim(-0.05, 1.2); viz_ax.set_ylim(-0.18, 1.2); viz_ax.set_aspect("equal")
 viz_ax.set_xlabel("signal coefficient $\\alpha$"); viz_ax.set_ylabel("noise coefficient $\\sigma$")
 viz_ax.set_title("Same SNR, same ray: a VP state is a rescaled flow state")
+viz_ax.legend(loc="upper left", bbox_to_anchor=(1.02, 1.0), fontsize=7)
+plt.tight_layout()
+plt.show()
+
+# %% [markdown]
+# **Why DDIM is Euler in flow coordinates.** With the predictions $(\hat x_0,\hat\varepsilon)$ frozen, the state
+# $\alpha\hat x_0+\sigma\hat\varepsilon$ is a linear function of $(\alpha,\sigma)$, so the plane above is an exact, linearly distorted
+# picture of a DDIM step in state space: straight lines stay straight and arcs stay curved. Below we zoom in on the
+# 8-NFE grid's big step from $k=143$ to $k=0$. In VP coordinates DDIM moves along the arc, but an Euler step goes
+# straight along the tangent and leaves it (dashed, with the angle $\phi$ of $\alpha=\cos\phi$, $\sigma=\sin\phi$ as time;
+# other time variables only change its length); in flow coordinates the same step is a straight line traversed at
+# constant speed, so one Euler step lands exactly on DDIM's next state.
+
+# %%
+# DDIM's step from its 7th evaluation (k = 143) to its 8th (k = 0) on the 8-NFE grid above, with x0_hat, eps_hat frozen,
+# in the coefficient plane (alpha, sigma) of x = alpha x0_hat + sigma eps_hat (reads viz_ks, viz_a, viz_sig from above)
+viz_P0, viz_P1 = np.array([viz_a[-2], viz_sig[-2]]), np.array([viz_a[-1], viz_sig[-1]])   # VP states (on the arc)
+viz_Z0, viz_Z1 = viz_P0 / viz_P0.sum(), viz_P1 / viz_P1.sum()                             # flow states: / (alpha + sigma)
+viz_phi0, viz_phi1 = np.arctan2(viz_P0[1], viz_P0[0]), np.arctan2(viz_P1[1], viz_P1[0])   # alpha = cos phi, sigma = sin phi
+viz_arc = np.linspace(viz_phi0, viz_phi1, 100)
+# one Euler step in VP coordinates (time phi): along the tangent d(alpha, sigma)/dphi = (-sin phi, cos phi)
+viz_E_vp = viz_P0 + (viz_phi1 - viz_phi0) * np.array([-np.sin(viz_phi0), np.cos(viz_phi0)])
+# one Euler step in flow coordinates (time t = sigma / (alpha + sigma)): velocity eps_hat - x0_hat, i.e. (-1, +1) here
+viz_E_fm = viz_Z0 + (viz_Z1[1] - viz_Z0[1]) * np.array([-1.0, 1.0])
+
+viz_fig, viz_ax = plt.subplots(figsize=(7.6, 3.9))
+viz_q = np.linspace(0, np.pi / 2, 200)
+viz_ax.plot(np.cos(viz_q), np.sin(viz_q), color=COL["ddpm"], lw=0.8, alpha=0.5)            # context: the whole paths
+viz_ax.plot([1, 0], [0, 1], color=COL["fm"], lw=0.8, alpha=0.5)
+for viz_f in np.linspace(0, 1, 5):                                                          # matching points: same SNR
+    viz_p = viz_phi0 + viz_f * (viz_phi1 - viz_phi0)
+    viz_ax.plot([0, np.cos(viz_p)], [0, np.sin(viz_p)], color="0.6", lw=0.7, ls=":",
+                label="same SNR: rays through the origin" if viz_f == 0 else None)
+viz_ax.plot(np.cos(viz_arc), np.sin(viz_arc), color=COL["ddpm"], lw=3,
+            label=f"DDIM's step $k={viz_ks[-2]}\\to{viz_ks[-1]}$ in VP coordinates: an arc")
+viz_ax.annotate("", xy=tuple(viz_E_vp), xytext=tuple(viz_P0),
+                arrowprops=dict(arrowstyle="-|>", color=COL["ddpm"], lw=1.5, ls="--", mutation_scale=14,
+                                shrinkA=0, shrinkB=0))
+viz_ax.plot([], [], color=COL["ddpm"], lw=1.5, ls="--", label="one Euler step there (time $\\phi$): leaves the arc")
+viz_ax.plot([viz_Z0[0], viz_Z1[0]], [viz_Z0[1], viz_Z1[1]], color=COL["fm"], lw=6, alpha=0.45,
+            solid_capstyle="butt", label="the same DDIM step in flow coordinates: a straight line")
+viz_ax.annotate("", xy=tuple(viz_E_fm), xytext=tuple(viz_Z0),
+                arrowprops=dict(arrowstyle="-|>", color="k", lw=1.3, mutation_scale=14, shrinkA=0, shrinkB=0))
+viz_ax.plot([], [], color="k", lw=1.3, label="one Euler step there: lands exactly on DDIM's next state")
+viz_ax.scatter([viz_P0[0], viz_P1[0]], [viz_P0[1], viz_P1[1]], s=30, color=COL["ddpm"], zorder=4)
+viz_ax.scatter([viz_Z0[0], viz_Z1[0]], [viz_Z0[1], viz_Z1[1]], s=30, facecolors="white", edgecolors=COL["ddpm"],
+               zorder=4)
+viz_ax.text(viz_P0[0] + 0.02, viz_P0[1] + 0.01, f"$k={viz_ks[-2]}$", fontsize=8)
+viz_ax.text(viz_Z0[0] - 0.02, viz_Z0[1] + 0.015, f"$t={viz_Z0[1]:.2f}$", fontsize=8, ha="right")
+viz_ax.text(viz_P1[0] - 0.02, viz_P1[1] - 0.045, f"$k={viz_ks[-1]}$, $t={viz_Z1[1]:.2f}$", fontsize=8, ha="right")
+viz_ax.set_xlim(0.5, 1.15); viz_ax.set_ylim(-0.07, 0.52); viz_ax.set_aspect("equal")
+viz_ax.set_xlabel("signal coefficient $\\alpha$"); viz_ax.set_ylabel("noise coefficient $\\sigma$")
+viz_ax.set_title("DDIM is Euler in flow coordinates, where its step is a straight line")
 viz_ax.legend(loc="upper left", bbox_to_anchor=(1.02, 1.0), fontsize=7)
 plt.tight_layout()
 plt.show()

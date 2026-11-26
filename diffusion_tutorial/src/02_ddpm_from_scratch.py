@@ -228,6 +228,46 @@ plt.show()
 #   Non-Gaussianity concentrates in the low-density gaps between modes, which few particles visit. That is why $T=50$
 #   does far better than $T=10$ in §9b, even though both kernels look bad at this point.
 #
+# **The mean, at an asymmetric $x_t$.** Below, $x_t=(0.1, 0.05)$ is still ambiguous but lies off every symmetry axis,
+# so nothing forces the two means to agree. The dashed circles show the step that DDPM would take there with a perfect
+# denoiser (and $\sigma_t^2=\beta_t$).
+
+# %%
+viz_x = torch.tensor([0.1, 0.05], dtype=torch.float64)          # ambiguous like (0, 0), but off every symmetry axis
+viz_circle = torch.linspace(0, 2 * math.pi, 100, dtype=torch.float64)
+viz_circle = torch.stack([viz_circle.cos(), viz_circle.sin()], 1)
+viz_fig, viz_axes = plt.subplots(1, 3, figsize=(11, 3.5))
+for viz_ax, viz_T in zip(viz_axes, (1000, 50, 10)):
+    viz_s = make_schedule(viz_T)
+    viz_k = true_reverse_kernel(viz_s, round(tau * viz_T) - 1, viz_x)     # the same steps as above
+    viz_first = viz_T == 1000                                             # label the artists once, for the legend
+    viz_ax.contourf(viz_k["X"], viz_k["Y"], viz_k["p"], levels=15, cmap="Greys")
+    for viz_sd in (1, 2):              # DDPM's step: a round Gaussian around its mean (here with sigma_t^2 = beta_t)
+        viz_ring = viz_k["tweedie"] + viz_sd * math.sqrt(viz_k["beta"]) * viz_circle
+        viz_ax.plot(viz_ring[:, 0], viz_ring[:, 1], "--", color=C["oracle"], lw=1,
+                    label=r"DDPM's step, $\sigma_t^2=\beta_t$: 1 and 2 sd" if viz_first and viz_sd == 1 else None)
+    viz_ax.plot(*viz_k["mean"], "o", mfc="none", mec="k", ms=14, mew=1.5,
+                label="mean of the true step (computed numerically)" if viz_first else None)
+    viz_ax.plot(*viz_k["tweedie"], "x", color=C["oracle"], ms=9, mew=2,     # = DDPM's mean fed the oracle's noise (§4)
+                label="DDPM's mean with a perfect denoiser (Tweedie)" if viz_first else None)
+    viz_err = (viz_k["mean"] - viz_k["tweedie"]).norm().item()
+    viz_ax.set(aspect="equal", xlabel="$x_{t-1}$, coordinate 1",
+               title=f"T={viz_T}: one step, $\\beta$={viz_k['beta']:.3f}\n|true mean − DDPM's mean| = {viz_err:.0e}")
+viz_axes[0].set_ylabel("$x_{t-1}$, coordinate 2")
+viz_h, viz_l = viz_axes[0].get_legend_handles_labels()
+viz_fig.legend([viz_h[i] for i in (1, 2, 0)], [viz_l[i] for i in (1, 2, 0)], loc="lower center", ncol=3,
+               bbox_to_anchor=(0.5, -0.1))
+plt.suptitle("Even at an asymmetric $x_t$, DDPM's step with a perfect denoiser has exactly the true mean (× in ○) "
+             "at every step size; large steps get only its shape wrong", y=1.02)
+plt.tight_layout()
+plt.show()
+
+# %% [markdown]
+# In every panel the red × lands in the black circle: fed a perfect noise prediction, DDPM's step has the true mean, to
+# within a few millionths (titles), whatever the step size. What large steps get wrong is the shape. For $T=10$ the true
+# step is four lobes of unequal weight, its mean lies in the gap between them, and DDPM's round Gaussian, centred on that
+# mean, puts most of its probability in the gap, where the true step has almost none.
+#
 # The map below shows the last point: it repeats the KL computation at every $x_t$ of a grid, for the same step as above.
 
 # %%
@@ -1332,6 +1372,9 @@ for viz_ax, viz_T in zip(viz_axes, step_counts):
                 "+", color=C["oracle"], ms=11, mew=2.2, label="true variance at $x_t$ = (0, 0), the point of §1")
     viz_ax.set(yscale="log", xlim=(0, 1), xlabel="continuous time (t+1)/T  (data at 0)", title=f"T = {viz_T}")
 viz_axes[0].set_ylabel(r"reverse-step variance per coord. / $\beta_t$")
+viz_axes[0].set_yticks([0.2, 0.5, 1, 2, 5])                        # plain ratios (the y-axis is shared)
+viz_axes[0].set_yticklabels(["0.2", "0.5", "1", "2", "5"])
+viz_axes[0].minorticks_off()
 viz_axes[2].legend(fontsize=7, loc="lower right")
 plt.suptitle("With large steps the true reverse variance depends on $x_t$, so no fixed $\\sigma_t^2$ fits everywhere; "
              "with T = 1000 one value fits all $x_t$", y=1.02)
@@ -1339,11 +1382,12 @@ plt.tight_layout()
 plt.show()
 
 # %% [markdown]
-# For $T=10$ and $T=50$ the band is wide near the data end: unambiguous $x_t$ need less than $\beta_t$, ambiguous ones
-# more (the red + of §1's point sits at about 5 and 2.4 times $\beta_t$), so no fixed $\sigma_t^2$ fits every $x_t$. The
-# average over $x_t$ (solid red), which is the best fixed choice, lies roughly between $\tilde\beta_t$ and $\beta_t$. For
-# $T=1000$ the band has collapsed onto $\beta_t$ (within about 1%), so one variance fits every $x_t$; the dashed
-# $\tilde\beta_t$ departs from it visibly only over the first couple of percent of the chain, where both are below $10^{-3}$.
+# For $T=10$ the band is wide at the step nearest the data (about 0.2 to 1.4 times $\beta_t$), and for $T=50$ it still
+# straddles $\beta_t$ around continuous time 0.1: unambiguous $x_t$ need less than $\beta_t$, ambiguous ones more (§1's
+# point, red +, needs about 5 and 2.4 times $\beta_t$), so no fixed $\sigma_t^2$ fits every $x_t$. The average over $x_t$
+# (solid red), which is the best fixed choice, lies roughly between $\tilde\beta_t$ and $\beta_t$. For $T=1000$ the band
+# has collapsed onto $\beta_t$ (within about 2%), so one variance fits every $x_t$; the dashed $\tilde\beta_t$ departs
+# from it visibly only over the first couple of percent of the chain, where both are below $10^{-3}$.
 #
 # Swapping the variance is free: no retraining, just a sampler argument.
 

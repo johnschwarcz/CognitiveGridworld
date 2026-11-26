@@ -546,8 +546,8 @@ print(f"total variance of the samples at NFE {NFES[0]} (exact samples: {x_true.v
       + ",  ".join(f"{name} {rows[0]['var']:.2f}" for name, rows in sweep.items()))
 
 # %% [markdown]
-# Before reading the curves, look at the samples behind their left half (grey: the true density; the stochastic samplers
-# show the first of their three seeds). At 5 NFE, DDPM and DDIM squeeze the samples into the middle (total variance about
+# Before reading the curves below, look at the samples behind their left half, 5–20 NFE (grey: the true density; the
+# stochastic samplers show the first of their three seeds). At 5 NFE, DDPM and DDIM squeeze the samples into the middle (total variance about
 # 0.9, against 2.11 for exact samples), Euler–Maruyama sprays them far past the modes (3.3), Euler keeps the right
 # variance without finding the modes, and only Heun already shows them. By 20 NFE the ODE solvers in $(x,t)$ look like
 # the data, while Euler–Maruyama's modes are still too wide and DDPM's too narrow.
@@ -573,7 +573,7 @@ for viz_r, viz_nfe in enumerate(viz_budgets):
                                       gen=torch.Generator().manual_seed(0))     # = the sweep's first seed
         viz_ax = viz_axes[viz_r, viz_c]
         viz_ax.contourf(viz_grid, viz_grid, viz_p0, levels=np.linspace(0, 1, 11), cmap=CMAP_DENSITY)
-        viz_ax.scatter(viz_x[:1000, 0], viz_x[:1000, 1], s=1.5, marker="s", color=COL[viz_name], linewidths=0,
+        viz_ax.scatter(viz_x[:800, 0], viz_x[:800, 1], s=1.5, marker="s", color=COL[viz_name], linewidths=0,
                        antialiased=False)
         viz_ax.text(0.03, 0.97, f"NFE {viz_used}\nvariance {viz_x.var(0).sum():.2f}", transform=viz_ax.transAxes,
                     va="top", fontsize=7.5, bbox=dict(fc="white", ec="none", alpha=0.7, pad=1.0))
@@ -940,7 +940,69 @@ plt.show()
 # The bending that matters happens where $\sigma$ is comparable to the structure of the data (roughly
 # $0.1\lesssim\sigma\lesssim5$, measured in §6). There $\hat x_0$ commits to a mode and then to a point within it, and that
 # window is where DDIM's error comes from. §6 asks where the steps should go.
-#
+
+# %% [markdown]
+# The printed check, drawn: one big DDIM step through that window, from $\sigma_t\approx2$ to $\sigma_s\approx0.3$. On the
+# left, the step follows the straight line from the start towards the denoiser's current guess $\hat x_0$ (the cross at
+# $\sigma=0$), tangent to the exact path, and stops $1-\sigma_s/\sigma_t\approx85\%$ of the way along, while the exact path
+# bends away as the guess sharpens. On the right, the same step in the plane: on every one of the twelve paths DDIM lands
+# nearer the centre than the exact path (printed below), which is how few-step DDIM pulls samples inwards in the §2.1
+# gallery.
+
+# %%
+viz_frac = 1 - s1 / s0                               # the fraction of the way to x0_hat that one DDIM step covers
+viz_show = [1, 2, 6, 7, 9, 11]                       # six of the N_LINES paths, spread around the plane
+viz_i = 6                                            # the path drawn on the left
+viz_sel = sig_rec <= 3.0
+viz_fig, viz_axes = plt.subplots(1, 2, figsize=(12.5, 4.9), layout="constrained", gridspec_kw={"width_ratios": [1.25, 1]})
+viz_ax = viz_axes[0]
+viz_start, viz_exact = float(rec_xt[i0, viz_i, 0]), float(rec_xt[i1, viz_i, 0])
+viz_land, viz_guess = float(x_one_ddim[viz_i, 0]), float(rec_x0[i0, viz_i, 0])
+viz_ax.plot(sig_rec[viz_sel], rec_xt[:, viz_i, 0].numpy()[viz_sel], color="k", lw=1.3, label="exact ODE path")
+viz_ax.plot([s0, 0.0], [viz_start, viz_guess], "--", color=COL["DDIM"], lw=1.3,
+            label=r"DDIM step: the straight line to $\hat x_0$")
+viz_ax.plot(s0, viz_start, "o", mfc="white", color="k", ms=7, zorder=3)
+viz_ax.plot(s1, viz_exact, "o", color="k", ms=6, zorder=3)
+viz_ax.plot(s1, viz_land, "s", color=COL["DDIM"], ms=7, zorder=3)
+viz_ax.plot(0.0, viz_guess, "X", color=COL["DDIM"], ms=9, zorder=3)
+viz_ax.annotate("", xy=(s1 - 0.04, viz_exact), xytext=(s1 - 0.04, viz_land), arrowprops=dict(arrowstyle="<->", lw=1.0))
+viz_ax.text(s1 - 0.07, 0.5 * (viz_exact + viz_land), "error", ha="right", va="center")
+viz_ax.annotate(r"start $\tilde x_t$", (s0, viz_start), xytext=(0, 10), textcoords="offset points", ha="center")
+viz_ax.annotate(r"exact path at $\sigma_s$", (s1, viz_exact), xytext=(4, 10), textcoords="offset points")
+viz_ax.annotate(f"DDIM lands {viz_frac:.0%} of the way to the guess", (s1, viz_land), xytext=(12, -4),
+                textcoords="offset points", color=COL["DDIM"], va="center")
+viz_ax.annotate(r"$\hat x_0=D(\tilde x_t;\sigma_t)$: the denoiser's guess at the start of the step (still blurry)",
+                (0.0, viz_guess), xytext=(12, -4), textcoords="offset points", color=COL["DDIM"], va="center")
+for viz_s in (s0, s1):
+    viz_ax.axvline(viz_s, color="0.7", lw=0.8, ls=":", zorder=0)
+viz_ax.set(xlim=(-0.08, 3.0), ylim=(viz_guess - 0.45, None), xlabel=r"noise level $\sigma$",
+           ylabel=r"first coordinate $\tilde x_1$",
+           title=f"one path, one DDIM step from $\\sigma_t={s0:.1f}$ to $\\sigma_s={s1:.1f}$")
+viz_ax.legend(loc="upper left", fontsize=7.5)
+viz_ax.grid(alpha=0.3)
+viz_ax = viz_axes[1]
+viz_ax.contourf(viz_grid, viz_grid, viz_p0, levels=np.linspace(0, 1, 11), cmap=CMAP_DENSITY)
+for viz_k in viz_show:
+    viz_lw = 1.8 if viz_k == viz_i else 1.0
+    viz_ax.plot(rec_xt[i0:i1 + 1, viz_k, 0].numpy(), rec_xt[i0:i1 + 1, viz_k, 1].numpy(), color="k", lw=viz_lw)
+    viz_ax.plot(*zip(rec_xt[i0, viz_k].numpy(), rec_x0[i0, viz_k].numpy()), "--", color=COL["DDIM"], lw=viz_lw)
+    viz_ax.plot(*rec_x0[i0, viz_k].numpy(), "X", color=COL["DDIM"], ms=6.5)
+    viz_ax.plot(*x_one_ddim[viz_k].numpy(), "s", color=COL["DDIM"], ms=5)
+    viz_ax.plot(*rec_xt[i1, viz_k].numpy(), "o", color="k", ms=5)
+    viz_ax.plot(*rec_xt[i0, viz_k].numpy(), "o", mfc="white", color="k", ms=5.5)
+viz_ax.set(xlim=(-LIM, LIM), ylim=(-LIM, LIM), aspect="equal", xlabel=r"$\tilde x_1$", ylabel=r"$\tilde x_2$",
+           title=f"the same step on {len(viz_show)} of the {N_LINES} paths, in the plane\n"
+                 "(thick: the path on the left; grey: the data)")
+viz_fig.suptitle(r"A DDIM step heads straight for the denoiser's current guess $\hat x_0$ and covers the fraction "
+                 r"$1-\sigma_s/\sigma_t$ of the way." "\n"
+                 r"At $\sigma\approx2$ that guess is still a blurry average near the centre; the exact path bends out to a "
+                 "mode as the guess sharpens, so DDIM lands short")
+plt.show()
+viz_r_ddim, viz_r_exact = x_one_ddim.norm(dim=1), rec_xt[i1].norm(dim=1)
+print(f"distance from the centre at sigma_s = {s1:.2f}: DDIM's landing point is nearer than the exact path on "
+      f"{int((viz_r_ddim < viz_r_exact).sum())} of {N_LINES} paths (mean {viz_r_ddim.mean():.2f} vs {viz_r_exact.mean():.2f})")
+
+# %% [markdown]
 # **Consequence 2: stability.** The cleanest test is one-dimensional Gaussian data $x_0\sim\mathcal N(0,\lambda)$ (in this
 # subsection $\lambda$ is the data variance, not a log-SNR). Every
 # quantity is then available in closed form: $\hat\epsilon(x,t)=\sqrt{1-a_t}\,x/(\lambda a_t+1-a_t)$, and the exact ODE maps
@@ -1085,7 +1147,7 @@ for viz_ax, viz_t in zip(viz_axes, (0.5, 0.2, 0.05, 0.0)):
     viz_ax.plot(XS_G, x1_marginal_density([grid_ode[viz_io]], XS_G)[:, 0], color="k", lw=1, label="exact $p_t(x_1)$")
     viz_ax.set(xlabel="first coordinate $x_1$", title=f"$t={grid_ode[viz_io]:.2f}$", xlim=(-LIM, LIM))
 viz_axes[0].set_ylabel("density")
-viz_axes[-1].legend(loc="upper left", fontsize=7)
+viz_fig.legend(*viz_axes[0].get_legend_handles_labels(), loc="upper center", bbox_to_anchor=(0.5, 0.0), ncol=3)
 viz_fig.suptitle(f"Same marginals: at every $t$ the {N_TRAJ} ODE and SDE particles both follow the exact $p_t(x_1)$, "
                  "although their paths differ")
 plt.show()
