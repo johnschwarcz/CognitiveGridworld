@@ -1190,7 +1190,7 @@ def viz_in_band(pts):
 
 
 print(f"{(viz_dps[:, 1] < 0.8).float().mean():.0%} of {viz_m} particles end in the spurious mode")
-viz_fig, viz_axes = plt.subplots(1, 2, figsize=(8.6, 4.6), sharey=True)
+viz_fig, viz_axes = plt.subplots(1, 2, figsize=(7.6, 5.0), sharey=True)
 for viz_ax, viz_t_target in zip(viz_axes, [400, 50]):
     viz_k = int((viz_t_dps - viz_t_target).abs().argmin())
     viz_tk = viz_t_dps[viz_k].item()
@@ -1212,11 +1212,10 @@ for viz_ax, viz_t_target in zip(viz_axes, [400, 50]):
                title=f"t = {viz_tk} ($\\sigma_t$ = {math.sqrt((1 - viz_ab) / viz_ab):.2g}): in the band are\n"
                      f"{viz_in_band(viz_x0h):.0%} of the $\\hat x_0$, {viz_in_band(viz_post):.0%} of the posterior samples")
 viz_axes[0].set_ylabel("$x_2$")
-viz_axes[0].legend(*viz_axes[0].get_legend_handles_labels(), loc="upper center", bbox_to_anchor=(1.0, -0.17),
-                   ncol=2, markerscale=2, fontsize=7.5)
+viz_fig.legend(*viz_axes[0].get_legend_handles_labels(), loc="lower center", ncol=2, markerscale=2, fontsize=7.5)
 viz_fig.suptitle("DPS particles that end in the spurious mode: at high noise their $\\hat x_0$ fits $y$,\n"
                  "although almost none of the posterior it summarises does", fontsize=10)
-plt.tight_layout()
+plt.tight_layout(rect=(0, 0.09, 1, 1))
 plt.show()
 
 # %% [markdown]
