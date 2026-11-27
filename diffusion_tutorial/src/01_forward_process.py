@@ -684,7 +684,9 @@ plt.show()
 # $$p_{\text{data}}=\sum_k w_k\,\mathcal N(\mu_k,\Sigma_k)\quad\Longrightarrow\quad
 # q_t=\sum_k w_k\,\mathcal N\!\big(\sqrt{\bar\alpha_t}\,\mu_k,\ \bar\alpha_t\Sigma_k+(1-\bar\alpha_t)I\big).$$
 #
-# The weights are unchanged, the means shrink, and the covariances inflate towards $I$. This GMM
+# Here $w_k$ is the **weight** of component $k$: the probability that a data point comes from that component
+# ($w_k\ge 0$, $\sum_k w_k=1$; in code, `gmm.weights`). The weights are unchanged, the means shrink, and the
+# covariances inflate towards $I$. This GMM
 # "laboratory" is used throughout the tutorial (`dm.GaussianMixture.noised`), because it lets us
 # separate a model's errors from a sampler's errors.
 
@@ -812,7 +814,8 @@ plt.show()
 # ## 6 · What is destroyed, and when
 #
 # Take the view of a **Bayesian observer** who sees only $x_t$, knows the generative model, and wants to
-# infer the latent cause: which mixture component $k$ produced the data point. By Bayes' rule,
+# infer the latent cause: which mixture component $k$ produced the data point. By Bayes' rule, with the mixture
+# weight $w_k$ (section 5) as the prior $p(k)$ and the noised component as the likelihood $p(x_t\mid k)$,
 #
 # $$p(k\mid x_t)=\frac{w_k\,\mathcal N\big(x_t;\sqrt{\bar\alpha_t}\mu_k,\ \bar\alpha_t\sigma_k^2+1-\bar\alpha_t\big)}{\sum_j w_j\,\mathcal N(\dots)} ,$$
 #
